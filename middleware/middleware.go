@@ -71,7 +71,7 @@ func EnsureHeaders(next http.Handler) http.Handler {
 			"NVX-Merchant-ID",
 			"NVX-Datetime",
 		}
-		
+
 		missingHeaders := []string{}
 
 		for _, header := range requiredHeaders {
@@ -106,6 +106,40 @@ func SecureHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'")
 
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Recoverer is a middleware that recovers from panics, logs the panic (and a
+// backtrace), and returns a HTTP 500 (Internal Server Error) status if
+// possible.
+func Recoverer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				log.Printf("PANIC: %v", err)
+			}
+		}()
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// EnforceMethods restricts the allowed HTTP methods to the specified list.
+// In this case, only GET and POST are allowed.
+func EnforceMethods(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodPost {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusMethodNotAllowed)
+
+			resp := map[string]string{
+				"error": "Method not allowed. Only GET and POST are permitted.",
+			}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
