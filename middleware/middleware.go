@@ -39,23 +39,56 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	return rw.ResponseWriter.Write(b)
 }
 
-// Logger is a middleware that logs the start and end of each request, along
-// with some useful data about what was requested, what the response status was,
-// and how long it took to return.
-func Logger(next http.Handler) http.Handler {
+// LogEntry holds the details of a request/response to be logged.
+type LogEntry struct {
+	Method   string        `json:"method"`
+	URL      string        `json:"url"`
+	Status   int           `json:"status"`
+	Duration time.Duration `json:"duration"`
+}
+
+// LogStore defines the interface for storing log entries.
+type LogStore interface {
+	Save(entry LogEntry) error
+}
+
+// ConsoleStore is a default implementation of LogStore that writes to the console.
+type ConsoleStore struct{}
+
+func (cs *ConsoleStore) Save(entry LogEntry) error {
+	log.Printf(
+		"%s %s %d %s",
+		entry.Method,
+		entry.URL,
+		entry.Status,
+		entry.Duration,
+	)
+	return nil
+}
+
+// Logger is a middleware that logs the start and end of each request.
+// It uses a LogStore to save the log entry.
+func Logger(store LogStore, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
 		wrapped := wrapResponseWriter(w)
 		next.ServeHTTP(wrapped, r)
 
-		log.Printf(
-			"%s %s %d %s",
-			r.Method,
-			r.RequestURI,
-			wrapped.Status(),
-			time.Since(start),
-		)
+		entry := LogEntry{
+			Method:   r.Method,
+			URL:      r.RequestURI,
+			Status:   wrapped.Status(),
+			Duration: time.Since(start),
+		}
+
+		// Save the log entry asynchronously to avoid blocking the response
+		// Note: For production reliability, consider using a worker pool or similar
+		go func() {
+			if err := store.Save(entry); err != nil {
+				log.Printf("Failed to save log: %v", err)
+			}
+		}()
 	})
 }
 

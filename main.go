@@ -15,12 +15,15 @@ func main() {
 		w.Write([]byte("Hello, World!"))
 	})
 
+	// Initialize the LogStore
+	// In the future, you can swap this with a DatabaseStore or FileStore
+	logStore := &middleware.ConsoleStore{}
+
 	// Wrap the mux with the middleware chain
 	// Chain: Recoverer -> Logger -> EnforceMethods -> EnsureHeaders -> SecureHeaders -> Mux
-	// Note: Order matters. Recoverer should be outer-most to catch panics.
-	// EnforceMethods should be early to reject invalid methods quickly.
 	handler := middleware.Recoverer(
 		middleware.Logger(
+			logStore,
 			middleware.EnforceMethods(
 				middleware.EnsureHeaders(
 					middleware.SecureHeaders(mux),
