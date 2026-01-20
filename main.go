@@ -5,35 +5,71 @@ import (
 	"log"
 	"net/http"
 
+	"time"
+
+	"github.com/Jkenyut/nvx-go-middleware/constants"
+	"github.com/Jkenyut/nvx-go-middleware/gateway"
 	"github.com/Jkenyut/nvx-go-middleware/middleware"
 )
 
 func main() {
-	mux := http.NewServeMux()
+	// 1. Initialize Configuration
+	cfg := middleware.Config{
+		LogStore:              &middleware.ConsoleStore{},
+		RequiredCommonHeaders: constants.RequiredCommonHeaders,
+		RequiredAuthHeaders:   constants.RequiredAuthHeaders,
+		SecurityHeaders:       constants.SecurityHeaders,
+	}
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello, World!"))
-	})
+	// 2. Initialize Middleware Manager
+	mw := middleware.New(cfg)
 
-	// Initialize the LogStore
-	// In the future, you can swap this with a DatabaseStore or FileStore
-	logStore := &middleware.ConsoleStore{}
+	// 3. Initialize Route Store (Mock DB)
+	// In production, this would be NewPostgresRouteStore(...)
+	routeStore := &gateway.MemoryRouteStore{
+		Routes: []gateway.Route{
+			{
+				PathPrefix:   "/public-api",
+				TargetURL:    "https://httpbin.org/anything/public",
+				RequiresAuth: false,
+			},
+			{
+				PathPrefix:   "/private-api",
+				TargetURL:    "https://httpbin.org/anything/private",
+				RequiresAuth: true,
+			},
+		},
+	}
 
-	// Wrap the mux with the middleware chain
-	// Chain: Recoverer -> Logger -> EnforceMethods -> EnsureHeaders -> SecureHeaders -> Mux
-	handler := middleware.Recoverer(
-		middleware.Logger(
-			logStore,
-			middleware.EnforceMethods(
-				middleware.EnsureHeaders(
-					middleware.SecureHeaders(mux),
+	// 4. Initialize Dynamic Gateway Router
+	// Refresh routes every 30 seconds
+	router := gateway.NewRouter(routeStore, 30*time.Second)
+
+	// Inject the Auth Middleware from our Manager to the Router
+	router.AuthMiddleware = mw.EnsureAuth
+
+	// 5. Define Global Middleware Chain
+	// Note: We don't apply EnsureAuth here globaly, because the Router applies it dynamically.
+	// We DO apply Recoverer, Logger, Security, etc.
+	globalMiddleware := func(next http.Handler) http.Handler {
+		return mw.Recoverer(
+			mw.Logger(
+				mw.EnforceMethods(
+					mw.SecureHeaders(
+						mw.EnsureCommonHeaders(next),
+					),
 				),
 			),
-		),
-	)
+		)
+	}
 
-	fmt.Println("Server executing on port 8080")
+	// Wraps the router with global middleware
+	handler := globalMiddleware(router)
+
+	fmt.Println("Gateway Server executing on port 8080")
+	fmt.Println("Routes:")
+	fmt.Println(" - /public-api  -> https://httpbin.org/anything/public (No Auth)")
+	fmt.Println(" - /private-api -> https://httpbin.org/anything/private (Auth Required)")
+
 	log.Fatal(http.ListenAndServe(":8080", handler))
 }
-
-const version = "1.0.0"

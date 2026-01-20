@@ -5,7 +5,32 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/Jkenyut/nvx-go-helper/response"
+	"github.com/Jkenyut/nvx-go-middleware/constants"
 )
+
+// Config holds the configuration for the middleware manager.
+type Config struct {
+	LogStore              LogStore
+	RequiredCommonHeaders []string
+	RequiredAuthHeaders   []string
+	SecurityHeaders       map[string]string
+}
+
+// Manager holds the middleware configuration and provides middleware methods.
+type Manager struct {
+	cfg Config
+}
+
+// New creates a new Middleware Manager with the given configuration.
+func New(cfg Config) *Manager {
+	// Set defaults if nil
+	if cfg.LogStore == nil {
+		cfg.LogStore = &ConsoleStore{}
+	}
+	return &Manager{cfg: cfg}
+}
 
 // responseWriter is a minimal wrapper for http.ResponseWriter that allows the
 // written HTTP status code to be captured for logging.
@@ -67,8 +92,8 @@ func (cs *ConsoleStore) Save(entry LogEntry) error {
 }
 
 // Logger is a middleware that logs the start and end of each request.
-// It uses a LogStore to save the log entry.
-func Logger(store LogStore, next http.Handler) http.Handler {
+// It uses the configured LogStore to save the log entry.
+func (m *Manager) Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -82,47 +107,20 @@ func Logger(store LogStore, next http.Handler) http.Handler {
 			Duration: time.Since(start),
 		}
 
-		// Save the log entry asynchronously to avoid blocking the response
-		// Note: For production reliability, consider using a worker pool or similar
+		// Save the log entry asynchronously
 		go func() {
-			if err := store.Save(entry); err != nil {
+			if err := m.cfg.LogStore.Save(entry); err != nil {
 				log.Printf("Failed to save log: %v", err)
 			}
 		}()
 	})
 }
 
-// EnsureHeaders is a middleware that validates the presence of required headers.
-// If any of the required headers are missing, it responds with 400 Bad Request.
-func EnsureHeaders(next http.Handler) http.Handler {
+// EnsureCommonHeaders validates headers required for ALL requests.
+func (m *Manager) EnsureCommonHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requiredHeaders := []string{
-			"NVX-Token",
-			"NVX-Signature",
-			"NVX-IP",
-			"NVX-Request-ID",
-			"NVX-Merchant-ID",
-			"NVX-Datetime",
-		}
-
-		missingHeaders := []string{}
-
-		for _, header := range requiredHeaders {
-			if r.Header.Get(header) == "" {
-				missingHeaders = append(missingHeaders, header)
-			}
-		}
-
-		if len(missingHeaders) > 0 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-
-			resp := map[string]interface{}{
-				"error":   "Missing required headers",
-				"missing": missingHeaders,
-			}
-
-			json.NewEncoder(w).Encode(resp)
+		valid := validateHeaders(w, r, m.cfg.RequiredCommonHeaders)
+		if !valid {
 			return
 		}
 
@@ -130,28 +128,39 @@ func EnsureHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// SecureHeaders adds security-related headers to the response.
-func SecureHeaders(next http.Handler) http.Handler {
+// EnsureAuth validates headers required for Authenticated requests.
+func (m *Manager) EnsureAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'")
+		valid := validateHeaders(w, r, m.cfg.RequiredAuthHeaders)
+		if !valid {
+			return
+		}
 
 		next.ServeHTTP(w, r)
 	})
 }
 
-// Recoverer is a middleware that recovers from panics, logs the panic (and a
-// backtrace), and returns a HTTP 500 (Internal Server Error) status if
-// possible.
-func Recoverer(next http.Handler) http.Handler {
+// SecureHeaders adds security-related headers to the response from config.
+func (m *Manager) SecureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for key, value := range m.cfg.SecurityHeaders {
+			w.Header().Set(key, value)
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Recoverer is a middleware that recovers from panics.
+func (m *Manager) Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
 				log.Printf("PANIC: %v", err)
+
+				json.NewEncoder(w).Encode(response.InternalError(r.Context()))
 			}
 		}()
 
@@ -159,20 +168,44 @@ func Recoverer(next http.Handler) http.Handler {
 	})
 }
 
-// EnforceMethods restricts the allowed HTTP methods to the specified list.
-// In this case, only GET and POST are allowed.
-func EnforceMethods(next http.Handler) http.Handler {
+// EnforceMethods restricts the allowed HTTP methods (GET, POST).
+func (m *Manager) EnforceMethods(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodPost {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusMethodNotAllowed)
 
-			resp := map[string]string{
-				"error": "Method not allowed. Only GET and POST are permitted.",
-			}
-			json.NewEncoder(w).Encode(resp)
+			json.NewEncoder(w).Encode(response.MethodNotAllowed(r.Context(), constants.ErrMsgMethodNotAllowed))
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// validateHeaders is a private helper function.
+func validateHeaders(w http.ResponseWriter, r *http.Request, headers []string) bool {
+	missingHeaders := []string{}
+
+	for _, header := range headers {
+		if r.Header.Get(header) == "" {
+			missingHeaders = append(missingHeaders, header)
+		}
+	}
+
+	if len(missingHeaders) > 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+
+		meta := response.NewMeta(r.Context(), false, constants.ErrMsgMissingHeaders, http.StatusBadRequest)
+		resp := response.Response{
+			Meta: meta,
+			Data: map[string]interface{}{
+				"missing": missingHeaders,
+			},
+		}
+
+		json.NewEncoder(w).Encode(resp)
+		return false
+	}
+	return true
 }
