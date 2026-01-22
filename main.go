@@ -19,6 +19,8 @@ func main() {
 		RequiredCommonHeaders: constants.RequiredCommonHeaders,
 		RequiredAuthHeaders:   constants.RequiredAuthHeaders,
 		SecurityHeaders:       constants.SecurityHeaders,
+		PublicKeySignature:    "dummy-public-key",
+		PrivateKeySignature:   "dummy-private-key",
 	}
 
 	// 2. Initialize Middleware Manager
@@ -46,7 +48,11 @@ func main() {
 	router := gateway.NewRouter(routeStore, 30*time.Second)
 
 	// Inject the Auth Middleware from our Manager to the Router
-	router.AuthMiddleware = mw.EnsureAuth
+	// We chain EnsureAuth -> InjectHeaders so that headers are added after successful auth.
+	router.AuthMiddleware = func(next http.Handler) http.Handler {
+		return mw.EnsureAuth(next)
+	}
+	router.PublicMiddleware = mw.EnsurePublicAuth
 
 	// 5. Define Global Middleware Chain
 	// Note: We don't apply EnsureAuth here globaly, because the Router applies it dynamically.

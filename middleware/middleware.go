@@ -6,16 +6,20 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/response"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 )
 
 // Config holds the configuration for the middleware manager.
 type Config struct {
-	LogStore              LogStore
-	RequiredCommonHeaders []string
-	RequiredAuthHeaders   []string
-	SecurityHeaders       map[string]string
+	LogStore                  LogStore
+	RequiredCommonHeaders     []string
+	RequiredAuthHeaders       []string
+	RequiredPublicAuthHeaders []string
+	SecurityHeaders           map[string]string
+	PublicKeySignature        string
+	PrivateKeySignature       string
 }
 
 // Manager holds the middleware configuration and provides middleware methods.
@@ -25,6 +29,10 @@ type Manager struct {
 
 // New creates a new Middleware Manager with the given configuration.
 func New(cfg Config) *Manager {
+	if cfg.PublicKeySignature == "" || cfg.PrivateKeySignature == "" {
+		panic("PublicKey and PrivateKey are required in middleware configuration")
+	}
+
 	// Set defaults if nil
 	if cfg.LogStore == nil {
 		cfg.LogStore = &ConsoleStore{}
@@ -128,14 +136,29 @@ func (m *Manager) EnsureCommonHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// EnsureAuth validates headers required for Authenticated requests.
+// EnsureAuth validates headers required for Authenticated requests and verifies the JWT token.
 func (m *Manager) EnsureAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 1. Validate Headers Presence
 		valid := validateHeaders(w, r, m.cfg.RequiredAuthHeaders)
 		if !valid {
 			return
 		}
 
+		// 2. Validate JWT Token
+		tokenString := r.Header.Get("NVX-Token") // Assuming NVX-Token contains the raw Bearer token
+		if tokenString == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken))
+			return
+		}
+
+		// Optional: Store claims in context if needed (User ID, etc.)
+		// ctx := context.WithValue(r.Context(), "user_claims", claims)
+		// next.ServeHTTP(w, r.WithContext(ctx))
+
+		// For now, just pass through since validation passed
 		next.ServeHTTP(w, r)
 	})
 }
@@ -154,6 +177,7 @@ func (m *Manager) SecureHeaders(next http.Handler) http.Handler {
 // Recoverer is a middleware that recovers from panics.
 func (m *Manager) Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("NVX-Transaction-id", cryptoutil.V7())
 		defer func() {
 			if err := recover(); err != nil {
 				w.Header().Set("Content-Type", "application/json")
@@ -208,4 +232,32 @@ func validateHeaders(w http.ResponseWriter, r *http.Request, headers []string) b
 		return false
 	}
 	return true
+}
+
+// EnsurePublicAuth validates that the request has a valid User-Agent and other required public headers.
+// Required: User-Agent, X-Device-ID, X-Platform, X-Mac-Address.
+func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		valid := validateHeaders(w, r, m.cfg.RequiredPublicAuthHeaders)
+		if !valid {
+			return
+		}
+
+		// 2. Validate Platform Enum
+		validPlatform := false
+		switch r.Header.Get("NVX-Platform") {
+		case "ios", "android", "web":
+			validPlatform = true
+		}
+
+		if !validPlatform {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+
+			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidPlatform))
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

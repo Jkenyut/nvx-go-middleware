@@ -23,9 +23,27 @@ var (
 		"Referrer-Policy":         "strict-origin-when-cross-origin",
 		"Content-Security-Policy": "default-src 'self'",
 	}
+
+	RequiredPublicAuthHeaders = []string{
+		"NVX-User-Agent",
+		"NVX-Device-ID",
+		"NVX-Platform",
+		"NVX-Mac-Address",
+		"NVX-Message",
+	}
+
+	// Context Keys (Internal)
+	CtxUserID = "user_id"
+	CtxRole   = "role"
+
+	// Forwarded Headers (External)
+	HeaderForwardedUserID = "X-User-ID"
+	HeaderForwardedRole   = "X-Role"
 )
 
 const (
-	ErrMsgMissingHeaders   = "missing required headers"
 	ErrMsgMethodNotAllowed = "method not allowed"
+	ErrMsgInvalidPlatform  = "invalid platform"
+	ErrMsgMissingHeaders   = "missing public auth headers"
+	ErrMsgInvalidToken     = "invalid or expired token"
 )

@@ -40,12 +40,13 @@ func (m *MemoryRouteStore) GetAllRoutes() ([]Route, error) {
 
 // DynamicRouter handles request routing based on dynamic configuration.
 type DynamicRouter struct {
-	store          RouteStore
-	routes         map[string]*Route
-	proxies        map[string]*httputil.ReverseProxy
-	mu             sync.RWMutex
-	refreshInt     time.Duration
-	AuthMiddleware Middleware
+	store            RouteStore
+	routes           map[string]*Route
+	proxies          map[string]*httputil.ReverseProxy
+	mu               sync.RWMutex
+	refreshInt       time.Duration
+	AuthMiddleware   Middleware
+	PublicMiddleware Middleware
 }
 
 // NewRouter creates a new DynamicRouter and starts the background refresh loop.
@@ -160,5 +161,21 @@ func (dr *DynamicRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// proxy.ServeHTTP(w, r)
 
 	// For now, we forward as is (Gateway /user/profile -> Backend /user/profile)
-	matchedProxy.ServeHTTP(w, r)
+	// Forward the request
+	var handler http.Handler = matchedProxy
+
+	// Apply Authentication Middleware if required by the route
+	if matchedRoute.RequiresAuth && dr.AuthMiddleware != nil {
+		handler = dr.AuthMiddleware(handler)
+	}
+
+	// Apply Public Middleware (e.g., User-Agent check) for public routes
+	// or optionally for ALL routes if desired. Here we apply it when Auth is NOT required
+	// to strictly follow "Public Auth" concept, or we could apply it always.
+	// For now, let's apply it when Auth is NOT required to ensure public routes have some protection.
+	if !matchedRoute.RequiresAuth && dr.PublicMiddleware != nil {
+		handler = dr.PublicMiddleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
 }
