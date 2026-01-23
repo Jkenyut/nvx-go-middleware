@@ -13,13 +13,16 @@ import (
 
 // Config holds the configuration for the middleware manager.
 type Config struct {
-	LogStore                  LogStore
-	RequiredCommonHeaders     []string
-	RequiredAuthHeaders       []string
-	RequiredPublicAuthHeaders []string
-	SecurityHeaders           map[string]string
-	PublicKeySignature        string
-	PrivateKeySignature       string
+	LogStore                        LogStore
+	RequiredCommonHeaders           []string
+	RequiredAuthHeaders             []string
+	RequiredPublicAuthHeaders       []string
+	SecurityHeaders                 map[string]string
+	RequiredSignatureAuthHeaders    []string
+	RequiredSignatureMessageHeaders []string
+	RequiredSignaturePublicHeaders  []string
+	PublicKeySignature              string
+	PrivateKeySignature             string
 }
 
 // Manager holds the middleware configuration and provides middleware methods.
@@ -146,11 +149,18 @@ func (m *Manager) EnsureAuth(next http.Handler) http.Handler {
 		}
 
 		// 2. Validate JWT Token
-		tokenString := r.Header.Get("NVX-Token") // Assuming NVX-Token contains the raw Bearer token
+		tokenString := r.Header.Get(constants.HeaderGetToken) // Assuming NVX-Token contains the raw Bearer token
 		if tokenString == "" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken))
+			return
+		}
+
+		if !m.validateSignatureAuthHeaders(r) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
 
@@ -209,7 +219,6 @@ func (m *Manager) EnforceMethods(next http.Handler) http.Handler {
 // validateHeaders is a private helper function.
 func validateHeaders(w http.ResponseWriter, r *http.Request, headers []string) bool {
 	missingHeaders := []string{}
-
 	for _, header := range headers {
 		if r.Header.Get(header) == "" {
 			missingHeaders = append(missingHeaders, header)
@@ -231,6 +240,7 @@ func validateHeaders(w http.ResponseWriter, r *http.Request, headers []string) b
 		json.NewEncoder(w).Encode(resp)
 		return false
 	}
+
 	return true
 }
 
@@ -243,11 +253,12 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// 2. Validate Platform Enum
+		// Validate Platform
 		validPlatform := false
-		switch r.Header.Get("NVX-Platform") {
-		case "ios", "android", "web":
-			validPlatform = true
+		for _, v := range constants.CheckPlatform {
+			if r.Header.Get(constants.HeaderGetPlatform) == v {
+				validPlatform = true
+			}
 		}
 
 		if !validPlatform {
@@ -260,4 +271,33 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (m *Manager) validateSignatureHeaders(r *http.Request, keySignature string, headers []string) bool {
+	return r.Header.Get(constants.HeaderGetSignature) == cryptoutil.Signature(keySignature, headers...)
+}
+
+func (m *Manager) validateSignatureAuthHeaders(r *http.Request) bool {
+	headers := []string{}
+	for _, nameHeader := range m.cfg.RequiredSignatureAuthHeaders {
+		headers = append(headers, r.Header.Get(nameHeader))
+	}
+
+	return m.validateSignatureHeaders(r, m.cfg.PrivateKeySignature, headers)
+}
+
+func (m *Manager) validateSignatureMessageHeaders(r *http.Request) bool {
+	messageHeaders := []string{}
+	for _, nameHeader := range m.cfg.RequiredSignatureMessageHeaders {
+		messageHeaders = append(messageHeaders, r.Header.Get(nameHeader))
+	}
+	messageSignature := cryptoutil.Signature(m.cfg.PublicKeySignature, messageHeaders...)
+	
+
+	headers := []string{}
+	for _, nameHeader := range m.cfg.RequiredSignaturePublicHeaders {
+		headers = append(headers, r.Header.Get(nameHeader))
+	}
+
+	return m.validateSignatureHeaders(r, m.cfg.PublicKeySignature, headers)
 }
