@@ -1,0 +1,208 @@
+package middleware
+
+import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/Jkenyut/nvx-go-middleware/constants"
+	"github.com/golang-jwt/jwt/v5"
+)
+
+// Helper to generate RSA keys for testing
+func generateRSAKeys() (string, string, *rsa.PrivateKey) {
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+
+	// Encode Private Key
+	privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privPem := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
+
+	// Encode Public Key
+	pubBytes := x509.MarshalPKCS1PublicKey(&privateKey.PublicKey)
+	pubPem := pem.EncodeToMemory(&pem.Block{Type: "RSA PUBLIC KEY", Bytes: pubBytes})
+
+	return string(pubPem), string(privPem), privateKey
+}
+
+func TestEnsurePublicAuth(t *testing.T) {
+	pubKey, privKey, _ := generateRSAKeys()
+
+	cfg := Config{
+		RequiredPublicAuthHeaders: constants.RequiredPublicAuthHeaders,
+		PublicKeySignature:        pubKey,
+		PrivateKeySignature:       privKey,
+	}
+	manager := New(cfg)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := manager.EnsurePublicAuth(next)
+
+	tests := []struct {
+		name           string
+		headers        map[string]string
+		expectedStatus int
+	}{
+		{
+			name: "Valid Headers (iOS)",
+			headers: map[string]string{
+				"NVX-User-Agent":  "MyApp/1.0",
+				"NVX-Device-ID":   "device-123",
+				"NVX-Platform":    "ios",
+				"NVX-Mac-Address": "00:00:00:00:00:00",
+				"NVX-Message":     "hello",
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name: "Valid Headers (Web)",
+			headers: map[string]string{
+				"NVX-User-Agent":  "MyApp/1.0",
+				"NVX-Device-ID":   "device-web-123",
+				"NVX-Platform":    "web",
+				"NVX-Mac-Address": "00:00:00:00:00:00",
+				"NVX-Message":     "hello",
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name: "Missing NVX-User-Agent",
+			headers: map[string]string{
+				"NVX-Device-ID":   "device-123",
+				"NVX-Platform":    "ios",
+				"NVX-Mac-Address": "00:00:00:00:00:00",
+				"NVX-Message":     "hello",
+			},
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "Missing NVX-Device-ID",
+			headers: map[string]string{
+				"NVX-User-Agent":  "MyApp/1.0",
+				"NVX-Platform":    "ios",
+				"NVX-Mac-Address": "00:00:00:00:00:00",
+				"NVX-Message":     "hello",
+			},
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "Invalid Platform",
+			headers: map[string]string{
+				"NVX-User-Agent":  "MyApp/1.0",
+				"NVX-Device-ID":   "device-123",
+				"NVX-Platform":    "blackberry",
+				"NVX-Mac-Address": "00:00:00:00:00:00",
+				"NVX-Message":     "hello",
+			},
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			for k, v := range tt.headers {
+				req.Header.Set(k, v)
+			}
+
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != tt.expectedStatus {
+				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
+			}
+		})
+	}
+}
+
+func TestEnsureAuth(t *testing.T) {
+	pubKey, privKey, signKey := generateRSAKeys()
+
+	cfg := Config{
+		RequiredAuthHeaders: []string{"Authorization", "NVX-Request-ID"},
+		PublicKeySignature:           pubKey,
+		PrivateKeySignature:          privKey,
+	}
+	manager := New(cfg)
+
+	// Helper to create valid JWT
+	createValidToken := func() string {
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+			"user_id": "123",
+			"exp":     time.Now().Add(time.Hour).Unix(),
+		})
+		s, _ := token.SignedString(signKey)
+		return s
+	}
+
+	tests := []struct {
+		name           string
+		headers        map[string]string
+		token          string
+		expectedStatus int
+	}{
+		{
+			name: "Valid Headers and Valid Token",
+			headers: map[string]string{
+				"Authorization":  "Bearer token",
+				"NVX-Request-ID": "12345",
+			},
+			token:          createValidToken(),
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name: "Missing Token",
+			headers: map[string]string{
+				"Authorization":  "Bearer token",
+				"NVX-Request-ID": "12345",
+			},
+			token:          "",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "Expired/Invalid Token",
+			headers: map[string]string{
+				"Authorization":  "Bearer token",
+				"NVX-Request-ID": "12345",
+			},
+			token:          "invalid-token-string",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "Missing Auth Header",
+			headers: map[string]string{
+				"NVX-Request-ID": "12345",
+			},
+			token:          createValidToken(),
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			for k, v := range tt.headers {
+				req.Header.Set(k, v)
+			}
+			if tt.token != "" {
+				req.Header.Set("NVX-Token", tt.token)
+			}
+
+			w := httptest.NewRecorder()
+			manager.EnsureAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})).ServeHTTP(w, req)
+
+			if w.Code != tt.expectedStatus {
+				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
+			}
+		})
+	}
+}
