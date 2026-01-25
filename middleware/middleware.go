@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -58,6 +59,8 @@ type Config struct {
 	AllowedOrigins []string
 	// TrustedProxies is the list of trusted proxy IPs or CIDRs.
 	TrustedProxies []string
+	// Env is the environment the application is running in.
+	env string
 }
 
 // Manager holds the middleware configuration and provides middleware methods.
@@ -68,10 +71,6 @@ type Manager struct {
 // New creates a new Middleware Manager with the given configuration.
 // It initializes required fields and sets default values if they are missing.
 func New(cfg Config) *Manager {
-	// Validate required keys
-	if cfg.PublicKeySignature == "" || cfg.PrivateKeySignature == "" {
-		panic("PublicKey and PrivateKey are required in middleware configuration")
-	}
 
 	// Set default LogStore if nil
 	if cfg.LogStore == nil {
@@ -86,6 +85,22 @@ func New(cfg Config) *Manager {
 	if cfg.RequestBodyLimit == 0 {
 		cfg.RequestBodyLimit = 3 * 1024 * 1024 // 3 MB
 	}
+	// Set default env if not set
+	if cfg.env == "" {
+		cfg.env = "dev"
+	}
+
+	// Set default logger if not set
+	if cfg.logger == nil {
+		l := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
+		cfg.logger = &l
+	}
+
+	// Validate required keys
+	if cfg.PublicKeySignature == "" || cfg.PrivateKeySignature == "" {
+		panic("PublicKey and PrivateKey are required in middleware configuration")
+	}
+
 	// Validate AllowedOrigins
 	if len(cfg.AllowedOrigins) == 0 {
 		panic("AllowedOrigins is required in middleware configuration")
@@ -282,10 +297,14 @@ func (m *Manager) EnsureAuth(next http.Handler) http.Handler {
 
 		// 3. Validate Signature Headers
 		// Check if the request signature is valid based on configured headers
-		if !m.validateSignatureAuthHeaders(r) {
+		if valid, signatureServer := m.validateSignatureAuthHeaders(r); !valid {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature))
+			if m.EnvProd() {
+				json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature))
+			} else {
+				json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature+" - "+signatureServer))
+			}
 			return
 		}
 
@@ -405,10 +424,14 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 		}
 
 		// 4. Validate Signature Headers
-		if !m.validateSignaturePublicHeaders(r) {
+		if valid, signatureServer := m.validateSignaturePublicHeaders(r); !valid {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature))
+			if m.EnvProd() {
+				json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature))
+			} else {
+				json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature+" - "+signatureServer))
+			}
 			return
 		}
 
@@ -417,7 +440,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 	})
 }
 
-func (m *Manager) validateSignatureAuthHeaders(r *http.Request) bool {
+func (m *Manager) validateSignatureAuthHeaders(r *http.Request) (bool, string) {
 	// get auth headers
 	authHeaders := []string{}
 	for _, nameHeader := range m.cfg.RequiredSignatureAuthHeaders {
@@ -428,7 +451,7 @@ func (m *Manager) validateSignatureAuthHeaders(r *http.Request) bool {
 	return m.validateSignatureHeaders(r, m.cfg.PrivateKeySignature, authHeaders)
 }
 
-func (m *Manager) validateSignaturePublicHeaders(r *http.Request) bool {
+func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string) {
 	// get message headers
 	messageHeaders := []string{}
 	for _, nameHeader := range m.cfg.RequiredSignatureMessageHeaders {
@@ -447,9 +470,13 @@ func (m *Manager) validateSignaturePublicHeaders(r *http.Request) bool {
 	return m.validateSignatureHeaders(r, m.cfg.PublicKeySignature, append(publicHeaders, messageSignature))
 }
 
-func (_ *Manager) validateSignatureHeaders(r *http.Request, keySignature string, headers []string) bool {
+func (_ *Manager) validateSignatureHeaders(r *http.Request, keySignature string, headers []string) (bool, string) {
+	signatureServer := cryptoutil.Signature(keySignature, headers...)
 	// validate signature headers
-	return r.Header.Get(constants.HeaderSignature) == cryptoutil.Signature(keySignature, headers...)
+	if r.Header.Get(constants.HeaderSignature) == "" {
+		return false, signatureServer
+	}
+	return r.Header.Get(constants.HeaderSignature) == signatureServer, signatureServer
 }
 
 func FullURL(r *http.Request) string {
@@ -616,7 +643,6 @@ func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 			}
 		}
 		next.ServeHTTP(w, r)
-
 	})
 }
 
@@ -728,4 +754,8 @@ func (_ *Manager) CORS(next http.Handler, allowedOrigins []string) http.Handler 
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (m *Manager) EnvProd() bool {
+	return m.cfg.env == "prod" || m.cfg.env == "production"
 }
