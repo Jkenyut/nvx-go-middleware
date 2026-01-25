@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -36,10 +37,11 @@ func TestEnsurePublicAuth(t *testing.T) {
 		RequiredPublicAuthHeaders: constants.RequiredPublicAuthHeaders,
 		PublicKeySignature:        pubKey,
 		PrivateKeySignature:       privKey,
+		AllowedOrigins:            []string{"*"},
 	}
 	manager := New(cfg)
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -58,6 +60,9 @@ func TestEnsurePublicAuth(t *testing.T) {
 				"NVX-Platform":    "ios",
 				"NVX-Mac-Address": "00:00:00:00:00:00",
 				"NVX-Message":     "hello",
+				"NVX-Token":       "dummy",
+				// Sig = Signature(pubKey, Signature(pubKey)) since other signature headers empty
+				"NVX-Signature": cryptoutil.Signature(pubKey, cryptoutil.Signature(pubKey)),
 			},
 			expectedStatus: http.StatusOK,
 		},
@@ -69,6 +74,8 @@ func TestEnsurePublicAuth(t *testing.T) {
 				"NVX-Platform":    "web",
 				"NVX-Mac-Address": "00:00:00:00:00:00",
 				"NVX-Message":     "hello",
+				"NVX-Token":       "dummy",
+				"NVX-Signature":   cryptoutil.Signature(pubKey, cryptoutil.Signature(pubKey)),
 			},
 			expectedStatus: http.StatusOK,
 		},
@@ -127,8 +134,9 @@ func TestEnsureAuth(t *testing.T) {
 
 	cfg := Config{
 		RequiredAuthHeaders: []string{"Authorization", "NVX-Request-ID"},
-		PublicKeySignature:           pubKey,
-		PrivateKeySignature:          privKey,
+		PublicKeySignature:  pubKey,
+		PrivateKeySignature: privKey,
+		AllowedOrigins:      []string{"*"},
 	}
 	manager := New(cfg)
 
@@ -153,6 +161,8 @@ func TestEnsureAuth(t *testing.T) {
 			headers: map[string]string{
 				"Authorization":  "Bearer token",
 				"NVX-Request-ID": "12345",
+				// Sign(privKey, empty_headers...) since test config doesn't set RequiredSignatureAuthHeaders
+				"NVX-Signature": cryptoutil.Signature(privKey),
 			},
 			token:          createValidToken(),
 			expectedStatus: http.StatusOK,
@@ -196,7 +206,7 @@ func TestEnsureAuth(t *testing.T) {
 			}
 
 			w := httptest.NewRecorder()
-			manager.EnsureAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			manager.EnsureAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			})).ServeHTTP(w, req)
 
