@@ -86,8 +86,8 @@ func New(cfg Config) *Manager {
 		cfg.RequestBodyLimit = 3 * 1024 * 1024 // 3 MB
 	}
 	// Set default env if not set
-	if cfg.env == "" {
-		cfg.env = "dev"
+	if cfg.Env == "" {
+		cfg.Env = "dev"
 	}
 
 	// Set default logger if not set
@@ -339,7 +339,7 @@ func (m *Manager) EnsureAuth(next http.Handler) http.Handler {
 		if valid, signatureServer := m.validateSignatureAuthHeaders(r); !valid {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			if m.EnvProd() {
+			if m.envProd() {
 				json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature))
 			} else {
 				json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature+" - "+signatureServer))
@@ -466,7 +466,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 		if valid, signatureServer := m.validateSignaturePublicHeaders(r); !valid {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			if m.EnvProd() {
+			if m.envProd() {
 				json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature))
 			} else {
 				json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature+" - "+signatureServer))
@@ -796,5 +796,5 @@ func (_ *Manager) CORS(next http.Handler, allowedOrigins []string) http.Handler 
 }
 
 func (m *Manager) envProd() bool {
-	return m.cfg.env == "prod" || m.cfg.env == "production"
+	return m.cfg.Env == "prod" || m.cfg.Env == "production"
 }
