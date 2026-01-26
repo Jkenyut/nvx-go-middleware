@@ -209,15 +209,8 @@ type ConsoleStore struct {
 
 // Save writes the audit log entry to the configured logger or stdout.
 func (m *ConsoleStore) Save(entry model.AuditLog) error {
-	// check if logger is configured
-	if m.logger != nil {
-		// Log structured data using zerolog
-		m.logger.Info().Interface("log entry", entry).Msg("saving audit log")
-	} else {
-		// Fallback to standard library log
-		data, _ := json.Marshal(entry)
-		log.Println("log entry", string(data))
-	}
+	// Log structured data using zerolog
+	m.logger.Info().Interface("log entry", entry).Msg("saving audit log")
 
 	return nil
 }
@@ -279,11 +272,9 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		// 7. Save Log Entry Asynchronously
 		go func() {
 			if err := m.cfg.LogStore.Save(entry); err != nil {
-				if m.cfg.logger != nil {
-					m.cfg.logger.Error().Err(err).Msg("Failed to save log")
-				} else {
-					log.Printf("Failed to save log: %v", err)
-				}
+
+				m.cfg.logger.Error().Err(err).Msg("Failed to save log")
+
 			}
 		}()
 	})
