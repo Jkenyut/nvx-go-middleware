@@ -106,6 +106,41 @@ func New(cfg Config) *Manager {
 		panic("AllowedOrigins is required in middleware configuration")
 	}
 
+	// Set default RequiredCommonHeaders if not set
+	if len(cfg.RequiredCommonHeaders) == 0 {
+		cfg.RequiredCommonHeaders = constants.RequiredCommonHeaders
+	}
+
+	// Set default RequiredAuthHeaders if not set
+	if len(cfg.RequiredAuthHeaders) == 0 {
+		cfg.RequiredAuthHeaders = constants.RequiredAuthHeaders
+	}
+
+	// Set default RequiredPublicAuthHeaders if not set
+	if len(cfg.RequiredPublicAuthHeaders) == 0 {
+		cfg.RequiredPublicAuthHeaders = constants.RequiredPublicAuthHeaders
+	}
+
+	// Set default RequiredSignatureAuthHeaders if not set
+	if len(cfg.RequiredSignatureAuthHeaders) == 0 {
+		cfg.RequiredSignatureAuthHeaders = constants.RequiredSignatureAuthHeaders
+	}
+
+	// Set default RequiredSignaturePublicHeaders if not set
+	if len(cfg.RequiredSignaturePublicHeaders) == 0 {
+		cfg.RequiredSignaturePublicHeaders = constants.RequiredSignaturePublicHeaders
+	}
+
+	// Set default RequiredSignatureMessageHeaders if not set
+	if len(cfg.RequiredSignatureMessageHeaders) == 0 {
+		cfg.RequiredSignatureMessageHeaders = constants.RequiredSignatureMessagePublicHeaders
+	}
+
+	// Set default SecurityHeaders if not set
+	if cfg.SecurityHeaders == nil {
+		cfg.SecurityHeaders = constants.SecurityHeaders
+	}
+
 	return &Manager{cfg: cfg}
 }
 
