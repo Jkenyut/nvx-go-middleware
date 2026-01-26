@@ -795,6 +795,6 @@ func (_ *Manager) CORS(next http.Handler, allowedOrigins []string) http.Handler 
 	})
 }
 
-func (m *Manager) EnvProd() bool {
+func (m *Manager) envProd() bool {
 	return m.cfg.env == "prod" || m.cfg.env == "production"
 }
