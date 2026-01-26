@@ -216,3 +216,37 @@ func TestEnsureAuth(t *testing.T) {
 		})
 	}
 }
+
+func TestLoggerMiddleware(t *testing.T) {
+	// 1. Setup minimal config to trigger default ConsoleStore and default logger
+	pubKey, privKey, _ := generateRSAKeys()
+	cfg := Config{
+		PublicKeySignature:  pubKey,
+		PrivateKeySignature: privKey,
+		AllowedOrigins:      []string{"*"},
+	}
+	manager := New(cfg)
+
+	// 2. Wrap a simple handler with Logger middleware (which uses LogStore.Save)
+	handler := manager.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+w.WriteHeader(http.StatusOK)
+w.Write([]byte("ok"))
+}))
+
+	// 3. Serve a request
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+
+	// 4. Execute (should not panic)
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Middleware panicked: %v", r)
+		}
+	}()
+	handler.ServeHTTP(w, req)
+
+	// 5. Verify response
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+}

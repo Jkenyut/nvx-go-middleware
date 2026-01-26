@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -72,9 +71,17 @@ type Manager struct {
 // It initializes required fields and sets default values if they are missing.
 func New(cfg Config) *Manager {
 
+	// Set default logger if not set
+	if cfg.logger == nil {
+		l := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
+		cfg.logger = &l
+	}
+
 	// Set default LogStore if nil
 	if cfg.LogStore == nil {
-		cfg.LogStore = &ConsoleStore{}
+		cfg.LogStore = &ConsoleStore{
+			logger: cfg.logger,
+		}
 	}
 
 	// Set default RequestTimeout if not set
@@ -87,13 +94,7 @@ func New(cfg Config) *Manager {
 	}
 	// Set default env if not set
 	if cfg.Env == "" {
-		cfg.Env = "dev"
-	}
-
-	// Set default logger if not set
-	if cfg.logger == nil {
-		l := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
-		cfg.logger = &l
+		cfg.Env = "development"
 	}
 
 	// Validate required keys
@@ -370,13 +371,9 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 
 				// 2. Log Panic with Stack Trace
 				// Use structured logging if available for better parsing
-				if m.cfg.logger != nil {
-					m.cfg.logger.Error().
-						Str("error", fmt.Sprintf("%v", err)).
-						Msgf("Panic recovered:\n%s", stackStr)
-				} else {
-					log.Printf("Panic recovered: %v\n%s", err, stackStr)
-				}
+				m.cfg.logger.Error().
+					Str("error", fmt.Sprintf("%v", err)).
+					Msgf("Panic recovered:\n%s", stackStr)
 
 				// 3. Return 500 Internal Server Error
 				w.WriteHeader(http.StatusInternalServerError)
