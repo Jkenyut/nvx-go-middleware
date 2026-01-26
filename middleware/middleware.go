@@ -60,7 +60,7 @@ type Config struct {
 	// TrustedProxies is the list of trusted proxy IPs or CIDRs.
 	TrustedProxies []string
 	// Env is the environment the application is running in.
-	env string
+	Env string
 }
 
 // Manager holds the middleware configuration and provides middleware methods.
