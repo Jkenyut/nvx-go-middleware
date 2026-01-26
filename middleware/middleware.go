@@ -192,8 +192,12 @@ func (m *ConsoleStore) Save(entry model.AuditLog) error {
 func (m *Manager) Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 1. Generate Transaction ID
-		uuidV7 := cryptoutil.V7()
-		w.Header().Set(constants.HeaderTransactionID, uuidV7)
+		if r.Header.Get(constants.HeaderTransactionID) == "" {
+			uuidV7 := cryptoutil.V7()
+			w.Header().Set(constants.HeaderTransactionID, uuidV7)
+		} else {
+			w.Header().Set(constants.HeaderTransactionID, r.Header.Get(constants.HeaderTransactionID))
+		}
 
 		// 2. Inject Context
 		// If a custom injector is provided, use it. Otherwise, use the default.
@@ -230,7 +234,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			RequestID:       r.Header.Get(constants.HeaderRequestID),
 			CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
 			CreatedAt:       format.NowUTC(),
-			TransactionID:   r.Header.Get(constants.HeaderTransactionID),
+			TransactionID:   wrapped.Header().Get(constants.HeaderTransactionID),
 			RequestHeaders:  string(requestHeadersBytes),
 			ResponseHeaders: string(responseHeadersBytes),
 			RequestBody:     string(reqBodyBytes),
