@@ -328,7 +328,7 @@ func (m *Manager) EnsureAuth(next http.Handler) http.Handler {
 
 		// 3. Validate Signature Headers
 		// Check if the request signature is valid based on configured headers
-		if valid, signatureServer := m.validateSignatureAuthHeaders(r); !valid {
+		if validSignature, signatureServer := m.validateSignatureAuthHeaders(r); !validSignature {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			if m.envProd() {
@@ -451,7 +451,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 		}
 
 		// 4. Validate Signature Headers
-		if valid, signatureServer := m.validateSignaturePublicHeaders(r); !valid {
+		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			if m.envProd() {
@@ -747,16 +747,16 @@ func (_ *Manager) Gzip(next http.Handler) http.Handler {
 }
 
 // GlobalChain applies a recommended chain of middleware.
-// Order: Recoverer -> Gzip -> Logger -> CORS -> SecureHeaders -> EnsureCommonHeaders -> TrustProxy -> MaxBodySize -> Timeout.
+// Order: Recoverer -> Gzip -> Logger -> CORS -> SecureHeaders -> MaxBodySize -> TrustProxy -> EnsureCommonHeaders  -> Timeout.
 func (m *Manager) GlobalChain(next http.Handler) http.Handler {
 	return m.Recoverer(
 		m.Gzip(
 			m.Logger(
 				m.CORS(
 					m.SecureHeaders(
-						m.EnsureCommonHeaders(
+						m.MaxBodySize(m.cfg.RequestBodyLimit)(
 							m.TrustProxy(
-								m.MaxBodySize(m.cfg.RequestBodyLimit)(
+								m.EnsureCommonHeaders(
 									m.Timeout(m.cfg.RequestTimeout)(next),
 								),
 							),
