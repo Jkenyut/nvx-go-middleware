@@ -52,8 +52,8 @@ type Config struct {
 	RequestTimeout time.Duration
 	// RequestBodyLimit is the maximum allowed size for the request body.
 	RequestBodyLimit int64
-	// logger is the internal logger instance.
-	logger *zerolog.Logger
+	// Logger is the internal logger instance.
+	Logger *zerolog.Logger
 	// AllowedOrigins is the list of allowed origins for CORS.
 	AllowedOrigins []string
 	// TrustedProxies is the list of trusted proxy IPs or CIDRs.
@@ -72,15 +72,15 @@ type Manager struct {
 func New(cfg Config) *Manager {
 
 	// Set default logger if not set
-	if cfg.logger == nil {
+	if cfg.Logger == nil {
 		l := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
-		cfg.logger = &l
+		cfg.Logger = &l
 	}
 
 	// Set default LogStore if nil
 	if cfg.LogStore == nil {
 		cfg.LogStore = &ConsoleStore{
-			logger: cfg.logger,
+			logger: cfg.Logger,
 		}
 	}
 
@@ -274,7 +274,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		go func() {
 			if err := m.cfg.LogStore.Save(entry); err != nil {
 
-				m.cfg.logger.Error().Err(err).Msg("Failed to save log")
+				m.cfg.Logger.Error().Err(err).Msg("Failed to save log")
 
 			}
 		}()
@@ -371,7 +371,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 
 				// 2. Log Panic with Stack Trace
 				// Use structured logging if available for better parsing
-				m.cfg.logger.Error().
+				m.cfg.Logger.Error().
 					Str("error", fmt.Sprintf("%v", err)).
 					Msgf("Panic recovered:\n%s", stackStr)
 
@@ -748,11 +748,11 @@ func (_ *Manager) Gzip(next http.Handler) http.Handler {
 }
 
 // GlobalChain applies a recommended chain of middleware.
-// Order: Recoverer -> Gzip -> Logger -> CORS -> SecureHeaders -> MaxBodySize -> TrustProxy -> EnsureCommonHeaders  -> Timeout.
+// Order: Logger -> Recoverer -> Gzip -> CORS -> SecureHeaders -> MaxBodySize -> TrustProxy -> EnsureCommonHeaders  -> Timeout.
 func (m *Manager) GlobalChain(next http.Handler) http.Handler {
-	return m.Recoverer(
-		m.Gzip(
-			m.Logger(
+	return m.Logger(
+		m.Recoverer(
+			m.Gzip(
 				m.CORS(
 					m.SecureHeaders(
 						m.MaxBodySize(m.cfg.RequestBodyLimit)(
