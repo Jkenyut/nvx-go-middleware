@@ -174,6 +174,10 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	if !r.wroteHeader {
 		r.WriteHeader(http.StatusOK)
 	}
+
+	fmt.Println("🔥 HEADER WRITTEN HERE")
+	debug.PrintStack()
+	
 	// detect JSON response
 	ct := r.Header().Get("Content-Type")
 	if strings.Contains(ct, "application/json") {
