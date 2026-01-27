@@ -297,7 +297,7 @@ func (m *Manager) EnsureAuth(next http.Handler) http.Handler {
 
 		// 3. Validate Signature Headers
 		// Check if the request signature is valid based on configured headers
-		if valid, signatureServer := m.validateSignatureAuthHeaders(r); !valid {
+		if validSignature, signatureServer := m.validateSignatureAuthHeaders(r); !validSignature {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			if m.EnvProd() {
@@ -424,7 +424,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 		}
 
 		// 4. Validate Signature Headers
-		if valid, signatureServer := m.validateSignaturePublicHeaders(r); !valid {
+		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			if m.EnvProd() {
