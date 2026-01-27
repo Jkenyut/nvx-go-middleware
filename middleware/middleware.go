@@ -375,7 +375,8 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					Str("error", fmt.Sprintf("%v", err)).
 					Msgf("Panic recovered:\n%s", stackStr)
 
-				// 3. Return 500 Internal Server Error
+					// 3. Return 500 Internal Server Error
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
 				w.Write([]byte("Internal Server Error"))
 			}
