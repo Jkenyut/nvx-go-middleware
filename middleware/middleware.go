@@ -360,25 +360,26 @@ func (m *Manager) SecureHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// Recoverer is a middleware that recovers from panics and logs the stack trace.
 func (m *Manager) Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
-			if err := recover(); err != nil {
-				// 1. Capture Stack Trace
-				stackBytes := debug.Stack()
-				stackStr := string(stackBytes)
+			if rec := recover(); rec != nil {
+				stack := string(debug.Stack())
 
-				// 2. Log Panic with Stack Trace
-				// Use structured logging if available for better parsing
 				m.cfg.Logger.Error().
-					Str("error", fmt.Sprintf("%v", err)).
-					Msgf("Panic recovered:\n%s", stackStr)
+					Str("panic", fmt.Sprintf("%v", rec)).
+					Str("method", r.Method).
+					Str("path", r.URL.Path).
+					Str("stack", stack).
+					Msg("panic recovered")
 
-					// 3. Return 500 Internal Server Error
+				// prevent double write if possible
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(response.InternalError(r.Context()))
+
+				_ = json.NewEncoder(w).Encode(
+					response.InternalError(r.Context()),
+				)
 			}
 		}()
 
@@ -746,6 +747,7 @@ func (_ *Manager) Gzip(next http.Handler) http.Handler {
 		next.ServeHTTP(gzw, r)
 	})
 }
+
 // GlobalChain applies a recommended chain of middleware.
 // Runtime order (outer → inner):
 // Recover -> Logger -> TrustProxy -> EnsureCommonHeaders -> SecureHeaders
