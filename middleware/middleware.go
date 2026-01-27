@@ -177,7 +177,7 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 
 	fmt.Println("🔥 HEADER WRITTEN HERE")
 	debug.PrintStack()
-	
+
 	// detect JSON response
 	ct := r.Header().Get("Content-Type")
 	if strings.Contains(ct, "application/json") {
@@ -264,11 +264,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 func (m *Manager) Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 1. Wrap ResponseWriter to capture status code and body
-		rw, ok := w.(*responseRecorder)
-		if !ok {
-			// safety fallback
-			rw = wrapResponseWriter(w)
-		}
+		rw := w.(*responseRecorder)
 
 		// 2. Generate Transaction ID
 		if r.Header.Get(constants.HeaderTransactionID) == "" {
