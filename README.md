@@ -19,6 +19,27 @@ A comprehensive HTTP middleware library for Go that combines custom authenticati
 - ✅ **Security Headers** - Automatic security header injection
 - ✅ **Context Injection** - Custom context values for handlers
 
+## 📁 Project Structure
+
+```
+nvx-go-middleware/
+├── go.mod                      # Go module definition
+├── manager.go                  # Main middleware manager entry point
+├── middleware.go               # Core middleware implementations
+├── chain.go                    # Middleware chaining & Chi integration
+├── chi.go                      # Chi middleware wrappers
+├── response_writer.go          # Response body capturing for audit logs
+├── store.go                    # LogStore interface & implementations
+├── config.go                   # Configuration struct & validation
+├── constants/
+│   └── constants.go            # Headers, error messages, etc.
+├── model/
+│   └── audit_log.go            # AuditLog struct definition
+└── examples/                   # Usage examples
+    ├── basic/                  # Simple public/auth routes
+    └── advanced/               # Admin routes & custom config
+```
+
 ## 📦 Installation
 
 ```bash
@@ -55,12 +76,12 @@ func main() {
 
     // Public route (device validation)
     mux.Handle("/register", mgr.PublicChain(chainCfg)(
-        mw.MethodOnly("POST", http.HandlerFunc(registerHandler)),
+        mgr.MethodOnly("POST", http.HandlerFunc(registerHandler)),
     ))
 
     // Authenticated route (JWT + signature validation)
     mux.Handle("/profile", mgr.AuthChain(chainCfg)(
-        mw.MethodOnly("GET", http.HandlerFunc(profileHandler)),
+        mgr.MethodOnly("GET", http.HandlerFunc(profileHandler)),
     ))
 
     http.ListenAndServe(":8080", mux)
@@ -118,6 +139,7 @@ Required headers:
 - `NVX-Device-ID`
 - `NVX-Platform` (android, ios, web, desktop)
 - `NVX-Mac-Address`
+- `NVX-Datetime`
 - `NVX-Signature`
 
 #### Auth Chain
@@ -207,13 +229,13 @@ The middleware validates request signatures using RSA:
 
 **For Auth Requests:**
 ```go
-signature = RSA_Sign(PrivateKey, [RequestID, MerchantKey, Token, UserID])
+signature = RSA_Sign(PrivateKey, [Token, IP, RequestID, MerchantKey, Datetime])
 ```
 
 **For Public Requests:**
 ```go
-messageSignature = RSA_Sign(PublicKey, [RequestID, MerchantKey])
-signature = RSA_Sign(PublicKey, [RequestID, MerchantKey, UserAgent, DeviceID, Platform, MacAddress, messageSignature])
+messageSignature = RSA_Sign(PublicKey, [UserAgent, DeviceID, Platform, MacAddress])
+signature = RSA_Sign(PublicKey, [Token, IP, RequestID, MerchantKey, Datetime, Message, messageSignature])
 ```
 
 Include the signature in the `NVX-Signature` header.
