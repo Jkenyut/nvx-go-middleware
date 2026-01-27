@@ -228,13 +228,20 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					Str("error", fmt.Sprintf("%v", rec)).
 					Str("method", r.Method).
 					Str("path", r.URL.Path).
-					Str("stack", stack).
+					Stack().
 					Msgf("Panic recovered:\n%s", stack)
+
+				if rw.wroteHeader {
+					m.cfg.Logger.Error().Str("value has wrote", "🔥 PANIC AFTER RESPONSE WAS WRITTEN (cannot recover response)").Msg("error")
+				} else {
+					m.cfg.Logger.Error().Str("value has not wrote", "🔥 PANIC BEFORE RESPONSE WAS WRITTEN (recoverable)").Msg("error")
+				}
 
 				// prevent double write if possible
 				if rw.wroteHeader {
 					return
 				}
+
 				rw.Header().Set("Content-Type", "application/json")
 				rw.WriteHeader(http.StatusInternalServerError)
 
