@@ -218,7 +218,7 @@ func (m *ConsoleStore) Save(entry model.AuditLog) error {
 
 func (m *Manager) Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wrapped := wrapResponseWriter(w)
+		rw := wrapResponseWriter(w)
 
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -228,23 +228,22 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					Str("error", fmt.Sprintf("%v", rec)).
 					Str("method", r.Method).
 					Str("path", r.URL.Path).
-					Str("stack", stack).
 					Msgf("Panic recovered:\n%s", stack)
 
 				// prevent double write if possible
-				if wrapped.wroteHeader {
+				if rw.wroteHeader {
 					return
 				}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
+				rw.Header().Set("Content-Type", "application/json")
+				rw.WriteHeader(http.StatusInternalServerError)
 
-				_ = json.NewEncoder(w).Encode(
+				_ = json.NewEncoder(rw).Encode(
 					response.InternalError(r.Context()),
 				)
 			}
 		}()
 
-		next.ServeHTTP(wrapped, r)
+		next.ServeHTTP(rw, r)
 	})
 }
 
@@ -272,9 +271,10 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		start := time.Now()
 
 		// 4. Wrap ResponseWriter to capture status code and body
-		wrapped, ok := w.(*responseRecorder)
+		rw, ok := w.(*responseRecorder)
 		if !ok {
-			wrapped = wrapResponseWriter(w)
+			// safety fallback
+			rw = wrapResponseWriter(w)
 		}
 
 		// Marshal request headers for logging
@@ -283,27 +283,27 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		reqBodyBytes, _ := m.readAndRestoreBodyJSON(r)
 
 		// 5. Serve Next Handler
-		next.ServeHTTP(wrapped, r)
+		next.ServeHTTP(rw, r)
 
 		// Marshal response headers for logging
-		responseHeadersBytes, _ := json.Marshal(wrapped.Header())
+		responseHeadersBytes, _ := json.Marshal(rw.Header())
 
 		// 6. Create Audit Log Entry
 		entry := model.AuditLog{
 			Method:          r.Method,
 			FullURL:         FullURL(r),
-			StatusCode:      wrapped.statusCode,
+			StatusCode:      rw.statusCode,
 			LatencyMS:       int(time.Since(start).Milliseconds()),
 			MerchantKey:     r.Header.Get(constants.HeaderMerchantKey),
 			ClientIP:        r.Header.Get(constants.HeaderIP),
 			RequestID:       r.Header.Get(constants.HeaderRequestID),
 			CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
 			CreatedAt:       format.NowUTC(),
-			TransactionID:   wrapped.Header().Get(constants.HeaderTransactionID),
+			TransactionID:   rw.Header().Get(constants.HeaderTransactionID),
 			RequestHeaders:  string(requestHeadersBytes),
 			ResponseHeaders: string(responseHeadersBytes),
 			RequestBody:     string(reqBodyBytes),
-			ResponseBody:    wrapped.body.String(),
+			ResponseBody:    rw.body.String(),
 		}
 
 		// 7. Save Log Entry Asynchronously
