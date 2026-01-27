@@ -56,7 +56,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 
 				// Check our own response recorder
 				if rw, ok := w.(*responseRecorder); ok {
-					if rw.wroteHeader {
+					if rw.Status() != 0 {
 						m.cfg.Logger.Error().Msg("Response already written, cannot recover")
 						return
 					}
@@ -84,16 +84,10 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		// Wrap response writer to capture status and body
 		var rw *responseRecorder
 
-		// Chi already wrapped with middleware.WrapResponseWriter
-		if ww, ok := w.(middleware.WrapResponseWriter); ok {
-			rw = &responseRecorder{
-				ResponseWriter: ww,
-				statusCode:     http.StatusOK,
-			}
-		} else if existingRw, ok := w.(*responseRecorder); ok {
+		if existingRw, ok := w.(*responseRecorder); ok {
 			rw = existingRw
 		} else {
-			rw = wrapResponseWriter(w)
+			rw = wrapResponseWriter(w, r)
 		}
 
 		// Generate/propagate Transaction ID
@@ -125,12 +119,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		next.ServeHTTP(rw, r)
 
 		// Get status from wrapper
-		statusCode := rw.statusCode
-		if ww, ok := w.(middleware.WrapResponseWriter); ok {
-			if ww.Status() != 0 {
-				statusCode = ww.Status()
-			}
-		}
+		statusCode := rw.Status()
 
 		responseHeadersBytes, _ := json.Marshal(rw.Header())
 

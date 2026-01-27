@@ -114,7 +114,6 @@ handler := mgr.PublicChain(chainCfg)(yourHandler)
 Required headers:
 - `NVX-Request-ID`
 - `NVX-Merchant-Key`
-- `NVX-IP`
 - `NVX-User-Agent`
 - `NVX-Device-ID`
 - `NVX-Platform` (android, ios, web, desktop)

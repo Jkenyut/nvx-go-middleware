@@ -31,7 +31,7 @@ func main() {
 	// PUBLIC ROUTES (device validation only)
 	// ========================================
 
-	mux.Handle("/api/register", mgr.PublicChain(chainCfg)(
+	mux.Handle("/api/register", mgr.GlobalChain(chainCfg)(
 		mgr.MethodOnly("POST", http.HandlerFunc(registerHandler)),
 	))
 

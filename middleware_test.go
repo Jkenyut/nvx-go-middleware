@@ -126,7 +126,11 @@ func TestEnsureCommonHeaders(t *testing.T) {
 			headers: map[string]string{
 				constants.HeaderRequestID:   "req-123",
 				constants.HeaderMerchantKey: "merchant-1",
-				constants.HeaderIP:          "192.168.1.1",
+				constants.HeaderDatetime:    "2024-01-01T00:00:00Z",
+				constants.HeaderSignature:   "sig-123",
+				// HeaderIP is populated by TrustProxy/RealIP, we mock it via TrustProxy if needed or assume set by previous middleware?
+				// Actually EnsureCommonHeaders checks it from request header which *should* be there.
+				constants.HeaderIP: "192.168.1.1",
 			},
 			wantStatus: http.StatusOK,
 		},
@@ -134,6 +138,18 @@ func TestEnsureCommonHeaders(t *testing.T) {
 			name: "missing request id",
 			headers: map[string]string{
 				constants.HeaderMerchantKey: "merchant-1",
+				constants.HeaderDatetime:    "2024-01-01T00:00:00Z",
+				constants.HeaderSignature:   "sig-123",
+				constants.HeaderIP:          "192.168.1.1",
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "missing datetime",
+			headers: map[string]string{
+				constants.HeaderRequestID:   "req-123",
+				constants.HeaderMerchantKey: "merchant-1",
+				constants.HeaderSignature:   "sig-123",
 				constants.HeaderIP:          "192.168.1.1",
 			},
 			wantStatus: http.StatusBadRequest,
@@ -143,6 +159,8 @@ func TestEnsureCommonHeaders(t *testing.T) {
 			headers: map[string]string{
 				constants.HeaderRequestID:   "req-123",
 				constants.HeaderMerchantKey: "merchant-1",
+				constants.HeaderDatetime:    "2024-01-01T00:00:00Z",
+				constants.HeaderSignature:   "sig-123",
 				constants.HeaderIP:          "invalid-ip",
 			},
 			wantStatus: http.StatusBadRequest,
@@ -194,6 +212,8 @@ func TestLogger(t *testing.T) {
 	req.Header.Set(constants.HeaderRequestID, "req-123")
 	req.Header.Set(constants.HeaderMerchantKey, "merchant-1")
 	req.Header.Set(constants.HeaderIP, "192.168.1.1")
+	req.Header.Set(constants.HeaderDatetime, "2024-01-01T00:00:00Z")
+	req.Header.Set(constants.HeaderSignature, "sig-123")
 
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)

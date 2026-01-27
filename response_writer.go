@@ -1,73 +1,41 @@
 package middleware
 
 import (
-	"bufio"
 	"bytes"
-	"fmt"
-	"net"
 	"net/http"
+
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 type responseRecorder struct {
-	http.ResponseWriter
-	statusCode  int
-	wroteHeader bool
-	body        bytes.Buffer
+	middleware.WrapResponseWriter
+	body *bytes.Buffer
 }
 
-func wrapResponseWriter(w http.ResponseWriter) *responseRecorder {
+func wrapResponseWriter(w http.ResponseWriter, r *http.Request) *responseRecorder {
+	mw := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 	return &responseRecorder{
-		ResponseWriter: w,
-		statusCode:     http.StatusOK, // Default to 200 OK
+		WrapResponseWriter: mw,
+		body:               &bytes.Buffer{},
 	}
-}
-
-func (r *responseRecorder) WriteHeader(code int) {
-	if r.wroteHeader {
-		return
-	}
-	// set status code
-	r.statusCode = code
-	r.wroteHeader = true
-	// write header
-	r.ResponseWriter.WriteHeader(code)
 }
 
 func (r *responseRecorder) Write(b []byte) (int, error) {
-	if !r.wroteHeader {
-		r.WriteHeader(http.StatusOK)
-	}
-
 	// detect JSON response
 	ct := r.Header().Get("Content-Type")
 	if ct == "" || ct == "application/json" {
 		r.body.Write(b)
 	}
 
-	return r.ResponseWriter.Write(b)
-}
-
-// Flush implements the http.Flusher interface to allow streaming.
-func (r *responseRecorder) Flush() {
-	if f, ok := r.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-// Hijack implements the http.Hijacker interface to allow WebSockets and other hijacks.
-func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if hj, ok := r.ResponseWriter.(http.Hijacker); ok {
-		return hj.Hijack()
-	}
-	return nil, nil, fmt.Errorf("http.Hijacker not supported by underlying ResponseWriter")
+	return r.WrapResponseWriter.Write(b)
 }
 
 // Status returns the status code
 func (r *responseRecorder) Status() int {
-	return r.statusCode
+	return r.WrapResponseWriter.Status()
 }
 
 // BytesWritten returns the number of bytes written to the body
 func (r *responseRecorder) BytesWritten() int {
-	return r.body.Len()
+	return r.WrapResponseWriter.BytesWritten()
 }
