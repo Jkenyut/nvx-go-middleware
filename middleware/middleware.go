@@ -378,7 +378,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					// 3. Return 500 Internal Server Error
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("Internal Server Error"))
+				json.NewEncoder(w).Encode(response.InternalError(r.Context()))
 			}
 		}()
 
