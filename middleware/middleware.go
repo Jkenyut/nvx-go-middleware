@@ -720,16 +720,16 @@ func (_ *Manager) Gzip(next http.Handler) http.Handler {
 }
 
 // GlobalChain applies a recommended chain of middleware.
-// Order: Recoverer -> Gzip -> Logger -> CORS -> SecureHeaders -> EnsureCommonHeaders -> TrustProxy -> MaxBodySize -> Timeout.
+// Order: Recoverer -> Gzip -> Logger -> CORS -> SecureHeaders -> MaxBodySize -> TrustProxy -> EnsureCommonHeaders  -> Timeout.
 func (m *Manager) GlobalChain(next http.Handler) http.Handler {
 	return m.Recoverer(
 		m.Gzip(
 			m.Logger(
 				m.CORS(
 					m.SecureHeaders(
-						m.EnsureCommonHeaders(
+						m.MaxBodySize(m.cfg.RequestBodyLimit)(
 							m.TrustProxy(
-								m.MaxBodySize(m.cfg.RequestBodyLimit)(
+								m.EnsureCommonHeaders(
 									m.Timeout(m.cfg.RequestTimeout)(next),
 								),
 							),
