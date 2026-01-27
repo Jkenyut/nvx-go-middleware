@@ -216,6 +216,38 @@ func (m *ConsoleStore) Save(entry model.AuditLog) error {
 	return nil
 }
 
+func (m *Manager) Recoverer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wrapped := wrapResponseWriter(w)
+
+		defer func() {
+			if rec := recover(); rec != nil {
+				stack := string(debug.Stack())
+
+				m.cfg.Logger.Error().
+					Str("error", fmt.Sprintf("%v", rec)).
+					Str("method", r.Method).
+					Str("path", r.URL.Path).
+					Str("stack", stack).
+					Msgf("Panic recovered:\n%s", stack)
+
+				// prevent double write if possible
+				if wrapped.wroteHeader {
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+
+				_ = json.NewEncoder(w).Encode(
+					response.InternalError(r.Context()),
+				)
+			}
+		}()
+
+		next.ServeHTTP(wrapped, r)
+	})
+}
+
 // Logger is a middleware that logs the start and end of each request.
 // It uses the configured LogStore to save the log entry.
 func (m *Manager) Logger(next http.Handler) http.Handler {
@@ -240,7 +272,11 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		start := time.Now()
 
 		// 4. Wrap ResponseWriter to capture status code and body
-		wrapped := wrapResponseWriter(w)
+		wrapped, ok := w.(*responseRecorder)
+		if !ok {
+			wrapped = wrapResponseWriter(w)
+		}
+
 		// Marshal request headers for logging
 		requestHeadersBytes, _ := json.Marshal(r.Header)
 		// Read and restore request body for logging
@@ -355,33 +391,6 @@ func (m *Manager) SecureHeaders(next http.Handler) http.Handler {
 		for key, value := range m.cfg.SecurityHeaders {
 			w.Header().Set(key, value)
 		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (m *Manager) Recoverer(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				stack := string(debug.Stack())
-
-				m.cfg.Logger.Error().
-					Str("panic", fmt.Sprintf("%v", rec)).
-					Str("method", r.Method).
-					Str("path", r.URL.Path).
-					Str("stack", stack).
-					Msg("panic recovered")
-
-				// prevent double write if possible
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-
-				_ = json.NewEncoder(w).Encode(
-					response.InternalError(r.Context()),
-				)
-			}
-		}()
 
 		next.ServeHTTP(w, r)
 	})
