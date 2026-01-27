@@ -228,6 +228,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					Str("error", fmt.Sprintf("%v", rec)).
 					Str("method", r.Method).
 					Str("path", r.URL.Path).
+					Str("stack", stack).
 					Msgf("Panic recovered:\n%s", stack)
 
 				// prevent double write if possible
@@ -251,15 +252,22 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 // It uses the configured LogStore to save the log entry.
 func (m *Manager) Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 1. Generate Transaction ID
-		if r.Header.Get(constants.HeaderTransactionID) == "" {
-			uuidV7 := cryptoutil.V7()
-			w.Header().Set(constants.HeaderTransactionID, uuidV7)
-		} else {
-			w.Header().Set(constants.HeaderTransactionID, r.Header.Get(constants.HeaderTransactionID))
+		// 1. Wrap ResponseWriter to capture status code and body
+		rw, ok := w.(*responseRecorder)
+		if !ok {
+			// safety fallback
+			rw = wrapResponseWriter(w)
 		}
 
-		// 2. Inject Context
+		// 2. Generate Transaction ID
+		if r.Header.Get(constants.HeaderTransactionID) == "" {
+			uuidV7 := cryptoutil.V7()
+			rw.Header().Set(constants.HeaderTransactionID, uuidV7)
+		} else {
+			rw.Header().Set(constants.HeaderTransactionID, r.Header.Get(constants.HeaderTransactionID))
+		}
+
+		// 3. Inject Context
 		// If a custom injector is provided, use it. Otherwise, use the default.
 		if m.cfg.ContextInjector != nil {
 			r = m.cfg.ContextInjector(r)
@@ -267,28 +275,21 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			r = m.injectContext(r)
 		}
 
-		// 3. Start Timer
+		// 4. Start Timer
 		start := time.Now()
 
-		// 4. Wrap ResponseWriter to capture status code and body
-		rw, ok := w.(*responseRecorder)
-		if !ok {
-			// safety fallback
-			rw = wrapResponseWriter(w)
-		}
-
-		// Marshal request headers for logging
+		// 5. Marshal request headers for logging
 		requestHeadersBytes, _ := json.Marshal(r.Header)
 		// Read and restore request body for logging
 		reqBodyBytes, _ := m.readAndRestoreBodyJSON(r)
 
-		// 5. Serve Next Handler
+		// 6. Serve Next Handler
 		next.ServeHTTP(rw, r)
 
-		// Marshal response headers for logging
+		// 7. Marshal response headers for logging
 		responseHeadersBytes, _ := json.Marshal(rw.Header())
 
-		// 6. Create Audit Log Entry
+		// 8. Create Audit Log Entry
 		entry := model.AuditLog{
 			Method:          r.Method,
 			FullURL:         FullURL(r),
@@ -306,7 +307,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			ResponseBody:    rw.body.String(),
 		}
 
-		// 7. Save Log Entry Asynchronously
+		// 9. Save Log Entry Asynchronously
 		go func() {
 			if err := m.cfg.LogStore.Save(entry); err != nil {
 
