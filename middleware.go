@@ -167,7 +167,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 func (m *Manager) EnsureCommonHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Validate Headers Presence
-		valid := validateHeaders(w, r, m.cfg.RequiredCommonHeaders)
+		valid := m.validateHeaders(w, r, m.cfg.RequiredCommonHeaders)
 		if !valid {
 			return
 		}
@@ -193,7 +193,7 @@ func (m *Manager) EnsureCommonHeaders(next http.Handler) http.Handler {
 func (m *Manager) EnsureAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Validate Headers Presence
-		valid := validateHeaders(w, r, m.cfg.RequiredAuthHeaders)
+		valid := m.validateHeaders(w, r, m.cfg.RequiredAuthHeaders)
 		if !valid {
 			return
 		}
@@ -291,7 +291,7 @@ func (w *headerCleanerResponseWriter) Write(b []byte) (int, error) {
 func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Validate Presence of Required Public Headers
-		valid := validateHeaders(w, r, m.cfg.RequiredPublicAuthHeaders)
+		valid := m.validateHeaders(w, r, m.cfg.RequiredPublicAuthHeaders)
 		if !valid {
 			return
 		}
@@ -443,7 +443,7 @@ func (m *Manager) CORS(next http.Handler, allowedOrigins []string, allowedHeader
 
 // validateHeaders checks if all required headers are present in the request.
 // If any headers are missing, it returns false and writes a 400 Bad Request response.
-func validateHeaders(w http.ResponseWriter, r *http.Request, headers []string) bool {
+func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, headers []string) bool {
 	missingHeaders := []string{}
 	for _, header := range headers {
 		if r.Header.Get(header) == "" {
@@ -455,15 +455,11 @@ func validateHeaders(w http.ResponseWriter, r *http.Request, headers []string) b
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 
-		meta := response.NewMeta(r.Context(), false, constants.ErrMsgMissingHeaders, http.StatusBadRequest)
-		resp := response.Response{
-			Meta: meta,
-			Data: map[string]interface{}{
-				"missing": missingHeaders,
-			},
+		message := constants.ErrMsgMissingHeaders
+		if !m.envProd() {
+			message = fmt.Sprintf("%s - Missing Headers: %s", constants.ErrMsgMissingHeaders, strings.Join(missingHeaders, ", "))
 		}
-
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(response.BadRequest(r.Context(), message))
 		return false
 	}
 
