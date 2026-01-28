@@ -69,7 +69,7 @@ func (m *Manager) GlobalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 		handler = m.TrustProxy(handler)
 
 		// Add CORS
-		handler = m.CORS(handler, m.cfg.AllowedOrigins)
+		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
 
 		return handler
 	}

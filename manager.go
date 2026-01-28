@@ -83,6 +83,29 @@ func New(cfg Config) *Manager {
 		cfg.SecurityHeaders = constants.SecurityHeaders
 	}
 
+	// Set default TrustedProxies if not set
+	if len(cfg.TrustedProxies) == 0 {
+		cfg.TrustedProxies = []string{}
+	}
+
+	// Set default AllowedOrigins if not set
+	if len(cfg.AllowedOrigins) == 0 {
+		cfg.AllowedOrigins = []string{"*"}
+	}
+
+	// Set default AllowedHeaders if not set
+	if len(cfg.AllowedHeaders) == 0 {
+		cfg.AllowedHeaders = append(cfg.AllowedHeaders, "Accept", "Authorization", "Content-Type")
+		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredCommonHeaders...)
+		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredAuthHeaders...)
+		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicAuthHeaders...)
+	}
+
+	// Set default HeadersToRemove if not set
+	if len(cfg.HeadersToRemove) == 0 {
+		cfg.HeadersToRemove = []string{}
+	}
+
 	return &Manager{cfg: cfg}
 }
 

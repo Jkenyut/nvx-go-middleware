@@ -421,11 +421,11 @@ func (m *Manager) MaxBodySize(limitBytes int64) func(http.Handler) http.Handler 
 // CORS adds Cross-Origin Resource Sharing (CORS) headers to responses.
 // It handles preflight OPTIONS requests and sets appropriate headers
 // based on the configured allowed origins.
-func (m *Manager) CORS(next http.Handler, allowedOrigins []string) http.Handler {
+func (m *Manager) CORS(next http.Handler, allowedOrigins []string, allowedHeaders []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", strings.Join(allowedOrigins, ", "))
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, NVX-*")
+		w.Header().Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
 		w.Header().Set("Access-Control-Max-Age", "3600")
 
 		if r.Method == "OPTIONS" {

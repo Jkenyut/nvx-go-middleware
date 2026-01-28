@@ -3,7 +3,6 @@ package middleware
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -29,6 +28,7 @@ type Config struct {
 	PrivateKeySignature string
 	TrustedProxies      []string
 	AllowedOrigins      []string
+	AllowedHeaders      []string
 	HeadersToRemove     []string
 	SecurityHeaders     map[string]string
 
@@ -42,33 +42,6 @@ type Config struct {
 
 	// Custom Context Injector
 	ContextInjector func(r *http.Request) *http.Request
-}
-
-// DefaultConfig returns a Config with sensible defaults
-func DefaultConfig() Config {
-	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
-
-	return Config{
-		Logger:            &logger,
-		LogStore:          &ConsoleStore{logger: &logger},
-		Env:               "development",
-		RequestTimeout:    60 * time.Second,
-		RequestBodyLimit:  3 * 1024 * 1024, // 3MB
-		SecurityHeaders:   defaultSecurityHeaders(),
-		TrustedProxies:    []string{},
-		AllowedOrigins:    []string{"*"},
-		LogRequestBodies:  true,
-		LogResponseBodies: true,
-	}
-}
-
-func defaultSecurityHeaders() map[string]string {
-	return map[string]string{
-		"X-Content-Type-Options":    "nosniff",
-		"X-Frame-Options":           "DENY",
-		"X-XSS-Protection":          "1; mode=block",
-		"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-	}
 }
 
 // Validate checks if the config is valid

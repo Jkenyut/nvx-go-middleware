@@ -77,8 +77,8 @@ var (
 		HeaderToken,
 		HeaderRequestID,
 		HeaderMerchantKey,
-		HeaderDatetime,
 		HeaderMessage,
+		HeaderDatetime,
 	}
 )
 
