@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -114,7 +115,10 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 
 		start := time.Now()
 		requestHeadersBytes, _ := json.Marshal(r.Header)
-		reqBodyBytes, _ := m.readAndRestoreBodyJSON(r)
+		var reqBodyBytes []byte
+		if m.cfg.LogRequestBodies {
+			reqBodyBytes, _ = m.readAndRestoreBodyJSON(r)
+		}
 
 		next.ServeHTTP(rw, r)
 
@@ -122,6 +126,11 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		statusCode := rw.Status()
 
 		responseHeadersBytes, _ := json.Marshal(rw.Header())
+
+		var responseBody string
+		if m.cfg.LogResponseBodies {
+			responseBody = rw.body.String()
+		}
 
 		entry := model.AuditLog{
 			Method:          r.Method,
@@ -137,7 +146,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			RequestHeaders:  string(requestHeadersBytes),
 			ResponseHeaders: string(responseHeadersBytes),
 			RequestBody:     string(reqBodyBytes),
-			ResponseBody:    rw.body.String(),
+			ResponseBody:    responseBody,
 		}
 
 		// Save log asynchronously with proper error handling
@@ -300,49 +309,53 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
-// TrustProxy extracts the real client IP from X-Forwarded-For header
-// if the request comes from a trusted proxy. Otherwise, it uses RemoteAddr.
-// The extracted IP is set in the NVX-IP header for downstream handlers.
 func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		remoteIP := func() string {
+			ip, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil {
+				return r.RemoteAddr
+			}
+			return ip
+		}()
+
 		isTrusted := false
 
-		if len(m.cfg.TrustedProxies) > 0 {
-			remoteIP, _, err := net.SplitHostPort(r.RemoteAddr)
-			if err != nil {
-				remoteIP = r.RemoteAddr
+		for _, proxy := range m.cfg.TrustedProxies {
+			if proxy == remoteIP {
+				isTrusted = true
+				break
 			}
 
-			for _, proxy := range m.cfg.TrustedProxies {
-				if proxy == remoteIP {
+			if _, ipNet, err := net.ParseCIDR(proxy); err == nil {
+				if ip := net.ParseIP(remoteIP); ip != nil && ipNet.Contains(ip) {
 					isTrusted = true
 					break
 				}
-
-				_, ipNet, err := net.ParseCIDR(proxy)
-				if err == nil {
-					ip := net.ParseIP(remoteIP)
-					if ip != nil && ipNet.Contains(ip) {
-						isTrusted = true
-						break
-					}
-				}
 			}
 		}
 
-		if r.Header.Get(constants.HeaderIP) == "" {
-			xff := r.Header.Get("X-Forwarded-For")
-			if xff != "" && isTrusted {
-				if idx := strings.Index(xff, ","); idx != -1 {
-					xff = xff[:idx]
-				}
-				r.Header.Set(constants.HeaderIP, strings.TrimSpace(xff))
-			} else {
-				remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
-				r.Header.Set(constants.HeaderIP, remoteIP)
+		var clientIP string
+
+		if isTrusted {
+			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+				parts := strings.Split(xff, ",")
+				clientIP = strings.TrimSpace(parts[0])
 			}
 		}
+		if net.ParseIP(clientIP) == nil {
+			clientIP = remoteIP
+		}
+
+		r.Header.Set(constants.HeaderIP, clientIP)
+
+		// If we found a valid client IP from a trusted proxy, update RemoteAddr
+		// This protects standard Go functions that rely on RemoteAddr
+		if clientIP != remoteIP {
+			r.RemoteAddr = net.JoinHostPort(clientIP, "0")
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -453,7 +466,11 @@ func (_ *Manager) validateSignatureHeaders(r *http.Request, keySignature string,
 		return false, signatureServer
 	}
 
-	return clientSignature == signatureServer, signatureServer
+	if len(clientSignature) != len(signatureServer) {
+		return false, signatureServer
+	}
+
+	return subtle.ConstantTimeCompare([]byte(clientSignature), []byte(signatureServer)) == 1, signatureServer
 }
 
 // FullURL reconstructs the full URL of the request, including scheme, host, and path.

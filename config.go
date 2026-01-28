@@ -20,6 +20,10 @@ type Config struct {
 	RequestTimeout   time.Duration
 	RequestBodyLimit int64
 
+	// Logging
+	LogRequestBodies  bool
+	LogResponseBodies bool
+
 	// Security
 	PublicKeySignature  string
 	PrivateKeySignature string
@@ -28,12 +32,12 @@ type Config struct {
 	SecurityHeaders     map[string]string
 
 	// Required Headers
-	RequiredCommonHeaders            []string
-	RequiredAuthHeaders              []string
-	RequiredPublicAuthHeaders        []string
-	RequiredSignatureAuthHeaders     []string
-	RequiredSignatureMessageHeaders  []string
-	RequiredSignaturePublicHeaders   []string
+	RequiredCommonHeaders           []string
+	RequiredAuthHeaders             []string
+	RequiredPublicAuthHeaders       []string
+	RequiredSignatureAuthHeaders    []string
+	RequiredSignatureMessageHeaders []string
+	RequiredSignaturePublicHeaders  []string
 
 	// Custom Context Injector
 	ContextInjector func(r *http.Request) *http.Request
@@ -44,14 +48,16 @@ func DefaultConfig() Config {
 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
 
 	return Config{
-		Logger:           &logger,
-		LogStore:         &ConsoleStore{logger: &logger},
-		Env:              "development",
-		RequestTimeout:   60 * time.Second,
-		RequestBodyLimit: 3 * 1024 * 1024, // 3MB
-		SecurityHeaders:  defaultSecurityHeaders(),
-		TrustedProxies:   []string{},
-		AllowedOrigins:   []string{"*"},
+		Logger:            &logger,
+		LogStore:          &ConsoleStore{logger: &logger},
+		Env:               "development",
+		RequestTimeout:    60 * time.Second,
+		RequestBodyLimit:  3 * 1024 * 1024, // 3MB
+		SecurityHeaders:   defaultSecurityHeaders(),
+		TrustedProxies:    []string{},
+		AllowedOrigins:    []string{"*"},
+		LogRequestBodies:  true,
+		LogResponseBodies: true,
 	}
 }
 

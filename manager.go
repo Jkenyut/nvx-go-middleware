@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -42,14 +43,9 @@ func New(cfg Config) *Manager {
 		cfg.Env = "development"
 	}
 
-	// Validate required keys
-	if cfg.PublicKeySignature == "" || cfg.PrivateKeySignature == "" {
-		panic("PublicKey and PrivateKey are required in middleware configuration")
-	}
-
-	// Validate AllowedOrigins
-	if len(cfg.AllowedOrigins) == 0 {
-		panic("AllowedOrigins is required in middleware configuration")
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		panic(fmt.Sprintf("middleware configuration error: %v", err))
 	}
 
 	// Set default RequiredCommonHeaders if not set

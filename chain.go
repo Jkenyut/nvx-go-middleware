@@ -25,9 +25,9 @@ type ChainConfig struct {
 // DefaultChainConfig returns recommended chain configuration
 func DefaultChainConfig() ChainConfig {
 	return ChainConfig{
-		UseChiRealIP:       true,
+		UseChiRealIP:       false, // Disabled in favor of secure TrustProxy
 		UseChiCompress:     true,
-		UseChiTimeout:      false, // Use custom timeout
+		UseChiTimeout:      true,  // User-requested: specific Chi timeout
 		UseChiThrottle:     false, // Enable per route
 		UseChiStripSlashes: true,
 		CompressionLevel:   5,
