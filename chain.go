@@ -42,6 +42,7 @@ func (m *Manager) GlobalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 
 		// Apply custom middleware (inner to outer)
 		handler = m.MaxBodySize(m.cfg.RequestBodyLimit)(handler)
+		handler = m.RemoveHeaders(handler)
 		handler = m.SecureHeaders(handler)
 		handler = m.EnsureCommonHeaders(handler)
 		handler = m.Recoverer(handler)

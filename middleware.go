@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"bytes"
-	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -104,13 +103,6 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			r = m.cfg.ContextInjector(r)
 		} else {
 			r = m.injectContext(r)
-		}
-
-		// Also set Chi's RequestID key for compatibility
-		ctx := r.Context()
-		if middleware.GetReqID(ctx) == "" {
-			ctx = context.WithValue(ctx, middleware.RequestIDKey, transactionID)
-			r = r.WithContext(ctx)
 		}
 
 		start := time.Now()
@@ -247,6 +239,50 @@ func (m *Manager) SecureHeaders(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// RemoveHeaders removes specified headers from the response.
+// This is useful for removing headers like Server, X-Powered-By, etc.
+func (m *Manager) RemoveHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// If no headers to remove, skip wrapper overhead
+		if len(m.cfg.HeadersToRemove) == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Use a custom writer directly without wrapper struct if possible,
+		// but since we need to intercept WriteHeader, let's just wrap it locally.
+		rw := &headerCleanerResponseWriter{
+			ResponseWriter:  w,
+			headersToRemove: m.cfg.HeadersToRemove,
+		}
+
+		next.ServeHTTP(rw, r)
+	})
+}
+
+type headerCleanerResponseWriter struct {
+	http.ResponseWriter
+	headersToRemove []string
+}
+
+func (w *headerCleanerResponseWriter) WriteHeader(statusCode int) {
+	for _, h := range w.headersToRemove {
+		w.ResponseWriter.Header().Del(h)
+	}
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *headerCleanerResponseWriter) Write(b []byte) (int, error) {
+	// Ensure headers are cleaned if Write is called before WriteHeader
+	// (Writing body implicitly calls WriteHeader(200) if not called yet)
+	// Just delete headers here too to be safe.
+	for _, h := range w.headersToRemove {
+		w.ResponseWriter.Header().Del(h)
+	}
+
+	return w.ResponseWriter.Write(b)
 }
 
 // EnsurePublicAuth validates headers required for public authenticated requests.

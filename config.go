@@ -29,6 +29,7 @@ type Config struct {
 	PrivateKeySignature string
 	TrustedProxies      []string
 	AllowedOrigins      []string
+	HeadersToRemove     []string
 	SecurityHeaders     map[string]string
 
 	// Required Headers

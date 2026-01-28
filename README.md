@@ -140,6 +140,8 @@ Required headers:
 - `NVX-Platform` (android, ios, web, desktop)
 - `NVX-Mac-Address`
 - `NVX-Datetime`
+- `NVX-Token`
+- `NVX-Message`
 - `NVX-Signature`
 
 #### Auth Chain
@@ -150,8 +152,7 @@ handler := mgr.AuthChain(chainCfg)(yourHandler)
 
 Additional required headers:
 - `NVX-Token` (JWT)
-- `NVX-User-ID`
-- `NVX-Signature` (calculated with token + user ID)
+- `NVX-Signature` (calculated with token, ip, request id, merchant key, and datetime)
 
 #### Admin Chain
 For admin-only endpoints:

@@ -7,11 +7,6 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 )
 
-// ChiRequestID wraps Chi's RequestID middleware
-func (m *Manager) ChiRequestID(next http.Handler) http.Handler {
-	return chimiddleware.RequestID(next)
-}
-
 // ChiRealIP wraps Chi's RealIP middleware
 func (m *Manager) ChiRealIP(next http.Handler) http.Handler {
 	return chimiddleware.RealIP(next)
@@ -50,11 +45,6 @@ func (m *Manager) ChiHeartbeat(endpoint string) func(http.Handler) http.Handler 
 // ChiProfiler wraps Chi's Profiler middleware (for debugging)
 func (m *Manager) ChiProfiler() http.Handler {
 	return chimiddleware.Profiler()
-}
-
-// GetChiRequestID extracts request ID from context (set by Chi RequestID middleware)
-func GetChiRequestID(r *http.Request) string {
-	return chimiddleware.GetReqID(r.Context())
 }
 
 // WrapWithChiWriter wraps response writer with Chi's WrapResponseWriter

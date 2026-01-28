@@ -59,7 +59,6 @@ var (
 	// RequiredSignatureAuthHeaders are headers required for signature authenticated requests
 	RequiredSignatureAuthHeaders = []string{
 		HeaderToken,
-		HeaderIP,
 		HeaderRequestID,
 		HeaderMerchantKey,
 		HeaderDatetime,
@@ -76,7 +75,6 @@ var (
 	// RequiredSignaturePublicHeaders are headers required for signature public authenticated requests
 	RequiredSignaturePublicHeaders = []string{
 		HeaderToken,
-		HeaderIP,
 		HeaderRequestID,
 		HeaderMerchantKey,
 		HeaderDatetime,

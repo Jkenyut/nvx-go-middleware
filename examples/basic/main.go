@@ -19,6 +19,7 @@ func main() {
 		RequestTimeout:      60 * time.Second,
 		RequestBodyLimit:    3 * 1024 * 1024, // 3MB
 		Env:                 "development",
+		HeadersToRemove:     []string{},
 	})
 
 	// Create chain config
