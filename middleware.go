@@ -463,6 +463,16 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 		return false
 	}
 
+	if r.Header.Get(constants.HeaderDatetime) != "" {
+		datetime := format.StringToDateTimeSecUTCOrZero(r.Header.Get(constants.HeaderDatetime))
+		if datetime.IsZero() {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidDatetime))
+			return false
+		}
+	}
+
 	return true
 }
 

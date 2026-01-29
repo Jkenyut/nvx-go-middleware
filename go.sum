@@ -1,5 +1,5 @@
-github.com/Jkenyut/nvx-go-helper v1.0.16-0.20260127143155-589693980984 h1:EKeTO3BWGCvu1R2gtcZi8yGihNuB1nlVsHAuKYdzGE4=
-github.com/Jkenyut/nvx-go-helper v1.0.16-0.20260127143155-589693980984/go.mod h1:XJh2YfbSgpmsNCvBAqUmF7b7QWwTP4N/Q/zfcPSfaj0=
+github.com/Jkenyut/nvx-go-helper v1.0.16-0.20260129082528-6c8af5c75878 h1:QiOaPDu7FesGhGGnQm128BdzazX+gbdSqDQv3dmfdk0=
+github.com/Jkenyut/nvx-go-helper v1.0.16-0.20260129082528-6c8af5c75878/go.mod h1:xg55az4LHP8NOFrgMLdkGX79kur7Rp9otb1SUQY1X98=
 github.com/coreos/go-systemd/v22 v22.5.0/go.mod h1:Y58oyj3AT4RCenI/lSvhwexgC+NSVTIJ3seZv2GcEnc=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
@@ -22,6 +22,8 @@ github.com/rs/zerolog v1.32.0 h1:keLypqrlIjaFsbmJOBdB/qvyF8KEtCWHwobLp5l/mQ0=
 github.com/rs/zerolog v1.32.0/go.mod h1:/7mN4D5sKwJLZQ2b/znpjC3/GQWY/xaDXUM0kKWRHss=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
+golang.org/x/crypto v0.46.0 h1:cKRW/pmt1pKAfetfu+RCEvjvZkA9RimPbh7bhFjGVBU=
+golang.org/x/crypto v0.46.0/go.mod h1:Evb/oLKmMraqjZ2iQTwDwvCtJkczlDuTmdJXoZVzqU0=
 golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/sys v0.6.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/sys v0.12.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
