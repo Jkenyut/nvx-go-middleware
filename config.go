@@ -16,29 +16,31 @@ type Config struct {
 	Env      string
 
 	// Timeout & Limits
-	RequestTimeout   time.Duration
-	RequestBodyLimit int64
+	RequestTimeout          time.Duration
+	RequestBodyLimit        int64
+	RequestBodyNonFileLimit int64
 
 	// Logging
-	LogRequestBodies  bool
-	LogResponseBodies bool
+	LogRequestBodies     bool
+	LogResponseBodies    bool
+	ResponseBodyLogLimit int
 
 	// Security
 	PublicKeySignature  string
 	PrivateKeySignature string
 	TrustedProxies      []string
 	AllowedOrigins      []string
+	AllowedContentTypes []string
 	AllowedHeaders      []string
 	HeadersToRemove     []string
 	SecurityHeaders     map[string]string
 
 	// Required Headers
-	RequiredCommonHeaders           []string
-	RequiredAuthHeaders             []string
-	RequiredPublicAuthHeaders       []string
-	RequiredSignatureAuthHeaders    []string
-	RequiredSignatureMessageHeaders []string
-	RequiredSignaturePublicHeaders  []string
+	RequiredCommonHeaders          []string
+	RequiredAuthHeaders            []string
+	RequiredPublicHeaders          []string
+	RequiredSignatureHeadersAuth   []string
+	RequiredSignatureHeadersPublic []string
 
 	// Custom Context Injector
 	ContextInjector func(r *http.Request) *http.Request

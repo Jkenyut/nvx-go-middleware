@@ -124,10 +124,11 @@ func TestEnsureCommonHeaders(t *testing.T) {
 		{
 			name: "all headers present",
 			headers: map[string]string{
-				constants.HeaderRequestID:   "req-123",
-				constants.HeaderMerchantKey: "merchant-1",
-				constants.HeaderDatetime:    "2024-01-01T00:00:00Z",
-				constants.HeaderSignature:   "sig-123",
+				constants.HeaderRequestID: "req-123",
+				constants.HeaderAPIKey:    "merchant-1",
+				constants.HeaderTimestamp: "1704067200",
+				constants.HeaderSignature: "sig-123",
+				constants.HeaderPlatform:  "web",
 				// HeaderIP is populated by TrustProxy/RealIP, we mock it via TrustProxy if needed or assume set by previous middleware?
 				// Actually EnsureCommonHeaders checks it from request header which *should* be there.
 				constants.HeaderIP: "192.168.1.1",
@@ -137,31 +138,34 @@ func TestEnsureCommonHeaders(t *testing.T) {
 		{
 			name: "missing request id",
 			headers: map[string]string{
-				constants.HeaderMerchantKey: "merchant-1",
-				constants.HeaderDatetime:    "2024-01-01T00:00:00Z",
-				constants.HeaderSignature:   "sig-123",
-				constants.HeaderIP:          "192.168.1.1",
+				constants.HeaderAPIKey:    "merchant-1",
+				constants.HeaderTimestamp: "1704067200",
+				constants.HeaderSignature: "sig-123",
+				constants.HeaderPlatform:  "web",
+				constants.HeaderIP:        "192.168.1.1",
 			},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name: "missing datetime",
+			name: "missing timestamp",
 			headers: map[string]string{
-				constants.HeaderRequestID:   "req-123",
-				constants.HeaderMerchantKey: "merchant-1",
-				constants.HeaderSignature:   "sig-123",
-				constants.HeaderIP:          "192.168.1.1",
+				constants.HeaderRequestID: "req-123",
+				constants.HeaderAPIKey:    "merchant-1",
+				constants.HeaderSignature: "sig-123",
+				constants.HeaderPlatform:  "web",
+				constants.HeaderIP:        "192.168.1.1",
 			},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
 			name: "invalid ip format",
 			headers: map[string]string{
-				constants.HeaderRequestID:   "req-123",
-				constants.HeaderMerchantKey: "merchant-1",
-				constants.HeaderDatetime:    "2024-01-01T00:00:00Z",
-				constants.HeaderSignature:   "sig-123",
-				constants.HeaderIP:          "invalid-ip",
+				constants.HeaderRequestID: "req-123",
+				constants.HeaderAPIKey:    "merchant-1",
+				constants.HeaderTimestamp: "1704067200",
+				constants.HeaderSignature: "sig-123",
+				constants.HeaderPlatform:  "web",
+				constants.HeaderIP:        "invalid-ip",
 			},
 			wantStatus: http.StatusBadRequest,
 		},
@@ -184,7 +188,7 @@ func TestEnsureCommonHeaders(t *testing.T) {
 			handler.ServeHTTP(w, req)
 
 			if w.Code != tt.wantStatus {
-				t.Errorf("Expected status %d, got %d", tt.wantStatus, w.Code)
+				t.Errorf("Expected status %d, got %d. Body: %s", tt.wantStatus, w.Code, w.Body.String())
 			}
 		})
 	}
@@ -210,9 +214,9 @@ func TestLogger(t *testing.T) {
 	req := httptest.NewRequest("POST", "/test", bytes.NewBufferString(`{"test":"data"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(constants.HeaderRequestID, "req-123")
-	req.Header.Set(constants.HeaderMerchantKey, "merchant-1")
+	req.Header.Set(constants.HeaderAPIKey, "merchant-1")
 	req.Header.Set(constants.HeaderIP, "192.168.1.1")
-	req.Header.Set(constants.HeaderDatetime, "2024-01-01T00:00:00Z")
+	req.Header.Set(constants.HeaderTimestamp, "1704067200")
 	req.Header.Set(constants.HeaderSignature, "sig-123")
 
 	w := httptest.NewRecorder()
@@ -245,22 +249,50 @@ func TestMaxBodySize(t *testing.T) {
 		PrivateKeySignature: "test-private-key",
 		AllowedOrigins:      []string{"*"},
 		RequestBodyLimit:    100, // 100 bytes limit
+		AllowedContentTypes: []string{"application/json", "multipart/form-data"},
 	})
 
 	tests := []struct {
-		name       string
-		bodySize   int
-		wantStatus int
+		name        string
+		bodySize    int
+		contentType string
+		wantStatus  int
 	}{
 		{
-			name:       "body within limit",
-			bodySize:   50,
-			wantStatus: http.StatusOK,
+			name:        "json body within limit",
+			bodySize:    50,
+			contentType: "application/json",
+			wantStatus:  http.StatusOK,
 		},
 		{
-			name:       "body exceeds limit",
-			bodySize:   200,
-			wantStatus: http.StatusRequestEntityTooLarge,
+			name:        "json body exceeds limit",
+			bodySize:    200,
+			contentType: "application/json",
+			wantStatus:  http.StatusRequestEntityTooLarge,
+		},
+		{
+			name:        "multipart body within limit",
+			bodySize:    50,
+			contentType: "multipart/form-data; boundary=something",
+			wantStatus:  http.StatusOK,
+		},
+		{
+			name:        "unsupported content type",
+			bodySize:    50,
+			contentType: "text/plain",
+			wantStatus:  http.StatusBadRequest,
+		},
+		{
+			name:        "missing content type with body",
+			bodySize:    50,
+			contentType: "",
+			wantStatus:  http.StatusBadRequest, // Logic assumes default reject if body present
+		},
+		{
+			name:        "no body no content type (GET like)",
+			bodySize:    0,
+			contentType: "",
+			wantStatus:  http.StatusOK,
 		},
 	}
 
@@ -270,11 +302,19 @@ func TestMaxBodySize(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			})
 
-			handler := mgr.MaxBodySize(mgr.cfg.RequestBodyLimit)(okHandler)
+			handler := mgr.MaxBodySize()(okHandler)
 
-			body := bytes.Repeat([]byte("a"), tt.bodySize)
-			req := httptest.NewRequest("POST", "/test", bytes.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
+			var body *bytes.Reader
+			if tt.bodySize > 0 {
+				body = bytes.NewReader(bytes.Repeat([]byte("a"), tt.bodySize))
+			} else {
+				body = bytes.NewReader([]byte{})
+			}
+
+			req := httptest.NewRequest("POST", "/test", body)
+			if tt.contentType != "" {
+				req.Header.Set("Content-Type", tt.contentType)
+			}
 
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, req)
@@ -379,7 +419,7 @@ func BenchmarkLogger(b *testing.B) {
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set(constants.HeaderRequestID, "req-123")
-	req.Header.Set(constants.HeaderMerchantKey, "merchant-1")
+	req.Header.Set(constants.HeaderAPIKey, "merchant-1")
 	req.Header.Set(constants.HeaderIP, "192.168.1.1")
 
 	b.ResetTimer()

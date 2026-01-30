@@ -34,10 +34,20 @@ func New(cfg Config) *Manager {
 	if cfg.RequestTimeout == 0 {
 		cfg.RequestTimeout = 60 * time.Second
 	}
-	// Set default RequestBodyLimit if not set (3MB)
+	// Set default RequestBodyLimit if not set (2GB)
 	if cfg.RequestBodyLimit == 0 {
-		cfg.RequestBodyLimit = 3 * 1024 * 1024 // 3 MB
+		cfg.RequestBodyLimit = 2 * 1024 * 1024 * 1024 // 2 GB
 	}
+	// Set default RequestBodyNonFileLimit if not set (3 MB)
+	if cfg.RequestBodyNonFileLimit == 0 {
+		cfg.RequestBodyNonFileLimit = 3 * 1024 * 1024 // 3 MB
+	}
+
+	// Set default ResponseBodyLogLimit (5 MB) if not set
+	if cfg.ResponseBodyLogLimit == 0 {
+		cfg.ResponseBodyLogLimit = 5 * 1024 * 1024 // 5 MB
+	}
+
 	// Set default env if not set
 	if cfg.Env == "" {
 		cfg.Env = "development"
@@ -58,24 +68,19 @@ func New(cfg Config) *Manager {
 		cfg.RequiredAuthHeaders = constants.RequiredAuthHeaders
 	}
 
-	// Set default RequiredPublicAuthHeaders if not set
-	if len(cfg.RequiredPublicAuthHeaders) == 0 {
-		cfg.RequiredPublicAuthHeaders = constants.RequiredPublicAuthHeaders
+	// Set default RequiredPublicHeaders if not set
+	if len(cfg.RequiredPublicHeaders) == 0 {
+		cfg.RequiredPublicHeaders = constants.RequiredPublicHeaders
 	}
 
-	// Set default RequiredSignatureAuthHeaders if not set
-	if len(cfg.RequiredSignatureAuthHeaders) == 0 {
-		cfg.RequiredSignatureAuthHeaders = constants.RequiredSignatureAuthHeaders
+	// Set default RequiredSignatureHeadersAuth if not set
+	if len(cfg.RequiredSignatureHeadersAuth) == 0 {
+		cfg.RequiredSignatureHeadersAuth = constants.RequiredSignatureHeadersAuth
 	}
 
-	// Set default RequiredSignaturePublicHeaders if not set
-	if len(cfg.RequiredSignaturePublicHeaders) == 0 {
-		cfg.RequiredSignaturePublicHeaders = constants.RequiredSignaturePublicHeaders
-	}
-
-	// Set default RequiredSignatureMessageHeaders if not set
-	if len(cfg.RequiredSignatureMessageHeaders) == 0 {
-		cfg.RequiredSignatureMessageHeaders = constants.RequiredSignatureMessagePublicHeaders
+	// Set default RequiredSignatureHeadersPublic if not set
+	if len(cfg.RequiredSignatureHeadersPublic) == 0 {
+		cfg.RequiredSignatureHeadersPublic = constants.RequiredSignatureHeadersPublic
 	}
 
 	// Set default SecurityHeaders if not set
@@ -93,12 +98,18 @@ func New(cfg Config) *Manager {
 		cfg.AllowedOrigins = []string{"*"}
 	}
 
+	// Set default AllowedContentTypes if not set
+	if len(cfg.AllowedContentTypes) == 0 {
+		cfg.AllowedContentTypes = []string{"application/json", "multipart/form-data"}
+	}
+
 	// Set default AllowedHeaders if not set
 	if len(cfg.AllowedHeaders) == 0 {
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, "Accept", "Authorization", "Content-Type")
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredCommonHeaders...)
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredAuthHeaders...)
-		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicAuthHeaders...)
+		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicHeaders...)
+
 	}
 
 	// Set default HeadersToRemove if not set

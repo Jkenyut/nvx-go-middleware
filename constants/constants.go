@@ -4,40 +4,42 @@ package constants
 const (
 	HeaderTransactionID = "NVX-Transaction-ID"
 	HeaderRequestID     = "NVX-Request-ID"
-	HeaderMerchantKey   = "NVX-Merchant-Key"
+	HeaderAPIKey        = "NVX-API-Key"
 	HeaderUserID        = "NVX-User-ID"
 	HeaderIP            = "NVX-IP"
 	HeaderUserType      = "NVX-User-Type"
 	HeaderToken         = "NVX-Token"
+	HeaderTimestamp     = "NVX-Timestamp"
 	HeaderSignature     = "NVX-Signature"
-	HeaderUserAgent     = "NVX-User-Agent"
-	HeaderDeviceID      = "NVX-Device-ID"
 	HeaderPlatform      = "NVX-Platform"
+	HeaderDeviceID      = "NVX-Device-ID"
 	HeaderMacAddress    = "NVX-Mac-Address"
-	HeaderDatetime      = "NVX-Datetime"
+	HeaderUserAgent     = "NVX-User-Agent"
 	HeaderMessage       = "NVX-Message"
+	HeaderXHashBody     = "NVX-Hash-Body"
 )
 
 // Error messages
 const (
-	ErrMsgMissingHeaders    = "Missing required headers"
-	ErrMsgInvalidIP         = "Invalid IP address format"
-	ErrMsgInvalidToken      = "Invalid or missing authentication token"
-	ErrMsgInvalidSignature  = "Invalid request signature"
-	ErrMsgInvalidMacAddress = "Invalid MAC address format"
-	ErrMsgInvalidPlatform   = "Invalid platform"
-	ErrMsgMethodNotAllowed  = "Method not allowed"
-	ErrMsgPayloadTooLarge   = "Request payload too large"
-	ErrMsgRequestTimeout    = "Request timeout"
-	ErrMsgInvalidDatetime   = "Invalid datetime format"
+	ErrMsgMissingHeaders         = "Missing required headers"
+	ErrMsgInvalidIP              = "Invalid IP address format"
+	ErrMsgInvalidToken           = "Invalid or missing authentication token"
+	ErrMsgInvalidSignature       = "Invalid request signature"
+	ErrMsgInvalidPlatform        = "Invalid platform"
+	ErrMsgMethodNotAllowed       = "Method not allowed"
+	ErrMsgPayloadTooLarge        = "Request payload too large"
+	ErrMsgRequestTimeout         = "Request timeout"
+	ErrMsgInvalidTimestamp       = "Invalid timestamp format"
+	ErrMsgUnsupportedContentType = "Unsupported content type"
 )
 
 // Required headers for different request types
 var (
 	RequiredCommonHeaders = []string{
 		HeaderRequestID,
-		HeaderMerchantKey,
-		HeaderDatetime,
+		HeaderAPIKey,
+		HeaderPlatform,
+		HeaderTimestamp,
 		HeaderSignature,
 	}
 
@@ -46,39 +48,26 @@ var (
 		HeaderToken,
 	}
 
-	// RequiredPublicAuthHeaders are headers required for public authenticated requests
-	RequiredPublicAuthHeaders = []string{
-		HeaderToken,
-		HeaderUserAgent,
-		HeaderDeviceID,
-		HeaderPlatform,
-		HeaderMacAddress,
-		HeaderMessage,
+	// RequiredPublicHeaders are headers required for public requests
+	RequiredPublicHeaders = []string{
+		HeaderXHashBody,
 	}
 
-	// RequiredSignatureAuthHeaders are headers required for signature authenticated requests
-	RequiredSignatureAuthHeaders = []string{
+	// RequiredSignatureHeadersAuth are headers required for signature validation for auth requests
+	RequiredSignatureHeadersAuth = []string{
 		HeaderToken,
 		HeaderRequestID,
-		HeaderMerchantKey,
-		HeaderDatetime,
-	}
-
-	// RequiredSignatureMessagePublicHeaders are headers required for signature message public authenticated requests
-	RequiredSignatureMessagePublicHeaders = []string{
-		HeaderUserAgent,
-		HeaderDeviceID,
+		HeaderAPIKey,
 		HeaderPlatform,
-		HeaderMacAddress,
+		HeaderTimestamp,
 	}
 
-	// RequiredSignaturePublicHeaders are headers required for signature public authenticated requests
-	RequiredSignaturePublicHeaders = []string{
-		HeaderToken,
+	// RequiredSignatureHeadersPublic are headers required for signature validation for public requests
+	RequiredSignatureHeadersPublic = []string{
 		HeaderRequestID,
-		HeaderMerchantKey,
-		HeaderDatetime,
-		HeaderMessage,
+		HeaderAPIKey,
+		HeaderPlatform,
+		HeaderTimestamp,
 	}
 )
 

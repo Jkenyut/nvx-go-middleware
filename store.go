@@ -25,7 +25,7 @@ func (c *ConsoleStore) Save(entry model.AuditLog) error {
 		Int("latency_ms", entry.LatencyMS).
 		Str("client_ip", entry.ClientIP).
 		Str("transaction_id", entry.TransactionID).
-		Str("merchant_key", entry.MerchantKey).
+		Str("api_key", entry.APIKey).
 		Int64("created_by", entry.CreatedBy).
 		Time("created_at", entry.CreatedAt).
 		Str("request_headers", entry.RequestHeaders).

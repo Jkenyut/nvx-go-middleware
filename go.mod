@@ -3,7 +3,7 @@ module github.com/Jkenyut/nvx-go-middleware
 go 1.25
 
 require (
-	github.com/Jkenyut/nvx-go-helper v1.0.16-0.20260129082528-6c8af5c75878
+	github.com/Jkenyut/nvx-go-helper v1.0.16-0.20260130143930-c72dd8ab4ce7
 	github.com/go-chi/chi/v5 v5.0.11
 	github.com/rs/zerolog v1.32.0
 )

@@ -9,7 +9,7 @@ type AuditLog struct {
 	FullURL         string    `json:"full_url"`
 	StatusCode      int       `json:"status_code"`
 	LatencyMS       int       `json:"latency_ms"`
-	MerchantKey     string    `json:"merchant_key"`
+	APIKey          string    `json:"api_key"`
 	ClientIP        string    `json:"client_ip"`
 	RequestID       string    `json:"request_id"`
 	TransactionID   string    `json:"transaction_id"`

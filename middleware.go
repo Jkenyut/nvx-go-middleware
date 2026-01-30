@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -87,7 +89,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		if existingRw, ok := w.(*responseRecorder); ok {
 			rw = existingRw
 		} else {
-			rw = wrapResponseWriter(w, r)
+			rw = wrapResponseWriter(w, r, m.cfg.ResponseBodyLogLimit)
 		}
 
 		// Generate/propagate Transaction ID
@@ -109,7 +111,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		requestHeadersBytes, _ := json.Marshal(r.Header)
 		var reqBodyBytes []byte
 		if m.cfg.LogRequestBodies {
-			reqBodyBytes, _ = m.readAndRestoreBodyJSON(r)
+			reqBodyBytes, _ = m.readAndRestoreBody(r)
 		}
 
 		next.ServeHTTP(rw, r)
@@ -129,7 +131,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			FullURL:         FullURL(r),
 			StatusCode:      statusCode,
 			LatencyMS:       int(time.Since(start).Milliseconds()),
-			MerchantKey:     r.Header.Get(constants.HeaderMerchantKey),
+			APIKey:          r.Header.Get(constants.HeaderAPIKey),
 			ClientIP:        r.Header.Get(constants.HeaderIP),
 			RequestID:       r.Header.Get(constants.HeaderRequestID),
 			CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
@@ -290,41 +292,6 @@ func (w *headerCleanerResponseWriter) Write(b []byte) (int, error) {
 // and validates the request signature for public endpoints.
 func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Validate Presence of Required Public Headers
-		valid := m.validateHeaders(w, r, m.cfg.RequiredPublicAuthHeaders)
-		if !valid {
-			return
-		}
-
-		// Validate MAC Address Format
-		macStr := r.Header.Get(constants.HeaderMacAddress)
-		if _, err := net.ParseMAC(macStr); err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidMacAddress)); err != nil {
-				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
-			}
-			return
-		}
-
-		// Validate Platform
-		platform := r.Header.Get(constants.HeaderPlatform)
-		validPlatform := false
-		for _, v := range constants.CheckPlatform {
-			if platform == v {
-				validPlatform = true
-				break
-			}
-		}
-
-		if !validPlatform {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidPlatform)); err != nil {
-				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
-			}
-			return
-		}
 
 		// Validate Signature Headers
 		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
@@ -345,6 +312,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
 func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
@@ -396,23 +364,60 @@ func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 	})
 }
 
+// isMultipart checks if the content type is multipart/form-data
+func isMultipart(contentType string) bool {
+	return strings.HasPrefix(strings.ToLower(contentType), "multipart/")
+}
+
 // MaxBodySize returns a middleware that limits the maximum size of the request body.
-// This helps prevent DoS attacks from large request bodies. The limit only applies
-// to requests with Content-Type: application/json.
-func (m *Manager) MaxBodySize(limitBytes int64) func(http.Handler) http.Handler {
+// It also restricts the allowed Content-Types based on the configuration.
+func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
-				if r.ContentLength > limitBytes {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusRequestEntityTooLarge)
-					if err := json.NewEncoder(w).Encode(response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge)); err != nil {
-						m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
-					}
-					return
-				}
-				r.Body = http.MaxBytesReader(w, r.Body, limitBytes)
+			contentType := r.Header.Get("Content-Type")
+
+			// If no content type and no body (Content-Length 0), proceed (e.g. GET requests)
+			if contentType == "" && r.ContentLength == 0 {
+				next.ServeHTTP(w, r)
+				return
 			}
+
+			// Validate Content-Type
+			isAllowed := false
+			for _, allowed := range m.cfg.AllowedContentTypes {
+				if strings.Contains(contentType, allowed) {
+					isAllowed = true
+					break
+				}
+			}
+
+			if !isAllowed {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType)); err != nil {
+					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+				}
+				return
+			}
+
+			if r.ContentLength > m.cfg.RequestBodyLimit {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				if err := json.NewEncoder(w).Encode(response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge)); err != nil {
+					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+				}
+				return
+			}
+
+			// FILE (multipart)
+			if isMultipart(contentType) {
+				r.Body = http.MaxBytesReader(w, r.Body, m.cfg.RequestBodyLimit)
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Non-FILE (application/json, application/x-www-form-urlencoded, etc.)
+			r.Body = http.MaxBytesReader(w, r.Body, m.cfg.RequestBodyNonFileLimit)
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -463,22 +468,37 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 		return false
 	}
 
-	if r.Header.Get(constants.HeaderDatetime) != "" {
-		datetime := format.StringToDateTimeSecUTCOrZero(r.Header.Get(constants.HeaderDatetime))
-		if datetime.IsZero() {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidDatetime))
-			return false
+	timestamp := format.StringToUnixOrZero(r.Header.Get(constants.HeaderTimestamp))
+	if timestamp.IsZero() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidTimestamp))
+		return false
+	}
+
+	// Validate Platform
+	platform := r.Header.Get(constants.HeaderPlatform)
+	validPlatform := false
+	for _, v := range constants.CheckPlatform {
+		if platform == v {
+			validPlatform = true
+			break
 		}
+	}
+
+	if !validPlatform {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidPlatform))
+		return false
 	}
 
 	return true
 }
 
 func (m *Manager) validateSignatureAuthHeaders(r *http.Request) (bool, string) {
-	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureAuthHeaders))
-	for _, nameHeader := range m.cfg.RequiredSignatureAuthHeaders {
+	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersAuth))
+	for _, nameHeader := range m.cfg.RequiredSignatureHeadersAuth {
 		authHeaders = append(authHeaders, r.Header.Get(nameHeader))
 	}
 
@@ -486,22 +506,26 @@ func (m *Manager) validateSignatureAuthHeaders(r *http.Request) (bool, string) {
 }
 
 func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string) {
-	messageHeaders := make([]string, 0, len(m.cfg.RequiredSignatureMessageHeaders))
-	for _, nameHeader := range m.cfg.RequiredSignatureMessageHeaders {
-		messageHeaders = append(messageHeaders, r.Header.Get(nameHeader))
-	}
-	messageSignature := cryptoutil.Signature(m.cfg.PublicKeySignature, messageHeaders...)
-
-	publicHeaders := make([]string, 0, len(m.cfg.RequiredSignaturePublicHeaders)+1)
-	for _, nameHeader := range m.cfg.RequiredSignaturePublicHeaders {
+	publicHeaders := make([]string, 0, len(m.cfg.RequiredCommonHeaders)+3)
+	publicHeaders = append(publicHeaders, strings.ToUpper(r.Method))
+	publicHeaders = append(publicHeaders, FullURL(r))
+	for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublic {
 		publicHeaders = append(publicHeaders, r.Header.Get(nameHeader))
 	}
 
-	return m.validateSignatureHeaders(r, m.cfg.PublicKeySignature, append(publicHeaders, messageSignature))
+	bodyBytes, _ := m.readAndRestoreBody(r)
+	bodyToken, err := resolveBodyToken(r.Header.Get("Content-Type"), bodyBytes)
+	if err != nil {
+		return false, err.Error()
+	}
+
+	publicHeaders = append(publicHeaders, bodyToken)
+
+	return m.validateSignatureHeaders(r, m.cfg.PublicKeySignature, publicHeaders)
 }
 
-func (_ *Manager) validateSignatureHeaders(r *http.Request, keySignature string, headers []string) (bool, string) {
-	signatureServer := cryptoutil.Signature(keySignature, headers...)
+func (_ *Manager) validateSignatureHeaders(r *http.Request, keySignature string, values []string) (bool, string) {
+	signatureServer := cryptoutil.Signature(keySignature, values...)
 	clientSignature := r.Header.Get(constants.HeaderSignature)
 
 	if clientSignature == "" {
@@ -539,7 +563,7 @@ func (_ *Manager) injectContext(r *http.Request) *http.Request {
 
 	ctx = activity.WithTransactionID(ctx, h.Get(constants.HeaderTransactionID))
 	ctx = activity.WithRequestID(ctx, h.Get(constants.HeaderRequestID))
-	ctx = activity.WithMerchantKey(ctx, h.Get(constants.HeaderMerchantKey))
+	ctx = activity.WithAPIKey(ctx, h.Get(constants.HeaderAPIKey))
 	ctx = activity.WithUserID(ctx, h.Get(constants.HeaderUserID))
 	ctx = activity.WithUserIP(ctx, h.Get(constants.HeaderIP))
 	ctx = activity.WithUserType(ctx, h.Get(constants.HeaderUserType))
@@ -547,17 +571,17 @@ func (_ *Manager) injectContext(r *http.Request) *http.Request {
 	return r.WithContext(ctx)
 }
 
-func (m *Manager) readAndRestoreBodyJSON(r *http.Request) ([]byte, error) {
+func (m *Manager) readAndRestoreBody(r *http.Request) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
 	}
 
-	ct := r.Header.Get("Content-Type")
-	if !strings.Contains(ct, "application/json") {
+	// skip read body if multipart
+	if isMultipart(r.Header.Get("Content-Type")) {
 		return nil, nil
 	}
 
-	limitReader := io.LimitReader(r.Body, m.cfg.RequestBodyLimit)
+	limitReader := io.LimitReader(r.Body, m.cfg.RequestBodyNonFileLimit)
 	bodyBytes, err := io.ReadAll(limitReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read request body: %w", err)
@@ -581,4 +605,22 @@ func (m *Manager) MethodOnly(method string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func resolveBodyToken(contentType string, body []byte) (string, error) {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+
+	// multipart / file upload → UNSIGNED
+	if strings.HasPrefix(ct, "multipart/") {
+		return "UNSIGNED", nil
+	}
+
+	// no body → EMPTY
+	if len(body) == 0 {
+		return "EMPTY", nil
+	}
+
+	// all non-multipart → hash
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:]), nil
 }
