@@ -111,7 +111,6 @@ func New(cfg Config) *Manager {
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicHeaders...)
 	}
 
-
 	// Set default HeadersToRemove if not set
 	if len(cfg.HeadersToRemove) == 0 {
 		cfg.HeadersToRemove = []string{}

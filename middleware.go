@@ -100,10 +100,11 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		}
 
 		start := time.Now()
-		requestHeadersBytes, _ := json.Marshal(r.Header)
-		var reqBodyBytes []byte
+		requestHeadersBytes := normalizeHeadersJSON(r.Header)
+		var reqBodyBytes any
 		if m.cfg.LogRequestBodies {
-			reqBodyBytes, _ = ReadAndRestoreBody(r)
+			raw, _ := ReadAndRestoreBody(r)
+			reqBodyBytes = normalizeBodyRaw(raw)
 		}
 
 		next.ServeHTTP(rw, r)
@@ -111,11 +112,12 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		// Get status from wrapper
 		statusCode := rw.Status()
 
-		responseHeadersBytes, _ := json.Marshal(rw.Header())
+		responseHeadersBytes := normalizeHeadersJSON(rw.Header())
 
-		var responseBody string
+		var responseBody any
+
 		if m.cfg.LogResponseBodies {
-			responseBody = rw.body.String()
+			responseBody = normalizeBodyRaw(rw.body.Bytes())
 		}
 
 		entry := model.AuditLog{
@@ -129,9 +131,9 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
 			CreatedAt:       format.NowUTC(),
 			TransactionID:   transactionID,
-			RequestHeaders:  string(requestHeadersBytes),
-			ResponseHeaders: string(responseHeadersBytes),
-			RequestBody:     string(reqBodyBytes),
+			RequestHeaders:  requestHeadersBytes,
+			ResponseHeaders: responseHeadersBytes,
+			RequestBody:     reqBodyBytes,
 			ResponseBody:    responseBody,
 		}
 
@@ -153,6 +155,39 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			}
 		}()
 	})
+}
+
+func normalizeBodyRaw(raw []byte) any {
+	// check if empty
+	if len(raw) == 0 {
+		return nil
+	}
+
+	// check if valid JSON
+	if json.Valid(raw) {
+		var v any
+		if err := json.Unmarshal(raw, &v); err == nil {
+			return v
+		}
+	}
+
+	// if not JSON, marshal to JSON string (escaped)
+	return string(raw)
+}
+
+func normalizeHeadersJSON(h http.Header) json.RawMessage {
+	out := make(map[string]any, len(h))
+
+	for k, v := range h {
+		if len(v) == 1 {
+			out[k] = v[0]
+		} else {
+			out[k] = v
+		}
+	}
+
+	b, _ := json.Marshal(out)
+	return json.RawMessage(b)
 }
 
 // EnsureCommonHeaders validates that common required headers are present in all requests.
@@ -514,7 +549,6 @@ func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string)
 
 	publicHeaders = append(publicHeaders, string(bodyToken))
 
-	fmt.Println(publicHeaders)
 	return m.validateSignatureHeaders(r, m.cfg.PublicKeySignature, publicHeaders)
 }
 
@@ -682,7 +716,7 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 			bodyToken := ResolveBodyToken(req.ContentType, bodyBytes)
 
 			publicHeaders = append(publicHeaders, string(bodyToken))
-			fmt.Println(publicHeaders)
+
 			json.NewEncoder(w).Encode(response.Success(r.Context(), model.PresignResponse{
 				Signature: cryptoutil.Signature(m.cfg.PublicKeySignature, publicHeaders...),
 			}))

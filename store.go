@@ -28,10 +28,10 @@ func (c *ConsoleStore) Save(entry model.AuditLog) error {
 		Str("api_key", entry.APIKey).
 		Int64("created_by", entry.CreatedBy).
 		Time("created_at", entry.CreatedAt).
-		Str("request_headers", entry.RequestHeaders).
-		Str("response_headers", entry.ResponseHeaders).
-		Str("request_body", entry.RequestBody).
-		Str("response_body", entry.ResponseBody).
+		Interface("request_headers", entry.RequestHeaders).
+		Interface("response_headers", entry.ResponseHeaders).
+		Interface("request_body", entry.RequestBody).
+		Interface("response_body", entry.ResponseBody).
 		Msg("HTTP Request")
 
 	return nil
