@@ -127,3 +127,42 @@ func Heartbeat(path string) http.HandlerFunc {
 		}
 	}
 }
+
+// PreSignChain creates a middleware chain with both custom and Chi middleware
+func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		handler := next
+		// Apply custom middleware (inner to outer)
+		handler = m.MaxBodySize()(handler)
+		handler = m.RemoveHeaders(handler)
+		handler = m.SecureHeaders(handler)
+		handler = m.EnsurePreSignHeaders(handler)
+		handler = m.Recoverer(handler)
+		handler = m.Logger(handler)
+
+		// Apply Chi middleware
+		if cfg.UseChiTimeout {
+			handler = chimiddleware.Timeout(m.cfg.RequestTimeout)(handler)
+		}
+
+		if cfg.UseChiCompress {
+			handler = chimiddleware.Compress(cfg.CompressionLevel)(handler)
+		}
+
+		if cfg.UseChiStripSlashes {
+			handler = chimiddleware.StripSlashes(handler)
+		}
+
+		if cfg.UseChiRealIP {
+			handler = chimiddleware.RealIP(handler)
+		}
+
+		// Always apply TrustProxy to populate NVX-IP safely
+		handler = m.TrustProxy(handler)
+
+		// Add CORS
+		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
+
+		return handler
+	}
+}

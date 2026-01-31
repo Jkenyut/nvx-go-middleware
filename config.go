@@ -23,7 +23,7 @@ type Config struct {
 	// Logging
 	LogRequestBodies     bool
 	LogResponseBodies    bool
-	ResponseBodyLogLimit int
+	ResponseBodyLogLimit int64
 
 	// Security
 	PublicKeySignature  string

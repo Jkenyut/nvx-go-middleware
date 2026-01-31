@@ -18,18 +18,10 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/format"
 	"github.com/Jkenyut/nvx-go-helper/response"
+	"github.com/Jkenyut/nvx-go-helper/validator"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
 	"github.com/go-chi/chi/v5/middleware"
-)
-
-const (
-	// DefaultCompressionLevel is the default gzip compression level
-	DefaultCompressionLevel = 5
-	// DefaultThrottleLimit is the default concurrent request limit
-	DefaultThrottleLimit = 100
-	// MaxHeaderSize is the maximum size for header values
-	MaxHeaderSize = 8192
 )
 
 // Recoverer is a middleware that recovers from panics, logs the panic (and a backtrace),
@@ -89,7 +81,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		if existingRw, ok := w.(*responseRecorder); ok {
 			rw = existingRw
 		} else {
-			rw = wrapResponseWriter(w, r, m.cfg.ResponseBodyLogLimit)
+			rw = wrapResponseWriter(w, r, constants.ResponseBodyLogLimit)
 		}
 
 		// Generate/propagate Transaction ID
@@ -111,7 +103,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		requestHeadersBytes, _ := json.Marshal(r.Header)
 		var reqBodyBytes []byte
 		if m.cfg.LogRequestBodies {
-			reqBodyBytes, _ = m.readAndRestoreBody(r)
+			reqBodyBytes, _ = ReadAndRestoreBody(r)
 		}
 
 		next.ServeHTTP(rw, r)
@@ -164,7 +156,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 }
 
 // EnsureCommonHeaders validates that common required headers are present in all requests.
-// These headers are: NVX-Request-ID, NVX-Merchant-Key, and NVX-IP.
+// These headers are: NVX-Request-ID, NVX-API-Key, and NVX-IP.
 // It also validates that NVX-IP contains a valid IP address format.
 func (m *Manager) EnsureCommonHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -292,12 +284,16 @@ func (w *headerCleanerResponseWriter) Write(b []byte) (int, error) {
 // and validates the request signature for public endpoints.
 func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Validate Headers Presence
+		valid := m.validateHeaders(w, r, m.cfg.RequiredPublicHeaders)
+		if !valid {
+			return
+		}
 
 		// Validate Signature Headers
 		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-
 			errMsg := constants.ErrMsgInvalidSignature
 			if !m.envProd() {
 				errMsg = fmt.Sprintf("%s - Expected: %s", constants.ErrMsgInvalidSignature, signatureServer)
@@ -506,21 +502,19 @@ func (m *Manager) validateSignatureAuthHeaders(r *http.Request) (bool, string) {
 }
 
 func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string) {
-	publicHeaders := make([]string, 0, len(m.cfg.RequiredCommonHeaders)+3)
+	publicHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublic)+3)
 	publicHeaders = append(publicHeaders, strings.ToUpper(r.Method))
-	publicHeaders = append(publicHeaders, FullURL(r))
+	publicHeaders = append(publicHeaders, r.RequestURI)
 	for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublic {
 		publicHeaders = append(publicHeaders, r.Header.Get(nameHeader))
 	}
 
-	bodyBytes, _ := m.readAndRestoreBody(r)
-	bodyToken, err := resolveBodyToken(r.Header.Get("Content-Type"), bodyBytes)
-	if err != nil {
-		return false, err.Error()
-	}
+	bodyBytes, _ := ReadAndRestoreBody(r)
+	bodyToken := ResolveBodyToken(r.Header.Get("Content-Type"), bodyBytes)
 
-	publicHeaders = append(publicHeaders, bodyToken)
+	publicHeaders = append(publicHeaders, string(bodyToken))
 
+	fmt.Println(publicHeaders)
 	return m.validateSignatureHeaders(r, m.cfg.PublicKeySignature, publicHeaders)
 }
 
@@ -571,7 +565,7 @@ func (_ *Manager) injectContext(r *http.Request) *http.Request {
 	return r.WithContext(ctx)
 }
 
-func (m *Manager) readAndRestoreBody(r *http.Request) ([]byte, error) {
+func ReadAndRestoreBody(r *http.Request) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
 	}
@@ -581,7 +575,7 @@ func (m *Manager) readAndRestoreBody(r *http.Request) ([]byte, error) {
 		return nil, nil
 	}
 
-	limitReader := io.LimitReader(r.Body, m.cfg.RequestBodyNonFileLimit)
+	limitReader := io.LimitReader(r.Body, constants.RequestBodyNonFileLimit)
 	bodyBytes, err := io.ReadAll(limitReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read request body: %w", err)
@@ -607,20 +601,90 @@ func (m *Manager) MethodOnly(method string, next http.Handler) http.Handler {
 	})
 }
 
-func resolveBodyToken(contentType string, body []byte) (string, error) {
+func ResolveBodyToken(contentType string, body []byte) string {
 	ct := strings.ToLower(strings.TrimSpace(contentType))
 
 	// multipart / file upload → UNSIGNED
 	if strings.HasPrefix(ct, "multipart/") {
-		return "UNSIGNED", nil
+		return "UNSIGNED"
 	}
 
 	// no body → EMPTY
 	if len(body) == 0 {
-		return "EMPTY", nil
+		return "EMPTY"
 	}
 
 	// all non-multipart → hash
 	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:]), nil
+	return hex.EncodeToString(sum[:])
+}
+
+// EnsurePreSignHeaders validates that common required headers are present in all requests.
+// These headers are: NVX-Request-ID, NVX-API-Key, NVX-Platform, and NVX-Timestamp.
+// It also validates that NVX-IP contains a valid IP address format.
+func (m *Manager) EnsurePreSignHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Validate Headers Presence
+		valid := m.validateHeaders(w, r, m.cfg.RequiredSignatureHeadersPublic)
+		if !valid {
+			return
+		}
+
+		// Validate IP Format
+		ipStr := r.Header.Get(constants.HeaderIP)
+		if net.ParseIP(ipStr) == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidIP)); err != nil {
+				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+			}
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
+	return m.MethodOnly("POST", m.PreSignChain(cfg)(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			var req model.PresignRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidRequest)); err != nil {
+					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+				}
+				return
+			}
+			err := validator.Struct(req)
+			if err != nil {
+				errs := validator.GetErrors(err)
+				var result = make([]string, len(errs))
+				for i, e := range errs {
+					result[i] = fmt.Sprintf("%s: %s", e.Field(), e.Tag())
+				}
+				w.WriteHeader(http.StatusBadRequest)
+				if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), strings.Join(result, ", "))); err != nil {
+					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+				}
+				return
+			}
+
+			publicHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublic)+3)
+			publicHeaders = append(publicHeaders, strings.ToUpper(req.Method))
+			publicHeaders = append(publicHeaders, req.Uri)
+			for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublic {
+				publicHeaders = append(publicHeaders, r.Header.Get(nameHeader))
+			}
+
+			bodyBytes, _ := ReadAndRestoreBody(r)
+			bodyToken := ResolveBodyToken(req.ContentType, bodyBytes)
+
+			publicHeaders = append(publicHeaders, string(bodyToken))
+			fmt.Println(publicHeaders)
+			json.NewEncoder(w).Encode(response.Success(r.Context(), model.PresignResponse{
+				Signature: cryptoutil.Signature(m.cfg.PublicKeySignature, publicHeaders...),
+			}))
+		})))
 }

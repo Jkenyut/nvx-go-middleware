@@ -31,6 +31,20 @@ const (
 	ErrMsgRequestTimeout         = "Request timeout"
 	ErrMsgInvalidTimestamp       = "Invalid timestamp format"
 	ErrMsgUnsupportedContentType = "Unsupported content type"
+	ErrMsgInvalidRequest         = "Invalid request"
+)
+
+const (
+	RequestBodyLimit        = 2 * 1024 * 1024 * 1024 // 2 GB
+	RequestBodyNonFileLimit = 3 * 1024 * 1024        // 3 MB
+	ResponseBodyLogLimit    = 5 * 1024 * 1024        // 5 MB
+
+	// DefaultCompressionLevel is the default gzip compression level
+	DefaultCompressionLevel = 5
+	// DefaultThrottleLimit is the default concurrent request limit
+	DefaultThrottleLimit = 100
+	// MaxHeaderSize is the maximum size for header values
+	MaxHeaderSize = 8192
 )
 
 // Required headers for different request types

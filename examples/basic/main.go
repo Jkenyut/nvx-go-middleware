@@ -20,6 +20,9 @@ func main() {
 		RequestBodyLimit:    3 * 1024 * 1024, // 3MB
 		Env:                 "development",
 		HeadersToRemove:     []string{},
+		LogRequestBodies:    true,
+		LogResponseBodies:   true,
+		AllowedContentTypes: []string{"application/json", "text/plain"},
 	})
 
 	// Create chain config
@@ -29,13 +32,16 @@ func main() {
 	mux := http.NewServeMux()
 
 	// ========================================
-	// PUBLIC ROUTES (device validation only)
+	// GLOBAL ROUTES (device validation only)
 	// ========================================
 
 	mux.Handle("/api/register", mgr.GlobalChain(chainCfg)(
 		mgr.MethodOnly("POST", http.HandlerFunc(registerHandler)),
 	))
 
+	// ========================================
+	// PUBLIC ROUTES (device validation only)
+	// ========================================
 	mux.Handle("/api/login", mgr.PublicChain(chainCfg)(
 		mgr.MethodOnly("POST", http.HandlerFunc(loginHandler)),
 	))
@@ -61,6 +67,11 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
+
+	// ========================================
+	// PRESIGN ROUTES (device validation only)
+	// ========================================
+	mux.Handle("/api/presign", mgr.PreSignHandler(chainCfg))
 
 	mux.HandleFunc("/ping", mw.Heartbeat("/ping"))
 

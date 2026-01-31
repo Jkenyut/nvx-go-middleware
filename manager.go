@@ -36,16 +36,16 @@ func New(cfg Config) *Manager {
 	}
 	// Set default RequestBodyLimit if not set (2GB)
 	if cfg.RequestBodyLimit == 0 {
-		cfg.RequestBodyLimit = 2 * 1024 * 1024 * 1024 // 2 GB
+		cfg.RequestBodyLimit = constants.RequestBodyLimit
 	}
 	// Set default RequestBodyNonFileLimit if not set (3 MB)
 	if cfg.RequestBodyNonFileLimit == 0 {
-		cfg.RequestBodyNonFileLimit = 3 * 1024 * 1024 // 3 MB
+		cfg.RequestBodyNonFileLimit = constants.RequestBodyNonFileLimit
 	}
 
 	// Set default ResponseBodyLogLimit (5 MB) if not set
 	if cfg.ResponseBodyLogLimit == 0 {
-		cfg.ResponseBodyLogLimit = 5 * 1024 * 1024 // 5 MB
+		cfg.ResponseBodyLogLimit = constants.ResponseBodyLogLimit
 	}
 
 	// Set default env if not set
@@ -109,8 +109,8 @@ func New(cfg Config) *Manager {
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredCommonHeaders...)
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredAuthHeaders...)
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicHeaders...)
-
 	}
+
 
 	// Set default HeadersToRemove if not set
 	if len(cfg.HeadersToRemove) == 0 {
