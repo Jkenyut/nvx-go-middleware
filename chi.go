@@ -61,37 +61,51 @@ func (m *Manager) ChiThrottleBacklog(limit int, backlog int, backlogTimeout time
 	return chimiddleware.ThrottleBacklog(limit, backlog, backlogTimeout)
 }
 
-// ChiRateLimit wraps httprate.Limit middleware
-func (m *Manager) ChiRateLimit(requestLimit int, windowLength time.Duration) func(http.Handler) http.Handler {
-	return httprate.Limit(
-		requestLimit,
-		windowLength,
-		httprate.WithKeyFuncs(httprate.KeyByIP, httprate.KeyByEndpoint),
-		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			json.NewEncoder(w).Encode(response.TooManyRequests(r.Context(), "Too Many Requests"))
-		}),
-	)
-}
+func RateLimit(
+	requestLimit int,
+	window time.Duration,
+	counter httprate.LimitCounter,
+	keyFuncs ...httprate.KeyFunc,
+) func(http.Handler) http.Handler {
 
-// ChiRateLimitByKey wraps httprate.Limit middleware with a custom key function
-func (m *Manager) ChiRateLimitByKey(requestLimit int, windowLength time.Duration, keyFuncs ...httprate.KeyFunc) func(http.Handler) http.Handler {
-	return httprate.Limit(
-		requestLimit,
-		windowLength,
+	opts := []httprate.Option{
 		httprate.WithKeyFuncs(keyFuncs...),
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
 			json.NewEncoder(w).Encode(response.TooManyRequests(r.Context(), "Too Many Requests"))
 		}),
-	)
+	}
+
+	if counter != nil {
+		opts = append(opts, httprate.WithLimitCounter(counter))
+	}
+
+	limiter := httprate.Limit(requestLimit, window, opts...)
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip valid OPTIONS requests from rate limiting
+			// This prevents preflight requests from using up quota or failing on strict limits
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+			limiter(next).ServeHTTP(w, r)
+		})
+	}
 }
 
 // KeyByHeader returns a key function that returns the value of the specified header
 func KeyByHeader(header string) httprate.KeyFunc {
 	return func(r *http.Request) (string, error) {
 		return r.Header.Get(header), nil
+	}
+}
+
+// KeyByName returns a key function that returns the value of the specified header
+func KeyByName(name string) httprate.KeyFunc {
+	return func(r *http.Request) (string, error) {
+		return name, nil
 	}
 }

@@ -50,19 +50,19 @@ func main() {
 	// AUTHENTICATED ROUTES
 	// ========================================
 
-	mux.Handle("/api/v1/profile", mgr.AuthChain(chainCfg)(
+	mux.Handle("/api/v1/profile", mgr.PublicAuthChain(chainCfg)(
 		mgr.MethodOnly("GET", http.HandlerFunc(profileHandler)),
 	))
 
-	mux.Handle("/api/v1/profile/update", mgr.AuthChain(chainCfg)(
+	mux.Handle("/api/v1/profile/update", mgr.PublicAuthChain(chainCfg)(
 		mgr.MethodOnly("PUT", http.HandlerFunc(updateProfileHandler)),
 	))
 
-	mux.Handle("/api/v1/posts", mgr.AuthChain(chainCfg)(
+	mux.Handle("/api/v1/posts", mgr.PublicAuthChain(chainCfg)(
 		mgr.MethodOnly("POST", http.HandlerFunc(createPostHandler)),
 	))
 
-	mux.Handle("/api/v1/posts/list", mgr.AuthChain(chainCfg)(
+	mux.Handle("/api/v1/posts/list", mgr.PublicAuthChain(chainCfg)(
 		mgr.MethodOnly("GET", http.HandlerFunc(listPostsHandler)),
 	))
 

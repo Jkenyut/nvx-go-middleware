@@ -6,12 +6,14 @@ import (
 	"time"
 
 	"github.com/Jkenyut/nvx-go-middleware/constants"
+	"github.com/go-chi/httprate"
 	"github.com/rs/zerolog"
 )
 
 // Manager holds the middleware configuration and provides middleware methods.
 type Manager struct {
-	cfg Config
+	cfg     Config
+	counter httprate.LimitCounter
 }
 
 // New creates a new Middleware Manager with the given configuration.
@@ -48,6 +50,10 @@ func New(cfg Config) *Manager {
 		cfg.ResponseBodyLogLimit = constants.ResponseBodyLogLimit
 	}
 
+	if cfg.ServiceName == "" {
+		cfg.ServiceName = "unknown-service"
+	}
+
 	// Set default env if not set
 	if cfg.Env == "" {
 		cfg.Env = "development"
@@ -63,9 +69,9 @@ func New(cfg Config) *Manager {
 		cfg.RequiredCommonHeaders = constants.RequiredCommonHeaders
 	}
 
-	// Set default RequiredAuthHeaders if not set
-	if len(cfg.RequiredAuthHeaders) == 0 {
-		cfg.RequiredAuthHeaders = constants.RequiredAuthHeaders
+	// Set default RequiredPublicAuthHeaders if not set
+	if len(cfg.RequiredPublicAuthHeaders) == 0 {
+		cfg.RequiredPublicAuthHeaders = constants.RequiredPublicAuthHeaders
 	}
 
 	// Set default RequiredPublicHeaders if not set
@@ -73,9 +79,9 @@ func New(cfg Config) *Manager {
 		cfg.RequiredPublicHeaders = constants.RequiredPublicHeaders
 	}
 
-	// Set default RequiredSignatureHeadersAuth if not set
-	if len(cfg.RequiredSignatureHeadersAuth) == 0 {
-		cfg.RequiredSignatureHeadersAuth = constants.RequiredSignatureHeadersAuth
+	// Set default RequiredSignatureHeadersPublicAuth if not set
+	if len(cfg.RequiredSignatureHeadersPublicAuth) == 0 {
+		cfg.RequiredSignatureHeadersPublicAuth = constants.RequiredSignatureHeadersPublicAuth
 	}
 
 	// Set default RequiredSignatureHeadersPublic if not set
@@ -107,7 +113,7 @@ func New(cfg Config) *Manager {
 	if len(cfg.AllowedHeaders) == 0 {
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, "Accept", "Authorization", "Content-Type")
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredCommonHeaders...)
-		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredAuthHeaders...)
+		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicAuthHeaders...)
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicHeaders...)
 	}
 

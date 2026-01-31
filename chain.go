@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Jkenyut/nvx-go-middleware/constants"
+	"github.com/go-chi/httprate"
 )
 
 // ChainConfig configures which middleware to use
@@ -53,7 +54,7 @@ func DefaultChainConfig() ChainConfig {
 		UseChiRateLimit:       true,            // Enabled by default
 		UseChiRateLimitAuth:   true,            // Enabled by default
 		UseChiRateLimitPublic: true,            // Enabled by default
-		RateLimitRequests:     100,             // User-requested: specific Chi rate limit requests
+		RateLimitRequests:     120,             // User-requested: specific Chi rate limit requests
 		RateLimitWindow:       1 * time.Minute, // User-requested: specific Chi rate limit window
 	}
 }
@@ -63,52 +64,55 @@ func (m *Manager) GlobalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := next
 
-		// Apply custom middleware (inner to outer)
-		handler = m.MaxBodySize()(handler)
-		handler = m.RemoveHeaders(handler)
-		handler = m.SecureHeaders(handler)
+		// Apply Base Middleware
+		handler = m.applyBaseMiddleware(handler, cfg)
+
+		// Ensure Common Headers (specific to GlobalChain)
 		handler = m.EnsureCommonHeaders(handler)
-		handler = m.Recoverer(handler)
-		handler = m.Logger(handler)
-
-		// Apply Chi middleware
-		if cfg.UseChiTimeout {
-			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
-		}
-
-		// Apply Chi compression
-		if cfg.UseChiCompress {
-			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
-		}
-
-		// Apply Chi strip slashes
-		if cfg.UseChiStripSlashes {
-			handler = m.ChiStripSlashes(handler)
-		}
-
-		// Apply Chi real IP
-		if cfg.UseChiRealIP {
-			handler = m.ChiRealIP(handler)
-		}
-
-		// Always apply TrustProxy to populate NVX-IP safely
-		handler = m.TrustProxy(handler)
-
-		// Add CORS
-		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
-
-		// Apply Chi throttle
-		if cfg.UseChiThrottle {
-			handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
-		}
-
-		// Apply Chi rate limit
-		if cfg.UseChiRateLimit {
-			handler = m.ChiRateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow)(handler)
-		}
 
 		return handler
 	}
+}
+
+// applyBaseMiddleware applies the core middleware stack common to most chains
+func (m *Manager) applyBaseMiddleware(handler http.Handler, cfg ChainConfig) http.Handler {
+	// Apply custom middleware (inner to outer)
+	handler = m.MaxBodySize()(handler)
+	handler = m.RemoveHeaders(handler)
+	handler = m.SecureHeaders(handler)
+	// Note: header validation is applied by the caller (GlobalChain vs PreSignChain)
+	handler = m.Recoverer(handler)
+	handler = m.Logger(handler)
+
+	// Apply Chi middleware
+	if cfg.UseChiTimeout {
+		handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
+	}
+
+	// Apply Chi compression
+	if cfg.UseChiCompress {
+		handler = m.ChiCompress(cfg.CompressionLevel)(handler)
+	}
+
+	// Apply Chi strip slashes
+	if cfg.UseChiStripSlashes {
+		handler = m.ChiStripSlashes(handler)
+	}
+
+	// Apply Chi real IP
+	if cfg.UseChiRealIP {
+		handler = m.ChiRealIP(handler)
+	}
+
+	// Always apply TrustProxy to populate NVX-IP safely
+	handler = m.TrustProxy(handler)
+
+	// Apply Chi throttle
+	if cfg.UseChiThrottle {
+		handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
+	}
+
+	return handler
 }
 
 // PublicChain creates a chain for public routes (with device validation)
@@ -120,28 +124,52 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 
 		handler = m.GlobalChain(cfg)(handler)
 
-		// Apply Auth Rate Limit (runs after authentication)
+		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitPublic {
-			handler = m.ChiRateLimitByKey(cfg.RateLimitRequests, cfg.RateLimitWindow, KeyByHeader(constants.HeaderAPIKey))(handler)
+			// Apply Chi rate limit
+			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, KeyByName(m.cfg.ServiceName), httprate.KeyByIP, httprate.KeyByEndpoint)(handler)
 		}
+
+		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
+		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
 
 		return handler
 	}
 }
 
-// AuthChain creates a chain for authenticated routes
-func (m *Manager) AuthChain(cfg ChainConfig) func(http.Handler) http.Handler {
+// PublicAuthChain creates a chain for authenticated public routes
+func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := next
 
-		handler = m.EnsureAuth(handler)
+		handler = m.EnsurePublicAuth(handler)
 
 		handler = m.GlobalChain(cfg)(handler)
 
-		// Apply Auth Rate Limit (runs after authentication)
+		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitAuth {
-			handler = m.ChiRateLimitByKey(cfg.RateLimitRequests, cfg.RateLimitWindow, KeyByHeader(constants.HeaderUserID), KeyByHeader(constants.HeaderUserType))(handler)
+			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, KeyByName(m.cfg.ServiceName), KeyByHeader(constants.HeaderUserID),
+				KeyByHeader(constants.HeaderUserType), httprate.KeyByEndpoint)(handler)
 		}
+
+		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
+		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
+
+		return handler
+	}
+}
+
+// InternalChain creates a chain for internal routes
+func (m *Manager) InternalChain(cfg ChainConfig) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		handler := next
+
+		handler = m.EnsureInternal(handler)
+
+		handler = m.GlobalChain(cfg)(handler)
+
+		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
+		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
 
 		return handler
 	}
@@ -150,7 +178,7 @@ func (m *Manager) AuthChain(cfg ChainConfig) func(http.Handler) http.Handler {
 // AdminChain creates a chain for admin routes
 func (m *Manager) AdminChain(cfg ChainConfig, adminCheck func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return m.AuthChain(cfg)(
+		return m.InternalChain(cfg)(
 			adminCheck(next),
 		)
 	}
@@ -179,44 +207,21 @@ func Heartbeat(path string) http.HandlerFunc {
 func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := next
-		// Apply custom middleware (inner to outer)
-		handler = m.MaxBodySize()(handler)
-		handler = m.RemoveHeaders(handler)
-		handler = m.SecureHeaders(handler)
+
+		// Apply Base Middleware
+		handler = m.applyBaseMiddleware(handler, cfg)
+
+		// Ensure PreSign Headers (specific to PreSignChain)
 		handler = m.EnsurePreSignHeaders(handler)
-		handler = m.Recoverer(handler)
-		handler = m.Logger(handler)
 
-		// Apply Chi middleware
-		if cfg.UseChiTimeout {
-			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
+		// Apply Chi rate limit
+		// Note: PreSignChain uses public rate limit settings in the original code, preserved here.
+		if cfg.UseChiRateLimitPublic {
+			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, KeyByName(m.cfg.ServiceName), httprate.KeyByIP, httprate.KeyByEndpoint)(handler)
 		}
 
-		// Apply Chi compression
-		if cfg.UseChiCompress {
-			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
-		}
-
-		// Apply Chi strip slashes
-		if cfg.UseChiStripSlashes {
-			handler = m.ChiStripSlashes(handler)
-		}
-
-		// Apply Chi real IP
-		if cfg.UseChiRealIP {
-			handler = m.ChiRealIP(handler)
-		}
-
-		// Always apply TrustProxy to populate NVX-IP safely
-		handler = m.TrustProxy(handler)
-
-		// Add CORS
+		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
 		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
-
-		// Apply Chi throttle
-		if cfg.UseChiThrottle {
-			handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
-		}
 
 		return handler
 	}

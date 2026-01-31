@@ -229,48 +229,6 @@ func (m *Manager) EnsureCommonHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// EnsureAuth validates headers required for authenticated requests.
-// It checks for the presence of NVX-Token and NVX-User-ID headers,
-// and validates the request signature to ensure authenticity.
-func (m *Manager) EnsureAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Validate Headers Presence
-		valid := m.validateHeaders(w, r, m.cfg.RequiredAuthHeaders)
-		if !valid {
-			return
-		}
-
-		// Validate Token
-		tokenString := r.Header.Get(constants.HeaderToken)
-		if tokenString == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken)); err != nil {
-				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
-			}
-			return
-		}
-
-		// Validate Signature Headers
-		if validSignature, signatureServer := m.validateSignatureAuthHeaders(r); !validSignature {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-
-			errMsg := constants.ErrMsgInvalidSignature
-			if !m.envProd() {
-				errMsg = fmt.Sprintf("%s - Expected: %s", constants.ErrMsgInvalidSignature, signatureServer)
-			}
-
-			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
-				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
-			}
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
 // SecureHeaders adds security-related headers to the response.
 // These headers help protect against common web vulnerabilities like XSS,
 // clickjacking, and MIME type sniffing.
@@ -330,10 +288,91 @@ func (w *headerCleanerResponseWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
-// EnsurePublicAuth validates headers required for public authenticated requests.
+// EnsureInternal validates headers required for internal requests.
+// It checks for the presence of NVX-Token and NVX-User-ID headers,
+// and validates the request signature to ensure authenticity.
+func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Validate Headers Presence
+		valid := m.validateHeaders(w, r, m.cfg.RequiredPublicAuthHeaders)
+		if !valid {
+			return
+		}
+
+		// Validate Token
+		tokenString := r.Header.Get(constants.HeaderToken)
+		if tokenString == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken)); err != nil {
+				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+			}
+			return
+		}
+
+		// Validate Signature Headers
+		if validSignature, signatureServer := m.validateSignatureInternalHeaders(r); !validSignature {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+
+			errMsg := constants.ErrMsgInvalidSignature
+			if !m.envProd() {
+				errMsg = fmt.Sprintf("%s - Expected: %s", constants.ErrMsgInvalidSignature, signatureServer)
+			}
+
+			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
+				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+			}
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// EnsurePublicAuth validates headers required for authenticated public requests.
 // This includes device information (User-Agent, Device-ID, Platform, Mac-Address)
 // and validates the request signature for public endpoints.
 func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Validate Headers Presence
+		valid := m.validateHeaders(w, r, m.cfg.RequiredPublicAuthHeaders)
+		if !valid {
+			return
+		}
+
+		// Validate Timestamp
+		timestamp := format.StringToUnixOrZero(r.Header.Get(constants.HeaderTimestamp))
+		if timestamp.IsZero() || timestamp.Before(format.NowUTC().Add(time.Duration(m.cfg.SignatureTimestampExpired)*time.Millisecond)) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.SignatureInvalid))
+			return
+		}
+
+		// Validate Signature Headers
+		if validSignature, signatureServer := m.validateSignaturePublicAuthHeaders(r); !validSignature {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			errMsg := constants.ErrMsgInvalidSignature
+			if !m.envProd() {
+				errMsg = fmt.Sprintf("%s - Expected: %s", constants.ErrMsgInvalidSignature, signatureServer)
+			}
+
+			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
+				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+			}
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// EnsurePublic validates headers required for public requests.
+// This includes device information (User-Agent, Device-ID, Platform, Mac-Address)
+// and validates the request signature for public endpoints.
+func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Validate Headers Presence
 		valid := m.validateHeaders(w, r, m.cfg.RequiredPublicHeaders)
@@ -367,6 +406,118 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// validateHeaders checks if all required headers are present in the request.
+// If any headers are missing, it returns false and writes a 400 Bad Request response.
+func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, headers []string) bool {
+	missingHeaders := []string{}
+	for _, header := range headers {
+		if r.Header.Get(header) == "" {
+			missingHeaders = append(missingHeaders, header)
+		}
+	}
+
+	// Validate Missing Headers
+	if len(missingHeaders) > 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+
+		message := constants.ErrMsgMissingHeaders
+		if !m.envProd() {
+			message = fmt.Sprintf("%s - Missing Headers: %s", constants.ErrMsgMissingHeaders, strings.Join(missingHeaders, ", "))
+		}
+		json.NewEncoder(w).Encode(response.BadRequest(r.Context(), message))
+		return false
+	}
+
+	// Validate Timestamp
+	timestamp := format.StringToUnixOrZero(r.Header.Get(constants.HeaderTimestamp))
+	if timestamp.IsZero() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidTimestamp))
+		return false
+	}
+
+	// Validate Platform
+	platform := r.Header.Get(constants.HeaderPlatform)
+	validPlatform := false
+	for _, v := range constants.CheckPlatform {
+		if platform == v {
+			validPlatform = true
+			break
+		}
+	}
+
+	if !validPlatform {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidPlatform))
+		return false
+	}
+
+	return true
+}
+
+// validateSignatureAuthHeaders validates the signature auth headers.
+func (m *Manager) validateSignatureInternalHeaders(r *http.Request) (bool, string) {
+	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublicAuth))
+	for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublicAuth {
+		authHeaders = append(authHeaders, r.Header.Get(nameHeader))
+	}
+
+	return m.validateSignatureHeaders(r, m.cfg.PrivateKeySignature, authHeaders)
+}
+
+// validateSignaturePublicAuthHeaders validates the signature public auth headers.
+func (m *Manager) validateSignaturePublicAuthHeaders(r *http.Request) (bool, string) {
+	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublicAuth)+3)
+	authHeaders = append(authHeaders, strings.ToUpper(r.Method))
+	authHeaders = append(authHeaders, r.RequestURI)
+	for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublicAuth {
+		authHeaders = append(authHeaders, r.Header.Get(nameHeader))
+	}
+
+	bodyBytes, _ := ReadAndRestoreBody(r)
+	bodyToken := ResolveBodyToken(r.Header.Get("Content-Type"), bodyBytes)
+
+	authHeaders = append(authHeaders, string(bodyToken))
+
+	return m.validateSignatureHeaders(r, m.cfg.PublicKeySignature, authHeaders)
+}
+
+// validateSignaturePublicHeaders validates the signature public headers.
+func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string) {
+	publicHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublic)+3)
+	publicHeaders = append(publicHeaders, strings.ToUpper(r.Method))
+	publicHeaders = append(publicHeaders, r.RequestURI)
+	for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublic {
+		publicHeaders = append(publicHeaders, r.Header.Get(nameHeader))
+	}
+
+	bodyBytes, _ := ReadAndRestoreBody(r)
+	bodyToken := ResolveBodyToken(r.Header.Get("Content-Type"), bodyBytes)
+
+	publicHeaders = append(publicHeaders, string(bodyToken))
+
+	return m.validateSignatureHeaders(r, m.cfg.PublicKeySignature, publicHeaders)
+}
+
+// validateSignatureHeaders validates the signature headers.
+func (_ *Manager) validateSignatureHeaders(r *http.Request, keySignature string, values []string) (bool, string) {
+	signatureServer := cryptoutil.Signature(keySignature, values...)
+	clientSignature := r.Header.Get(constants.HeaderSignature)
+
+	if clientSignature == "" {
+		return false, signatureServer
+	}
+
+	if len(clientSignature) != len(signatureServer) {
+		return false, signatureServer
+	}
+
+	return subtle.ConstantTimeCompare([]byte(clientSignature), []byte(signatureServer)) == 1, signatureServer
 }
 
 // TrustProxy validates the remote IP address of the request.
@@ -511,101 +662,6 @@ func (m *Manager) CORS(next http.Handler, allowedOrigins []string, allowedHeader
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// validateHeaders checks if all required headers are present in the request.
-// If any headers are missing, it returns false and writes a 400 Bad Request response.
-func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, headers []string) bool {
-	missingHeaders := []string{}
-	for _, header := range headers {
-		if r.Header.Get(header) == "" {
-			missingHeaders = append(missingHeaders, header)
-		}
-	}
-
-	// Validate Missing Headers
-	if len(missingHeaders) > 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-
-		message := constants.ErrMsgMissingHeaders
-		if !m.envProd() {
-			message = fmt.Sprintf("%s - Missing Headers: %s", constants.ErrMsgMissingHeaders, strings.Join(missingHeaders, ", "))
-		}
-		json.NewEncoder(w).Encode(response.BadRequest(r.Context(), message))
-		return false
-	}
-
-	// Validate Timestamp
-	timestamp := format.StringToUnixOrZero(r.Header.Get(constants.HeaderTimestamp))
-	if timestamp.IsZero() {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidTimestamp))
-		return false
-	}
-
-	// Validate Platform
-	platform := r.Header.Get(constants.HeaderPlatform)
-	validPlatform := false
-	for _, v := range constants.CheckPlatform {
-		if platform == v {
-			validPlatform = true
-			break
-		}
-	}
-
-	if !validPlatform {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidPlatform))
-		return false
-	}
-
-	return true
-}
-
-// validateSignatureAuthHeaders validates the signature auth headers.
-func (m *Manager) validateSignatureAuthHeaders(r *http.Request) (bool, string) {
-	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersAuth))
-	for _, nameHeader := range m.cfg.RequiredSignatureHeadersAuth {
-		authHeaders = append(authHeaders, r.Header.Get(nameHeader))
-	}
-
-	return m.validateSignatureHeaders(r, m.cfg.PrivateKeySignature, authHeaders)
-}
-
-// validateSignaturePublicHeaders validates the signature public headers.
-func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string) {
-	publicHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublic)+3)
-	publicHeaders = append(publicHeaders, strings.ToUpper(r.Method))
-	publicHeaders = append(publicHeaders, r.RequestURI)
-	for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublic {
-		publicHeaders = append(publicHeaders, r.Header.Get(nameHeader))
-	}
-
-	bodyBytes, _ := ReadAndRestoreBody(r)
-	bodyToken := ResolveBodyToken(r.Header.Get("Content-Type"), bodyBytes)
-
-	publicHeaders = append(publicHeaders, string(bodyToken))
-
-	return m.validateSignatureHeaders(r, m.cfg.PublicKeySignature, publicHeaders)
-}
-
-// validateSignatureHeaders validates the signature headers.
-func (_ *Manager) validateSignatureHeaders(r *http.Request, keySignature string, values []string) (bool, string) {
-	signatureServer := cryptoutil.Signature(keySignature, values...)
-	clientSignature := r.Header.Get(constants.HeaderSignature)
-
-	if clientSignature == "" {
-		return false, signatureServer
-	}
-
-	if len(clientSignature) != len(signatureServer) {
-		return false, signatureServer
-	}
-
-	return subtle.ConstantTimeCompare([]byte(clientSignature), []byte(signatureServer)) == 1, signatureServer
 }
 
 // FullURL reconstructs the full URL of the request, including scheme, host, and path.

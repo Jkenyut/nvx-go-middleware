@@ -12,17 +12,17 @@ import (
 func main() {
 	// Create middleware manager with configuration
 	mgr := mw.New(mw.Config{
-		PublicKeySignature:  "your-rsa-public-key-here",
-		PrivateKeySignature: "your-rsa-private-key-here",
-		AllowedOrigins:      []string{"https://example.com", "http://localhost:3000"},
-		TrustedProxies:      []string{"10.0.0.0/8", "172.16.0.0/12"},
-		RequestTimeout:      60 * time.Second,
-		RequestBodyLimit:    3 * 1024 * 1024, // 3MB
-		Env:                 "development",
-		HeadersToRemove:     []string{},
-		LogRequestBodies:    true,
-		LogResponseBodies:   true,
-		AllowedContentTypes: []string{"application/json", "text/plain"},
+		PublicKeySignature:        "your-rsa-public-key-here",
+		PrivateKeySignature:       "your-rsa-private-key-here",
+		AllowedOrigins:            []string{"https://example.com", "http://localhost:3000"},
+		TrustedProxies:            []string{"10.0.0.0/8", "172.16.0.0/12"},
+		RequestTimeout:            60 * time.Second,
+		RequestBodyLimit:          3 * 1024 * 1024, // 3MB
+		Env:                       "development",
+		HeadersToRemove:           []string{},
+		LogRequestBodies:          true,
+		LogResponseBodies:         true,
+		AllowedContentTypes:       []string{"application/json", "text/plain"},
 		SignatureTimestampExpired: 6000000,
 	})
 
@@ -56,11 +56,11 @@ func main() {
 	// AUTHENTICATED ROUTES
 	// ========================================
 
-	mux.Handle("/api/profile", mgr.AuthChain(chainCfg)(
+	mux.Handle("/api/profile", mgr.PublicAuthChain(chainCfg)(
 		mgr.MethodOnly("GET", http.HandlerFunc(profileHandler)),
 	))
 
-	mux.Handle("/api/posts", mgr.AuthChain(chainCfg)(
+	mux.Handle("/api/posts", mgr.PublicAuthChain(chainCfg)(
 		mgr.MethodOnly("POST", http.HandlerFunc(createPostHandler)),
 	))
 

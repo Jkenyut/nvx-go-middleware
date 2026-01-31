@@ -59,8 +59,8 @@ var (
 		HeaderSignature,
 	}
 
-	// RequiredAuthHeaders are headers required for authenticated requests
-	RequiredAuthHeaders = []string{
+	// RequiredPublicAuthHeaders are headers required for authenticated public requests
+	RequiredPublicAuthHeaders = []string{
 		HeaderToken,
 		HeaderUserID,
 		HeaderUserType,
@@ -71,8 +71,8 @@ var (
 		HeaderXHashBody,
 	}
 
-	// RequiredSignatureHeadersAuth are headers required for signature validation for auth requests
-	RequiredSignatureHeadersAuth = []string{
+	// RequiredSignatureHeadersPublicAuth are headers required for signature validation for public authenticated requests
+	RequiredSignatureHeadersPublicAuth = []string{
 		HeaderToken,
 		HeaderUserID,
 		HeaderUserType,

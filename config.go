@@ -37,14 +37,15 @@ type Config struct {
 	SignatureTimestampExpired int64
 
 	// Required Headers
-	RequiredCommonHeaders          []string
-	RequiredAuthHeaders            []string
-	RequiredPublicHeaders          []string
-	RequiredSignatureHeadersAuth   []string
-	RequiredSignatureHeadersPublic []string
+	RequiredCommonHeaders              []string
+	RequiredPublicAuthHeaders          []string
+	RequiredPublicHeaders              []string
+	RequiredSignatureHeadersPublicAuth []string
+	RequiredSignatureHeadersPublic     []string
 
 	// Custom Context Injector
 	ContextInjector func(r *http.Request) *http.Request
+	ServiceName     string
 }
 
 // Validate checks if the config is valid
