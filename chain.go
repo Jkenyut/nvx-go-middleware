@@ -34,11 +34,11 @@ func DefaultChainConfig() ChainConfig {
 		UseChiCompress:     true,
 		UseChiTimeout:      true,  // User-requested: specific Chi timeout
 		UseChiThrottle:     false, // Enable per route
-		UseChiStripSlashes: true,
-		CompressionLevel:   5,
-		ThrottleLimit:      50,
-		ThrottleTimeout:    1 * time.Minute,
-		ThrottleBacklog:    50,
+		UseChiStripSlashes: true,  // User-requested: specific Chi strip slashes
+		CompressionLevel:   5,     // User-requested: specific Chi compression level
+		ThrottleLimit:      50,    // User-requested: specific Chi throttle limit
+		ThrottleTimeout:    1 * time.Minute, // User-requested: specific Chi throttle timeout
+		ThrottleBacklog:    50,    // User-requested: specific Chi throttle backlog
 	}
 }
 
@@ -60,14 +60,17 @@ func (m *Manager) GlobalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
 		}
 
+		// Apply Chi compression
 		if cfg.UseChiCompress {
 			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
 		}
 
+		// Apply Chi strip slashes
 		if cfg.UseChiStripSlashes {
 			handler = m.ChiStripSlashes(handler)
 		}
 
+		// Apply Chi real IP
 		if cfg.UseChiRealIP {
 			handler = m.ChiRealIP(handler)
 		}
@@ -99,15 +102,8 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 // AuthChain creates a chain for authenticated routes
 func (m *Manager) AuthChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		handler := next
-
-		// Add throttling for auth routes
-		if cfg.UseChiThrottle {
-			handler = m.ChiThrottle(cfg.ThrottleLimit)(handler)
-		}
-
 		return m.GlobalChain(cfg)(
-			m.EnsureAuth(handler),
+			m.EnsureAuth(next),
 		)
 	}
 }
@@ -157,14 +153,17 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
 		}
 
+		// Apply Chi compression
 		if cfg.UseChiCompress {
 			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
 		}
 
+		// Apply Chi strip slashes
 		if cfg.UseChiStripSlashes {
 			handler = m.ChiStripSlashes(handler)
 		}
 
+		// Apply Chi real IP
 		if cfg.UseChiRealIP {
 			handler = m.ChiRealIP(handler)
 		}
@@ -174,6 +173,11 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 
 		// Add CORS
 		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
+
+		// Apply Chi throttle
+		if cfg.UseChiThrottle {
+			handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
+		}
 
 		return handler
 	}

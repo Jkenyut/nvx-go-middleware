@@ -7,15 +7,14 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// DefaultResponseBodyLogLimit is the maximum size of response body to log (5MB)
-const DefaultResponseBodyLogLimit = 5 * 1024 * 1024
-
+// responseRecorder is a custom response writer that records the response body.
 type responseRecorder struct {
 	middleware.WrapResponseWriter
 	body        *bytes.Buffer
 	maxBodySize int
 }
 
+// wrapResponseWriter wraps the response writer with a response recorder.
 func wrapResponseWriter(w http.ResponseWriter, r *http.Request, limit int) *responseRecorder {
 	mw := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 	return &responseRecorder{
@@ -25,6 +24,7 @@ func wrapResponseWriter(w http.ResponseWriter, r *http.Request, limit int) *resp
 	}
 }
 
+// Write writes the response body to the buffer.
 func (r *responseRecorder) Write(b []byte) (int, error) {
 	ct := r.Header().Get("Content-Type")
 	if !isMultipart(ct) {

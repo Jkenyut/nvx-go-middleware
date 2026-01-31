@@ -30,6 +30,7 @@ import (
 func (m *Manager) Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
+			// Handle panic
 			if rec := recover(); rec != nil {
 				stack := string(debug.Stack())
 
@@ -56,9 +57,11 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					}
 				}
 
+				// Set response headers
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
 
+				// Encode error response
 				if err := json.NewEncoder(w).Encode(response.InternalError(r.Context())); err != nil {
 					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
 				}
@@ -100,8 +103,12 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		}
 
 		start := time.Now()
+
+		// Normalize headers and body
 		requestHeadersBytes := normalizeHeadersJSON(r.Header)
 		var reqBodyBytes any
+
+		// Normalize request body if logging is enabled
 		if m.cfg.LogRequestBodies {
 			raw, _ := ReadAndRestoreBody(r)
 			reqBodyBytes = normalizeBodyRaw(raw)
@@ -112,14 +119,17 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		// Get status from wrapper
 		statusCode := rw.Status()
 
+		// Normalize headers and body
 		responseHeadersBytes := normalizeHeadersJSON(rw.Header())
 
 		var responseBody any
 
+		// Normalize response body if logging is enabled
 		if m.cfg.LogResponseBodies {
 			responseBody = normalizeBodyRaw(rw.body.Bytes())
 		}
 
+		// Create audit log entry
 		entry := model.AuditLog{
 			Method:          r.Method,
 			FullURL:         FullURL(r),
@@ -147,6 +157,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				}
 			}()
 
+			// Save log asynchronously with proper error handling
 			if err := m.cfg.LogStore.Save(entry); err != nil {
 				m.cfg.Logger.Error().
 					Err(err).
@@ -157,6 +168,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 	})
 }
 
+// normalizeBodyRaw normalizes the body of a request.
 func normalizeBodyRaw(raw []byte) any {
 	// check if empty
 	if len(raw) == 0 {
@@ -175,6 +187,7 @@ func normalizeBodyRaw(raw []byte) any {
 	return string(raw)
 }
 
+// normalizeHeadersJSON normalizes the headers of a request.
 func normalizeHeadersJSON(h http.Header) json.RawMessage {
 	out := make(map[string]any, len(h))
 
@@ -291,11 +304,13 @@ func (m *Manager) RemoveHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// headerCleanerResponseWriter is a custom response writer that removes specified headers from the response.
 type headerCleanerResponseWriter struct {
 	http.ResponseWriter
 	headersToRemove []string
 }
 
+// WriteHeader removes specified headers from the response.
 func (w *headerCleanerResponseWriter) WriteHeader(statusCode int) {
 	for _, h := range w.headersToRemove {
 		w.ResponseWriter.Header().Del(h)
@@ -303,6 +318,7 @@ func (w *headerCleanerResponseWriter) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
+// Write removes specified headers from the response.
 func (w *headerCleanerResponseWriter) Write(b []byte) (int, error) {
 	// Ensure headers are cleaned if Write is called before WriteHeader
 	// (Writing body implicitly calls WriteHeader(200) if not called yet)
@@ -344,6 +360,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 	})
 }
 
+// TrustProxy validates the remote IP address of the request.
 func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
@@ -431,6 +448,7 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 				return
 			}
 
+			// Validate Request Body Size
 			if r.ContentLength > m.cfg.RequestBodyLimit {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusRequestEntityTooLarge)
@@ -444,6 +462,16 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 			if isMultipart(contentType) {
 				r.Body = http.MaxBytesReader(w, r.Body, m.cfg.RequestBodyLimit)
 				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Validate Request Body Size (non-file)
+			if r.ContentLength > m.cfg.RequestBodyNonFileLimit {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				if err := json.NewEncoder(w).Encode(response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge)); err != nil {
+					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+				}
 				return
 			}
 
@@ -464,6 +492,7 @@ func (m *Manager) CORS(next http.Handler, allowedOrigins []string, allowedHeader
 		w.Header().Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
 		w.Header().Set("Access-Control-Max-Age", "3600")
 
+		// Handle OPTIONS request
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			if err := json.NewEncoder(w).Encode(response.Success(r.Context(), nil)); err != nil {
@@ -475,8 +504,6 @@ func (m *Manager) CORS(next http.Handler, allowedOrigins []string, allowedHeader
 	})
 }
 
-// Helper functions
-
 // validateHeaders checks if all required headers are present in the request.
 // If any headers are missing, it returns false and writes a 400 Bad Request response.
 func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, headers []string) bool {
@@ -487,6 +514,7 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 		}
 	}
 
+	// Validate Missing Headers
 	if len(missingHeaders) > 0 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -499,6 +527,7 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 		return false
 	}
 
+	// Validate Timestamp
 	timestamp := format.StringToUnixOrZero(r.Header.Get(constants.HeaderTimestamp))
 	if timestamp.IsZero() {
 		w.Header().Set("Content-Type", "application/json")
@@ -527,6 +556,7 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 	return true
 }
 
+// validateSignatureAuthHeaders validates the signature auth headers.
 func (m *Manager) validateSignatureAuthHeaders(r *http.Request) (bool, string) {
 	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersAuth))
 	for _, nameHeader := range m.cfg.RequiredSignatureHeadersAuth {
@@ -536,6 +566,7 @@ func (m *Manager) validateSignatureAuthHeaders(r *http.Request) (bool, string) {
 	return m.validateSignatureHeaders(r, m.cfg.PrivateKeySignature, authHeaders)
 }
 
+// validateSignaturePublicHeaders validates the signature public headers.
 func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string) {
 	publicHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublic)+3)
 	publicHeaders = append(publicHeaders, strings.ToUpper(r.Method))
@@ -552,6 +583,7 @@ func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string)
 	return m.validateSignatureHeaders(r, m.cfg.PublicKeySignature, publicHeaders)
 }
 
+// validateSignatureHeaders validates the signature headers.
 func (_ *Manager) validateSignatureHeaders(r *http.Request, keySignature string, values []string) (bool, string) {
 	signatureServer := cryptoutil.Signature(keySignature, values...)
 	clientSignature := r.Header.Get(constants.HeaderSignature)
@@ -585,6 +617,7 @@ func FullURL(r *http.Request) string {
 	return scheme + "://" + host + r.RequestURI
 }
 
+// injectContext injects common headers into the request context.
 func (_ *Manager) injectContext(r *http.Request) *http.Request {
 	h := r.Header
 	ctx := r.Context()
@@ -599,6 +632,9 @@ func (_ *Manager) injectContext(r *http.Request) *http.Request {
 	return r.WithContext(ctx)
 }
 
+// ReadAndRestoreBody reads the request body and restores it for later use.
+// It returns the body as a byte slice and an error if the read fails.
+// If the request body is nil or the content type is multipart, it returns nil and no error.
 func ReadAndRestoreBody(r *http.Request) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
@@ -635,6 +671,10 @@ func (m *Manager) MethodOnly(method string, next http.Handler) http.Handler {
 	})
 }
 
+// ResolveBodyToken resolves a body token based on the content type and body.
+// If the content type is multipart, it returns "UNSIGNED".
+// If the body is empty, it returns "EMPTY".
+// Otherwise, it returns the SHA-256 hash of the body.
 func ResolveBodyToken(contentType string, body []byte) string {
 	ct := strings.ToLower(strings.TrimSpace(contentType))
 
@@ -679,20 +719,26 @@ func (m *Manager) EnsurePreSignHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// PreSignHandler creates a handler for presigning requests
 func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 	return m.MethodOnly("POST", m.PreSignChain(cfg)(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Set content type
 			w.Header().Set("Content-Type", "application/json")
 			var req model.PresignRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				// Invalid request
 				w.WriteHeader(http.StatusBadRequest)
 				if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidRequest)); err != nil {
 					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
 				}
 				return
 			}
+			
+			// Validate request
 			err := validator.Struct(req)
 			if err != nil {
+				// Get errors
 				errs := validator.GetErrors(err)
 				var result = make([]string, len(errs))
 				for i, e := range errs {
@@ -705,20 +751,22 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 				return
 			}
 
-			publicHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublic)+3)
-			publicHeaders = append(publicHeaders, strings.ToUpper(req.Method))
-			publicHeaders = append(publicHeaders, req.Uri)
+			// Create canonical 
+			publicCanonical := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublic)+3)
+			publicCanonical = append(publicCanonical, strings.ToUpper(req.Method))
+			publicCanonical = append(publicCanonical, req.Uri)
 			for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublic {
-				publicHeaders = append(publicHeaders, r.Header.Get(nameHeader))
+				publicCanonical = append(publicCanonical, r.Header.Get(nameHeader))
 			}
 
+			// Add body token
 			bodyBytes, _ := ReadAndRestoreBody(r)
 			bodyToken := ResolveBodyToken(req.ContentType, bodyBytes)
+			publicCanonical = append(publicCanonical, string(bodyToken))
 
-			publicHeaders = append(publicHeaders, string(bodyToken))
-
+			// Sign canonical
 			json.NewEncoder(w).Encode(response.Success(r.Context(), model.PresignResponse{
-				Signature: cryptoutil.Signature(m.cfg.PublicKeySignature, publicHeaders...),
+				Signature: cryptoutil.Signature(m.cfg.PublicKeySignature, publicCanonical...),
 			}))
 		})))
 }
