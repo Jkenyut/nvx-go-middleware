@@ -2,8 +2,7 @@ package middleware
 
 import (
 	"net/http"
-
-	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"time"
 )
 
 // ChainConfig configures which middleware to use
@@ -20,6 +19,12 @@ type ChainConfig struct {
 
 	// Throttle limit (concurrent requests)
 	ThrottleLimit int
+
+	// Throttle timeout (duration)
+	ThrottleTimeout time.Duration
+
+	// Throttle backlog (max queue size)
+	ThrottleBacklog int
 }
 
 // DefaultChainConfig returns recommended chain configuration
@@ -31,7 +36,9 @@ func DefaultChainConfig() ChainConfig {
 		UseChiThrottle:     false, // Enable per route
 		UseChiStripSlashes: true,
 		CompressionLevel:   5,
-		ThrottleLimit:      100,
+		ThrottleLimit:      50,
+		ThrottleTimeout:    1 * time.Minute,
+		ThrottleBacklog:    50,
 	}
 }
 
@@ -50,19 +57,19 @@ func (m *Manager) GlobalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 
 		// Apply Chi middleware
 		if cfg.UseChiTimeout {
-			handler = chimiddleware.Timeout(m.cfg.RequestTimeout)(handler)
+			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
 		}
 
 		if cfg.UseChiCompress {
-			handler = chimiddleware.Compress(cfg.CompressionLevel)(handler)
+			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
 		}
 
 		if cfg.UseChiStripSlashes {
-			handler = chimiddleware.StripSlashes(handler)
+			handler = m.ChiStripSlashes(handler)
 		}
 
 		if cfg.UseChiRealIP {
-			handler = chimiddleware.RealIP(handler)
+			handler = m.ChiRealIP(handler)
 		}
 
 		// Always apply TrustProxy to populate NVX-IP safely
@@ -70,6 +77,11 @@ func (m *Manager) GlobalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 
 		// Add CORS
 		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
+
+		// Apply Chi throttle
+		if cfg.UseChiThrottle {
+			handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
+		}
 
 		return handler
 	}
@@ -91,7 +103,7 @@ func (m *Manager) AuthChain(cfg ChainConfig) func(http.Handler) http.Handler {
 
 		// Add throttling for auth routes
 		if cfg.UseChiThrottle {
-			handler = chimiddleware.Throttle(cfg.ThrottleLimit)(handler)
+			handler = m.ChiThrottle(cfg.ThrottleLimit)(handler)
 		}
 
 		return m.GlobalChain(cfg)(
@@ -142,19 +154,19 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 
 		// Apply Chi middleware
 		if cfg.UseChiTimeout {
-			handler = chimiddleware.Timeout(m.cfg.RequestTimeout)(handler)
+			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
 		}
 
 		if cfg.UseChiCompress {
-			handler = chimiddleware.Compress(cfg.CompressionLevel)(handler)
+			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
 		}
 
 		if cfg.UseChiStripSlashes {
-			handler = chimiddleware.StripSlashes(handler)
+			handler = m.ChiStripSlashes(handler)
 		}
 
 		if cfg.UseChiRealIP {
-			handler = chimiddleware.RealIP(handler)
+			handler = m.ChiRealIP(handler)
 		}
 
 		// Always apply TrustProxy to populate NVX-IP safely

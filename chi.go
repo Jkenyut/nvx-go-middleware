@@ -49,6 +49,11 @@ func (m *Manager) ChiProfiler() http.Handler {
 
 // WrapWithChiWriter wraps response writer with Chi's WrapResponseWriter
 // This is useful for compatibility with Chi middleware
-func WrapWithChiWriter(w http.ResponseWriter, r *http.Request) chimiddleware.WrapResponseWriter {
+func (m *Manager) WrapWithChiWriter(w http.ResponseWriter, r *http.Request) chimiddleware.WrapResponseWriter {
 	return chimiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
+}
+
+// ChiThrottleBacklog wraps Chi's ThrottleBacklog middleware
+func (m *Manager) ChiThrottleBacklog(limit int, backlog int, backlogTimeout time.Duration) func(http.Handler) http.Handler {
+	return chimiddleware.ThrottleBacklog(limit, backlog, backlogTimeout)
 }
