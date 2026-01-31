@@ -341,6 +341,15 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 			return
 		}
 
+		// Validate Timestamp
+		timestamp := format.StringToUnixOrZero(r.Header.Get(constants.HeaderTimestamp))
+		if timestamp.IsZero() || timestamp.Before(format.NowUTC().Add(time.Duration(m.cfg.SignatureTimestampExpired)*time.Millisecond)) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.SignatureInvalid))
+			return
+		}
+
 		// Validate Signature Headers
 		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
 			w.Header().Set("Content-Type", "application/json")
@@ -734,7 +743,7 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 				}
 				return
 			}
-			
+
 			// Validate request
 			err := validator.Struct(req)
 			if err != nil {
@@ -751,7 +760,7 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 				return
 			}
 
-			// Create canonical 
+			// Create canonical
 			publicCanonical := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublic)+3)
 			publicCanonical = append(publicCanonical, strings.ToUpper(req.Method))
 			publicCanonical = append(publicCanonical, req.Uri)

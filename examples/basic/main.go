@@ -23,10 +23,16 @@ func main() {
 		LogRequestBodies:    true,
 		LogResponseBodies:   true,
 		AllowedContentTypes: []string{"application/json", "text/plain"},
+		SignatureTimestampExpired: 6000000,
 	})
 
 	// Create chain config
 	chainCfg := mw.DefaultChainConfig()
+	chainCfg.UseChiRateLimit = true
+	chainCfg.RateLimitRequests = 5
+	chainCfg.RateLimitWindow = 10 * time.Second
+	chainCfg.UseChiRateLimitAuth = true
+	chainCfg.UseChiRateLimitPublic = true
 
 	// Create HTTP mux
 	mux := http.NewServeMux()

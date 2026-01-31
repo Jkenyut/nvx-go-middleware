@@ -116,6 +116,11 @@ func New(cfg Config) *Manager {
 		cfg.HeadersToRemove = []string{}
 	}
 
+	// Set default SignatureTimestampExpired if not set
+	if cfg.SignatureTimestampExpired == 0 {
+		cfg.SignatureTimestampExpired = constants.TimestampExpired
+	}
+
 	return &Manager{cfg: cfg}
 }
 

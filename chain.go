@@ -3,16 +3,21 @@ package middleware
 import (
 	"net/http"
 	"time"
+
+	"github.com/Jkenyut/nvx-go-middleware/constants"
 )
 
 // ChainConfig configures which middleware to use
 type ChainConfig struct {
 	// Chi middleware toggles
-	UseChiRealIP       bool
-	UseChiCompress     bool
-	UseChiTimeout      bool
-	UseChiThrottle     bool
-	UseChiStripSlashes bool
+	UseChiRealIP          bool
+	UseChiCompress        bool
+	UseChiTimeout         bool
+	UseChiThrottle        bool
+	UseChiRateLimit       bool
+	UseChiRateLimitAuth   bool
+	UseChiRateLimitPublic bool
+	UseChiStripSlashes    bool
 
 	// Compression level (1-9)
 	CompressionLevel int
@@ -25,20 +30,31 @@ type ChainConfig struct {
 
 	// Throttle backlog (max queue size)
 	ThrottleBacklog int
+
+	// Rate limit configuration
+	RateLimitRequests int
+	RateLimitWindow   time.Duration
 }
 
 // DefaultChainConfig returns recommended chain configuration
 func DefaultChainConfig() ChainConfig {
 	return ChainConfig{
+
 		UseChiRealIP:       false, // Disabled in favor of secure TrustProxy
 		UseChiCompress:     true,
-		UseChiTimeout:      true,  // User-requested: specific Chi timeout
-		UseChiThrottle:     false, // Enable per route
-		UseChiStripSlashes: true,  // User-requested: specific Chi strip slashes
-		CompressionLevel:   5,     // User-requested: specific Chi compression level
-		ThrottleLimit:      50,    // User-requested: specific Chi throttle limit
+		UseChiTimeout:      true,            // User-requested: specific Chi timeout
+		UseChiThrottle:     false,           // Enable per route
+		UseChiStripSlashes: true,            // User-requested: specific Chi strip slashes
+		CompressionLevel:   5,               // User-requested: specific Chi compression level
+		ThrottleLimit:      50,              // User-requested: specific Chi throttle limit
 		ThrottleTimeout:    1 * time.Minute, // User-requested: specific Chi throttle timeout
-		ThrottleBacklog:    50,    // User-requested: specific Chi throttle backlog
+
+		ThrottleBacklog:       50,              // User-requested: specific Chi throttle backlog
+		UseChiRateLimit:       true,            // Enabled by default
+		UseChiRateLimitAuth:   true,            // Enabled by default
+		UseChiRateLimitPublic: true,            // Enabled by default
+		RateLimitRequests:     100,             // User-requested: specific Chi rate limit requests
+		RateLimitWindow:       1 * time.Minute, // User-requested: specific Chi rate limit window
 	}
 }
 
@@ -86,6 +102,11 @@ func (m *Manager) GlobalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 			handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
 		}
 
+		// Apply Chi rate limit
+		if cfg.UseChiRateLimit {
+			handler = m.ChiRateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow)(handler)
+		}
+
 		return handler
 	}
 }
@@ -93,18 +114,36 @@ func (m *Manager) GlobalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 // PublicChain creates a chain for public routes (with device validation)
 func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return m.GlobalChain(cfg)(
-			m.EnsurePublicAuth(next),
-		)
+		handler := next
+
+		handler = m.EnsurePublicAuth(handler)
+
+		handler = m.GlobalChain(cfg)(handler)
+
+		// Apply Auth Rate Limit (runs after authentication)
+		if cfg.UseChiRateLimitPublic {
+			handler = m.ChiRateLimitByKey(cfg.RateLimitRequests, cfg.RateLimitWindow, KeyByHeader(constants.HeaderAPIKey))(handler)
+		}
+
+		return handler
 	}
 }
 
 // AuthChain creates a chain for authenticated routes
 func (m *Manager) AuthChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return m.GlobalChain(cfg)(
-			m.EnsureAuth(next),
-		)
+		handler := next
+
+		handler = m.EnsureAuth(handler)
+
+		handler = m.GlobalChain(cfg)(handler)
+
+		// Apply Auth Rate Limit (runs after authentication)
+		if cfg.UseChiRateLimitAuth {
+			handler = m.ChiRateLimitByKey(cfg.RateLimitRequests, cfg.RateLimitWindow, KeyByHeader(constants.HeaderUserID), KeyByHeader(constants.HeaderUserType))(handler)
+		}
+
+		return handler
 	}
 }
 

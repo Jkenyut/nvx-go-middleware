@@ -26,14 +26,15 @@ type Config struct {
 	ResponseBodyLogLimit int64
 
 	// Security
-	PublicKeySignature  string
-	PrivateKeySignature string
-	TrustedProxies      []string
-	AllowedOrigins      []string
-	AllowedContentTypes []string
-	AllowedHeaders      []string
-	HeadersToRemove     []string
-	SecurityHeaders     map[string]string
+	PublicKeySignature        string
+	PrivateKeySignature       string
+	TrustedProxies            []string
+	AllowedOrigins            []string
+	AllowedContentTypes       []string
+	AllowedHeaders            []string
+	HeadersToRemove           []string
+	SecurityHeaders           map[string]string
+	SignatureTimestampExpired int64
 
 	// Required Headers
 	RequiredCommonHeaders          []string

@@ -32,6 +32,7 @@ const (
 	ErrMsgInvalidTimestamp       = "Invalid timestamp format"
 	ErrMsgUnsupportedContentType = "Unsupported content type"
 	ErrMsgInvalidRequest         = "Invalid request"
+	SignatureInvalid             = "Signature invalid"
 )
 
 const (
@@ -44,7 +45,8 @@ const (
 	// DefaultThrottleLimit is the default concurrent request limit
 	DefaultThrottleLimit = 100
 	// MaxHeaderSize is the maximum size for header values
-	MaxHeaderSize = 8192
+	MaxHeaderSize    = 8192
+	TimestampExpired = 600000 // milliseconds
 )
 
 // Required headers for different request types
@@ -60,6 +62,8 @@ var (
 	// RequiredAuthHeaders are headers required for authenticated requests
 	RequiredAuthHeaders = []string{
 		HeaderToken,
+		HeaderUserID,
+		HeaderUserType,
 	}
 
 	// RequiredPublicHeaders are headers required for public requests
@@ -70,6 +74,8 @@ var (
 	// RequiredSignatureHeadersAuth are headers required for signature validation for auth requests
 	RequiredSignatureHeadersAuth = []string{
 		HeaderToken,
+		HeaderUserID,
+		HeaderUserType,
 		HeaderRequestID,
 		HeaderAPIKey,
 		HeaderPlatform,
