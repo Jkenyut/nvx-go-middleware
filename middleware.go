@@ -645,21 +645,41 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 // CORS adds Cross-Origin Resource Sharing (CORS) headers to responses.
 // It handles preflight OPTIONS requests and sets appropriate headers
 // based on the configured allowed origins.
-func (m *Manager) CORS(next http.Handler, allowedOrigins []string, allowedHeaders []string) http.Handler {
+func (m *Manager) CORS(
+	next http.Handler,
+	allowedOrigins []string,
+	allowedHeaders []string,
+) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", strings.Join(allowedOrigins, ", "))
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		allowed := false
+		for _, o := range allowedOrigins {
+			if o == "*" || o == origin {
+				allowed = true
+				break
+			}
+		}
+
+		if allowed {
+			// echo origin (WAJIB)
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
+		}
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
 		w.Header().Set("Access-Control-Max-Age", "3600")
 
-		// Handle OPTIONS request
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			if err := json.NewEncoder(w).Encode(response.Success(r.Context(), nil)); err != nil {
-				m.cfg.Logger.Error().Err(err).Msg("Failed to encode CORS response")
-			}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+
 		next.ServeHTTP(w, r)
 	})
 }

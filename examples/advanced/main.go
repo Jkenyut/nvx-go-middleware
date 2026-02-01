@@ -67,6 +67,17 @@ func main() {
 	))
 
 	// ========================================
+	// WEBHOOK ROUTES
+	// ========================================
+
+	mux.Handle("/webhooks/payment", mgr.WebhookChain(chainCfg)(
+		mgr.MethodOnly("POST", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Webhook received"))
+		})),
+	))
+
+	// ========================================
 	// ADMIN ROUTES
 	// ========================================
 
