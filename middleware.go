@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -342,12 +343,13 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 		}
 
 		// Validate Timestamp
-		timestamp := format.StringToUnixOrZero(r.Header.Get(constants.HeaderTimestamp))
-		if timestamp.IsZero() || timestamp.Before(format.NowUTC().Add(time.Duration(m.cfg.SignatureTimestampExpired)*time.Millisecond)) {
+		err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.SignatureTimestampExpired)
+		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
+
 		}
 
 		// Validate Signature Headers
@@ -381,12 +383,13 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 		}
 
 		// Validate Timestamp
-		timestamp := format.StringToUnixOrZero(r.Header.Get(constants.HeaderTimestamp))
-		if timestamp.IsZero() || timestamp.Before(format.NowUTC().Add(time.Duration(m.cfg.SignatureTimestampExpired)*time.Millisecond)) {
+		err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.SignatureTimestampExpired)
+		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
+
 		}
 
 		// Validate Signature Headers
@@ -823,17 +826,21 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 			// Validate request
 			err := validator.Struct(req)
 			if err != nil {
-				// Get errors
-				errs := validator.GetErrors(err)
-				var result = make([]string, len(errs))
-				for i, e := range errs {
-					result[i] = fmt.Sprintf("%s: %s", e.Field(), e.Tag())
-				}
 				w.WriteHeader(http.StatusBadRequest)
-				if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), strings.Join(result, ", "))); err != nil {
+				if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), validator.GetErrorsFullStr(err))); err != nil {
 					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
 				}
 				return
+			}
+
+			// Validate Timestamp
+			err = checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.SignatureTimestampExpired)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
+				return
+
 			}
 
 			// Create canonical
@@ -842,15 +849,6 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 			publicCanonical = append(publicCanonical, req.Uri)
 			for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublic {
 				publicCanonical = append(publicCanonical, r.Header.Get(nameHeader))
-			}
-
-			// Validate Timestamp
-			timestamp := format.StringToUnixOrZero(r.Header.Get(constants.HeaderTimestamp))
-			if timestamp.IsZero() || timestamp.Before(format.NowUTC().Add(time.Duration(m.cfg.SignatureTimestampExpired)*time.Millisecond)) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
-				return
 			}
 
 			// Add body token
@@ -863,4 +861,24 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 				Signature: cryptoutil.Signature(m.cfg.PublicKeySignature, publicCanonical...),
 			}))
 		})))
+}
+
+// checkTimestamp checks if the timestamp is within the allowed skew
+func checkTimestamp(timestampStr string, allowedSkewSec int64) error {
+	ts := format.StringToUnixOrZero(timestampStr)
+	if ts.IsZero() {
+		return errors.New(constants.ErrMsgInvalidSignature)
+	}
+
+	now := format.NowUTC()
+
+	// check timestamp within allowed skew
+	min := now.Add(-time.Duration(allowedSkewSec) * time.Second)
+	max := now.Add(time.Duration(allowedSkewSec) * time.Second)
+
+	if ts.Before(min) || ts.After(max) {
+		return errors.New(constants.ErrMsgInvalidSignature)
+	}
+
+	return nil
 }

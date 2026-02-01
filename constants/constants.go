@@ -46,7 +46,7 @@ const (
 	DefaultThrottleLimit = 100
 	// MaxHeaderSize is the maximum size for header values
 	MaxHeaderSize    = 8192
-	TimestampExpired = 600000 // milliseconds
+	TimestampExpired = 600 // seconds
 )
 
 // Required headers for different request types
