@@ -97,6 +97,7 @@ var CheckPlatform = []string{
 	"ios",
 	"web",
 	"desktop",
+	"internal",
 }
 
 // Default security headers

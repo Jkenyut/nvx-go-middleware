@@ -844,6 +844,15 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 				publicCanonical = append(publicCanonical, r.Header.Get(nameHeader))
 			}
 
+			// Validate Timestamp
+			timestamp := format.StringToUnixOrZero(r.Header.Get(constants.HeaderTimestamp))
+			if timestamp.IsZero() || timestamp.Before(format.NowUTC().Add(time.Duration(m.cfg.SignatureTimestampExpired)*time.Millisecond)) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.SignatureInvalid))
+				return
+			}
+
 			// Add body token
 			bodyBytes, _ := ReadAndRestoreBody(r)
 			bodyToken := ResolveBodyToken(req.ContentType, bodyBytes)
