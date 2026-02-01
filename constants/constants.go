@@ -32,7 +32,7 @@ const (
 	ErrMsgInvalidTimestamp       = "Invalid timestamp format"
 	ErrMsgUnsupportedContentType = "Unsupported content type"
 	ErrMsgInvalidRequest         = "Invalid request"
-	SignatureInvalid             = "Signature invalid"
+	ErrMsgSignatureInvalid       = "Signature invalid"
 )
 
 const (

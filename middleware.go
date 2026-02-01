@@ -346,7 +346,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 		if timestamp.IsZero() || timestamp.Before(format.NowUTC().Add(time.Duration(m.cfg.SignatureTimestampExpired)*time.Millisecond)) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.SignatureInvalid))
+			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
 
@@ -354,9 +354,9 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 		if validSignature, signatureServer := m.validateSignaturePublicAuthHeaders(r); !validSignature {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			errMsg := constants.ErrMsgInvalidSignature
+			errMsg := constants.ErrMsgSignatureInvalid
 			if !m.envProd() {
-				errMsg = fmt.Sprintf("%s - Expected: %s", constants.ErrMsgInvalidSignature, signatureServer)
+				errMsg = fmt.Sprintf("%s - Expected: %s", constants.ErrMsgSignatureInvalid, signatureServer)
 			}
 
 			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
@@ -385,7 +385,7 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 		if timestamp.IsZero() || timestamp.Before(format.NowUTC().Add(time.Duration(m.cfg.SignatureTimestampExpired)*time.Millisecond)) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.SignatureInvalid))
+			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
 
@@ -393,9 +393,9 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			errMsg := constants.ErrMsgInvalidSignature
+			errMsg := constants.ErrMsgSignatureInvalid
 			if !m.envProd() {
-				errMsg = fmt.Sprintf("%s - Expected: %s", constants.ErrMsgInvalidSignature, signatureServer)
+				errMsg = fmt.Sprintf("%s - Expected: %s", constants.ErrMsgSignatureInvalid, signatureServer)
 			}
 
 			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
@@ -849,7 +849,7 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 			if timestamp.IsZero() || timestamp.Before(format.NowUTC().Add(time.Duration(m.cfg.SignatureTimestampExpired)*time.Millisecond)) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.SignatureInvalid))
+				json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 				return
 			}
 
