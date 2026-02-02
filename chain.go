@@ -37,8 +37,8 @@ type ChainConfig struct {
 	RateLimitWindow   time.Duration
 
 	// PreSignChain middleware toggles
-	preRequestOnBeforeLimiter func(w http.ResponseWriter, r *http.Request) bool
-	preRequestOnAfterLimiter  func(w http.ResponseWriter, r *http.Request) bool
+	PreRequestOnBeforeLimiter func(w http.ResponseWriter, r *http.Request) bool
+	PreRequestOnAfterLimiter  func(w http.ResponseWriter, r *http.Request) bool
 }
 
 // DefaultChainConfig returns recommended chain configuration
@@ -60,10 +60,10 @@ func DefaultChainConfig() ChainConfig {
 		UseChiRateLimitPublic: true,            // Enabled by default
 		RateLimitRequests:     120,             // User-requested: specific Chi rate limit requests
 		RateLimitWindow:       1 * time.Minute, // User-requested: specific Chi rate limit window
-		preRequestOnBeforeLimiter: func(w http.ResponseWriter, r *http.Request) bool {
+		PreRequestOnBeforeLimiter: func(w http.ResponseWriter, r *http.Request) bool {
 			return true // TODO: implement pre request on before limiter
 		},
-		preRequestOnAfterLimiter: func(w http.ResponseWriter, r *http.Request) bool {
+		PreRequestOnAfterLimiter: func(w http.ResponseWriter, r *http.Request) bool {
 			return true // TODO: implement pre request on after limiter
 		},
 	}
