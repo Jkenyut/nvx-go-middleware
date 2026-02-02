@@ -36,9 +36,9 @@ const (
 )
 
 const (
-	RequestBodyLimit        = 2 * 1024 * 1024 * 1024 // 2 GB
-	RequestBodyNonFileLimit = 3 * 1024 * 1024        // 3 MB
-	ResponseBodyLogLimit    = 5 * 1024 * 1024        // 5 MB
+	RequestBodyLimitSize        = 2 * 1024 * 1024 * 1024 // 2 GB
+	RequestBodyNonFileLimitSize = 3 * 1024 * 1024        // 3 MB
+	ResponseBodyLogLimitSize    = 5 * 1024 * 1024        // 5 MB
 
 	// DefaultCompressionLevel is the default gzip compression level
 	DefaultCompressionLevel = 5

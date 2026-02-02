@@ -37,17 +37,17 @@ func New(cfg Config) *Manager {
 		cfg.RequestTimeout = 60 * time.Second
 	}
 	// Set default RequestBodyLimit if not set (2GB)
-	if cfg.RequestBodyLimit == 0 {
-		cfg.RequestBodyLimit = constants.RequestBodyLimit
+	if cfg.RequestBodyLimitSize == 0 {
+		cfg.RequestBodyLimitSize = constants.RequestBodyLimitSize
 	}
 	// Set default RequestBodyNonFileLimit if not set (3 MB)
-	if cfg.RequestBodyNonFileLimit == 0 {
-		cfg.RequestBodyNonFileLimit = constants.RequestBodyNonFileLimit
+	if cfg.RequestBodyNonFileLimitSize == 0 {
+		cfg.RequestBodyNonFileLimitSize = constants.RequestBodyNonFileLimitSize
 	}
 
 	// Set default ResponseBodyLogLimit (5 MB) if not set
-	if cfg.ResponseBodyLogLimit == 0 {
-		cfg.ResponseBodyLogLimit = constants.ResponseBodyLogLimit
+	if cfg.ResponseBodyLogLimitSize == 0 {
+		cfg.ResponseBodyLogLimitSize = constants.ResponseBodyLogLimitSize
 	}
 
 	if cfg.ServiceName == "" {

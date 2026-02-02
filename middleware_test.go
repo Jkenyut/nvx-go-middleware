@@ -248,7 +248,7 @@ func TestMaxBodySize(t *testing.T) {
 		PublicKeySignature:  "test-public-key",
 		PrivateKeySignature: "test-private-key",
 		AllowedOrigins:      []string{"*"},
-		RequestBodyLimit:    100, // 100 bytes limit
+		RequestBodyLimitSize:    100, // 100 bytes limit
 		AllowedContentTypes: []string{"application/json", "multipart/form-data"},
 	})
 

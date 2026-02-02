@@ -16,14 +16,14 @@ type Config struct {
 	Env      string
 
 	// Timeout & Limits
-	RequestTimeout          time.Duration
-	RequestBodyLimit        int64
-	RequestBodyNonFileLimit int64
+	RequestTimeout              time.Duration
+	RequestBodyLimitSize        int64
+	RequestBodyNonFileLimitSize int64
 
 	// Logging
-	LogRequestBodies     bool
-	LogResponseBodies    bool
-	ResponseBodyLogLimit int64
+	LogRequestBodies         bool
+	LogResponseBodies        bool
+	ResponseBodyLogLimitSize int64
 
 	// Security
 	PublicKeySignature        string

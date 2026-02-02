@@ -17,7 +17,7 @@ func main() {
 		AllowedOrigins:      []string{"https://example.com"},
 		TrustedProxies:      []string{"10.0.0.0/8"},
 		RequestTimeout:      30 * time.Second,
-		RequestBodyLimit:    5 * 1024 * 1024, // 5MB
+		RequestBodyLimitSize:    5 * 1024 * 1024, // 5MB
 		Env:                 "production",
 	})
 

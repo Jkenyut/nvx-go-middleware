@@ -85,7 +85,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		if existingRw, ok := w.(*responseRecorder); ok {
 			rw = existingRw
 		} else {
-			rw = wrapResponseWriter(w, r, constants.ResponseBodyLogLimit)
+			rw = wrapResponseWriter(w, r, int(m.cfg.ResponseBodyLogLimitSize))
 		}
 
 		// Generate/propagate Transaction ID
@@ -612,7 +612,7 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 			}
 
 			// Validate Request Body Size
-			if r.ContentLength > m.cfg.RequestBodyLimit {
+			if r.ContentLength > m.cfg.RequestBodyLimitSize {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusRequestEntityTooLarge)
 				if err := json.NewEncoder(w).Encode(response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge)); err != nil {
@@ -623,13 +623,13 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 
 			// FILE (multipart)
 			if isMultipart(contentType) {
-				r.Body = http.MaxBytesReader(w, r.Body, m.cfg.RequestBodyLimit)
+				r.Body = http.MaxBytesReader(w, r.Body, m.cfg.RequestBodyLimitSize)
 				next.ServeHTTP(w, r)
 				return
 			}
 
 			// Validate Request Body Size (non-file)
-			if r.ContentLength > m.cfg.RequestBodyNonFileLimit {
+			if r.ContentLength > m.cfg.RequestBodyNonFileLimitSize {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusRequestEntityTooLarge)
 				if err := json.NewEncoder(w).Encode(response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge)); err != nil {
@@ -639,7 +639,7 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 			}
 
 			// Non-FILE (application/json, application/x-www-form-urlencoded, etc.)
-			r.Body = http.MaxBytesReader(w, r.Body, m.cfg.RequestBodyNonFileLimit)
+			r.Body = http.MaxBytesReader(w, r.Body, m.cfg.RequestBodyNonFileLimitSize)
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -733,7 +733,7 @@ func ReadAndRestoreBody(r *http.Request) ([]byte, error) {
 		return nil, nil
 	}
 
-	limitReader := io.LimitReader(r.Body, constants.RequestBodyNonFileLimit)
+	limitReader := io.LimitReader(r.Body, constants.RequestBodyNonFileLimitSize)
 	bodyBytes, err := io.ReadAll(limitReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read request body: %w", err)
