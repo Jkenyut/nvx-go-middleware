@@ -62,6 +62,7 @@ func (m *Manager) ChiThrottleBacklog(limit int, backlog int, backlogTimeout time
 	return chimiddleware.ThrottleBacklog(limit, backlog, backlogTimeout)
 }
 
+// RateLimit is a middleware that limits the rate of requests to a handler.
 func RateLimit(
 	requestLimit int,
 	window time.Duration,

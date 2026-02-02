@@ -873,10 +873,10 @@ func checkTimestamp(timestampStr string, allowedSkewSec int64) error {
 	now := format.NowUTC()
 
 	// check timestamp within allowed skew
-	min := now.Add(-time.Duration(allowedSkewSec) * time.Second)
-	max := now.Add(time.Duration(allowedSkewSec) * time.Second)
+	minTimestamp := now.Add(-time.Duration(allowedSkewSec) * time.Second)
+	maxTimestamp := now.Add(time.Duration(allowedSkewSec) * time.Second)
 
-	if ts.Before(min) || ts.After(max) {
+	if ts.Before(minTimestamp) || ts.After(maxTimestamp) {
 		return errors.New(constants.ErrMsgInvalidSignature)
 	}
 
