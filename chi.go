@@ -66,6 +66,8 @@ func RateLimit(
 	requestLimit int,
 	window time.Duration,
 	counter httprate.LimitCounter,
+	preRequestOnBeforeLimiter func(w http.ResponseWriter, r *http.Request) bool,
+	preRequestOnAfterLimiter func(w http.ResponseWriter, r *http.Request) bool,
 	keyFuncs ...httprate.KeyFunc,
 ) func(http.Handler) http.Handler {
 
@@ -98,7 +100,24 @@ func RateLimit(
 				return
 			}
 
-			limiter(next).ServeHTTP(w, r)
+			// before limiter
+			if preRequestOnBeforeLimiter != nil {
+				if !preRequestOnBeforeLimiter(w, r) {
+					return
+				}
+			}
+
+			// after limiter
+			wrappedNext := http.HandlerFunc(func(w2 http.ResponseWriter, r2 *http.Request) {
+				if preRequestOnAfterLimiter != nil {
+					if !preRequestOnAfterLimiter(w2, r2) {
+						return
+					}
+				}
+				next.ServeHTTP(w2, r2)
+			})
+
+			limiter(wrappedNext).ServeHTTP(w, r)
 		})
 	}
 }
