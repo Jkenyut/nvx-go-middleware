@@ -12,10 +12,7 @@ const (
 	HeaderTimestamp     = "NVX-Timestamp"
 	HeaderSignature     = "NVX-Signature"
 	HeaderPlatform      = "NVX-Platform"
-	HeaderDeviceID      = "NVX-Device-ID"
-	HeaderMacAddress    = "NVX-Mac-Address"
-	HeaderUserAgent     = "NVX-User-Agent"
-	HeaderMessage       = "NVX-Message"
+	HeaderUserAgent     = "User-Agent"
 	HeaderXHashBody     = "NVX-Hash-Body"
 )
 
@@ -55,6 +52,7 @@ var (
 		HeaderRequestID,
 		HeaderAPIKey,
 		HeaderPlatform,
+		HeaderUserAgent,
 		HeaderTimestamp,
 		HeaderSignature,
 	}
@@ -79,6 +77,7 @@ var (
 		HeaderRequestID,
 		HeaderAPIKey,
 		HeaderPlatform,
+		HeaderUserAgent,
 		HeaderTimestamp,
 	}
 
@@ -87,6 +86,7 @@ var (
 		HeaderRequestID,
 		HeaderAPIKey,
 		HeaderPlatform,
+		HeaderUserAgent,
 		HeaderTimestamp,
 	}
 )

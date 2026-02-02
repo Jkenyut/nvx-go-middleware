@@ -127,8 +127,16 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 
 		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitPublic {
+
+			opts := []httprate.KeyFunc{
+				KeyByName(m.cfg.ServiceName),
+				httprate.KeyByIP,
+				httprate.KeyByEndpoint,
+				KeyByHeaderSignature(m.cfg.PrivateKeySignature, constants.HeaderUserAgent),
+				KeyByHeader(constants.HeaderAPIKey),
+			}
 			// Apply Chi rate limit
-			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, KeyByName(m.cfg.ServiceName), httprate.KeyByIP, httprate.KeyByEndpoint)(handler)
+			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, opts...)(handler)
 		}
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
@@ -149,8 +157,17 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 
 		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitAuth {
-			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, KeyByName(m.cfg.ServiceName), httprate.KeyByIP, httprate.KeyByEndpoint, KeyByHeader(constants.HeaderUserID),
-				KeyByHeader(constants.HeaderUserType))(handler)
+			opts := []httprate.KeyFunc{
+				KeyByName(m.cfg.ServiceName),
+				httprate.KeyByIP,
+				httprate.KeyByEndpoint,
+				KeyByHeaderSignature(m.cfg.PrivateKeySignature, constants.HeaderUserAgent),
+				KeyByHeader(constants.HeaderUserID),
+				KeyByHeader(constants.HeaderUserType),
+				KeyByHeader(constants.HeaderAPIKey),
+			}
+
+			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, opts...)(handler)
 		}
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers

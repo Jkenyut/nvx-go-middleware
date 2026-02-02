@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/response"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
@@ -70,10 +71,15 @@ func RateLimit(
 
 	opts := []httprate.Option{
 		httprate.WithKeyFuncs(keyFuncs...),
+		httprate.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPreconditionRequired)
+			json.NewEncoder(w).Encode(response.PreconditionRequired(r.Context(), "precondition required"))
+		}),
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
-			json.NewEncoder(w).Encode(response.TooManyRequests(r.Context(), "Too Many Requests"))
+			json.NewEncoder(w).Encode(response.TooManyRequests(r.Context(), "too many requests"))
 		}),
 	}
 
@@ -91,6 +97,7 @@ func RateLimit(
 				next.ServeHTTP(w, r)
 				return
 			}
+
 			limiter(next).ServeHTTP(w, r)
 		})
 	}
@@ -103,9 +110,12 @@ func KeyByHeader(header string) httprate.KeyFunc {
 	}
 }
 
-// KeyByName returns a key function that returns the value of the specified header
-func KeyByName(name string) httprate.KeyFunc {
+func KeyByHeaderSignature(secret, name string) httprate.KeyFunc {
 	return func(r *http.Request) (string, error) {
-		return name, nil
+		headerName := r.Header.Get(name)
+		if headerName == "" {
+			headerName = "unknown"
+		}
+		return cryptoutil.Signature(secret, headerName), nil
 	}
 }
