@@ -61,10 +61,10 @@ func DefaultChainConfig() ChainConfig {
 		RateLimitRequests:     120,             // User-requested: specific Chi rate limit requests
 		RateLimitWindow:       1 * time.Minute, // User-requested: specific Chi rate limit window
 		preRequestOnBeforeLimiter: func(w http.ResponseWriter, r *http.Request) bool {
-			return true
+			return true // TODO: implement pre request on before limiter
 		},
 		preRequestOnAfterLimiter: func(w http.ResponseWriter, r *http.Request) bool {
-			return true
+			return true // TODO: implement pre request on after limiter
 		},
 	}
 }
