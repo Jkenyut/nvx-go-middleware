@@ -12,13 +12,13 @@ import (
 func main() {
 	// Create middleware manager
 	mgr := mw.New(mw.Config{
-		PublicKeySignature:  "your-rsa-public-key-here",
-		PrivateKeySignature: "your-rsa-private-key-here",
-		AllowedOrigins:      []string{"https://example.com"},
-		TrustedProxies:      []string{"10.0.0.0/8"},
-		RequestTimeout:      30 * time.Second,
-		RequestBodyLimitSize:    5 * 1024 * 1024, // 5MB
-		Env:                 "production",
+		PublicKeySignature:   "your-rsa-public-key-here",
+		PrivateKeySignature:  "your-rsa-private-key-here",
+		AllowedOrigins:       []string{"https://example.com"},
+		TrustedProxies:       []string{"10.0.0.0/8"},
+		RequestTimeout:       30 * time.Second,
+		RequestBodyLimitSize: 5 * 1024 * 1024, // 5MB
+		Env:                  "production",
 	})
 
 	// Custom chain config for production

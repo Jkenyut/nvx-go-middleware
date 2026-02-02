@@ -149,8 +149,8 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 
 		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitAuth {
-			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, KeyByName(m.cfg.ServiceName), KeyByHeader(constants.HeaderUserID),
-				KeyByHeader(constants.HeaderUserType), httprate.KeyByEndpoint)(handler)
+			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, KeyByName(m.cfg.ServiceName), httprate.KeyByIP, httprate.KeyByEndpoint, KeyByHeader(constants.HeaderUserID),
+				KeyByHeader(constants.HeaderUserType))(handler)
 		}
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers

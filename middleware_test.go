@@ -244,12 +244,12 @@ func TestLogger(t *testing.T) {
 func TestMaxBodySize(t *testing.T) {
 	mockStore := &MockLogStore{}
 	mgr := New(Config{
-		LogStore:            mockStore,
-		PublicKeySignature:  "test-public-key",
-		PrivateKeySignature: "test-private-key",
-		AllowedOrigins:      []string{"*"},
-		RequestBodyLimitSize:    100, // 100 bytes limit
-		AllowedContentTypes: []string{"application/json", "multipart/form-data"},
+		LogStore:             mockStore,
+		PublicKeySignature:   "test-public-key",
+		PrivateKeySignature:  "test-private-key",
+		AllowedOrigins:       []string{"*"},
+		RequestBodyLimitSize: 100, // 100 bytes limit
+		AllowedContentTypes:  []string{"application/json", "multipart/form-data"},
 	})
 
 	tests := []struct {

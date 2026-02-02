@@ -17,7 +17,7 @@ func main() {
 		AllowedOrigins:            []string{"https://example.com", "http://localhost:3000"},
 		TrustedProxies:            []string{"10.0.0.0/8", "172.16.0.0/12"},
 		RequestTimeout:            60 * time.Second,
-		RequestBodyLimitSize:        3 * 1024 * 1024, // 3MB
+		RequestBodyLimitSize:      3 * 1024 * 1024, // 3MB
 		Env:                       "development",
 		HeadersToRemove:           []string{},
 		LogRequestBodies:          true,
