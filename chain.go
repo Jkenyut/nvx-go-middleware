@@ -15,7 +15,6 @@ type ChainConfig struct {
 	UseChiCompress        bool
 	UseChiTimeout         bool
 	UseChiThrottle        bool
-	UseChiRateLimit       bool
 	UseChiRateLimitAuth   bool
 	UseChiRateLimitPublic bool
 	UseChiStripSlashes    bool
@@ -51,11 +50,10 @@ func DefaultChainConfig() ChainConfig {
 		UseChiThrottle:     false,           // Enable per route
 		UseChiStripSlashes: true,            // User-requested: specific Chi strip slashes
 		CompressionLevel:   5,               // User-requested: specific Chi compression level
-		ThrottleLimit:      50,              // User-requested: specific Chi throttle limit
+		ThrottleLimit:      100,             // User-requested: specific Chi throttle limit
 		ThrottleTimeout:    1 * time.Minute, // User-requested: specific Chi throttle timeout
 
 		ThrottleBacklog:       50,              // User-requested: specific Chi throttle backlog
-		UseChiRateLimit:       true,            // Enabled by default
 		UseChiRateLimitAuth:   true,            // Enabled by default
 		UseChiRateLimitPublic: true,            // Enabled by default
 		RateLimitRequests:     120,             // User-requested: specific Chi rate limit requests
