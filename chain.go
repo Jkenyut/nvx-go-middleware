@@ -144,7 +144,7 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 				KeyByHeader(constants.HeaderAPIKey),
 			}
 			// Apply Chi rate limit
-			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, cfg.preRequestOnBeforeLimiter, cfg.preRequestOnAfterLimiter, opts...)(handler)
+			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, cfg.PreRequestOnBeforeLimiter, cfg.PreRequestOnAfterLimiter, opts...)(handler)
 		}
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
@@ -175,7 +175,7 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 				KeyByHeader(constants.HeaderAPIKey),
 			}
 
-			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, cfg.preRequestOnBeforeLimiter, cfg.preRequestOnAfterLimiter, opts...)(handler)
+			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, cfg.PreRequestOnBeforeLimiter, cfg.PreRequestOnAfterLimiter, opts...)(handler)
 		}
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
@@ -251,7 +251,7 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 				KeyByHeader(constants.HeaderAPIKey),
 			}
 
-			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, cfg.preRequestOnBeforeLimiter, cfg.preRequestOnAfterLimiter, opts...)(handler)
+			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, cfg.PreRequestOnBeforeLimiter, cfg.PreRequestOnAfterLimiter, opts...)(handler)
 		}
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
