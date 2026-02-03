@@ -1,5 +1,3 @@
-github.com/Jkenyut/nvx-go-helper v1.0.16-0.20260131063538-e8ec77ca732b h1:wNPeYhF3oO+YzDlmvIUGAdXaJLkkNLoNAKHahFlTuQ4=
-github.com/Jkenyut/nvx-go-helper v1.0.16-0.20260131063538-e8ec77ca732b/go.mod h1:xg55az4LHP8NOFrgMLdkGX79kur7Rp9otb1SUQY1X98=
 github.com/Jkenyut/nvx-go-helper v1.0.16-0.20260202064825-2b58cec5b8a0 h1:6N3r3INGw8CtXbY5w0cPbXnRNc1Jzc497sLn0rJr7T0=
 github.com/Jkenyut/nvx-go-helper v1.0.16-0.20260202064825-2b58cec5b8a0/go.mod h1:xg55az4LHP8NOFrgMLdkGX79kur7Rp9otb1SUQY1X98=
 github.com/coreos/go-systemd/v22 v22.5.0/go.mod h1:Y58oyj3AT4RCenI/lSvhwexgC+NSVTIJ3seZv2GcEnc=

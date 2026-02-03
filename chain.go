@@ -137,7 +137,6 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 		if cfg.UseChiRateLimitPublic {
 
 			opts := []httprate.KeyFunc{
-				httprate.Key(m.cfg.ServiceName),
 				httprate.KeyByIP,
 				httprate.KeyByEndpoint,
 				KeyByHeaderSignature(m.cfg.PrivateKeySignature, constants.HeaderUserAgent),
@@ -166,7 +165,6 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitAuth {
 			opts := []httprate.KeyFunc{
-				httprate.Key(m.cfg.ServiceName),
 				httprate.KeyByIP,
 				httprate.KeyByEndpoint,
 				KeyByHeaderSignature(m.cfg.PrivateKeySignature, constants.HeaderUserAgent),
@@ -244,7 +242,6 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 		// Note: PreSignChain uses public rate limit settings in the original code, preserved here.
 		if cfg.UseChiRateLimitPublic {
 			opts := []httprate.KeyFunc{
-				httprate.Key(m.cfg.ServiceName),
 				httprate.KeyByIP,
 				httprate.KeyByEndpoint,
 				KeyByHeaderSignature(m.cfg.PrivateKeySignature, constants.HeaderUserAgent),

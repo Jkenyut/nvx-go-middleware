@@ -36,6 +36,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 				stack := string(debug.Stack())
 
 				m.cfg.Logger.Error().
+					Str("Service", m.cfg.ServiceName).
 					Str("error", fmt.Sprintf("%v", rec)).
 					Str("method", r.Method).
 					Str("path", r.URL.Path).
@@ -45,7 +46,9 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 				// Chi's middleware.WrapResponseWriter compatibility
 				if ww, ok := w.(middleware.WrapResponseWriter); ok {
 					if ww.Status() != 0 {
-						m.cfg.Logger.Error().Msg("Response already written, cannot recover")
+						m.cfg.Logger.Error().
+							Str("Service", m.cfg.ServiceName).
+							Msg("Response already written, cannot recover")
 						return
 					}
 				}
@@ -53,7 +56,9 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 				// Check our own response recorder
 				if rw, ok := w.(*responseRecorder); ok {
 					if rw.Status() != 0 {
-						m.cfg.Logger.Error().Msg("Response already written, cannot recover")
+						m.cfg.Logger.Error().
+							Str("Service", m.cfg.ServiceName).
+							Msg("Response already written, cannot recover")
 						return
 					}
 				}
@@ -64,7 +69,10 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 
 				// Encode error response
 				if err := json.NewEncoder(w).Encode(response.InternalError(r.Context())); err != nil {
-					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+					m.cfg.Logger.Error().
+						Str("Service", m.cfg.ServiceName).
+						Err(err).
+						Msg("Failed to encode error response")
 				}
 			}
 		}()
@@ -153,6 +161,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			defer func() {
 				if rec := recover(); rec != nil {
 					m.cfg.Logger.Error().
+						Str("Service", m.cfg.ServiceName).
 						Interface("panic", rec).
 						Msg("Panic in async log save")
 				}
@@ -161,6 +170,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			// Save log asynchronously with proper error handling
 			if err := m.cfg.LogStore.Save(entry); err != nil {
 				m.cfg.Logger.Error().
+					Str("Service", m.cfg.ServiceName).
 					Err(err).
 					Str("transaction_id", transactionID).
 					Msg("Failed to save audit log")
@@ -221,7 +231,10 @@ func (m *Manager) EnsureCommonHeaders(next http.Handler) http.Handler {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidIP)); err != nil {
-				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+				m.cfg.Logger.Error().
+					Str("Service", m.cfg.ServiceName).
+					Err(err).
+					Msg("Failed to encode error response")
 			}
 			return
 		}
@@ -306,7 +319,10 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken)); err != nil {
-				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+				m.cfg.Logger.Error().
+					Str("Service", m.cfg.ServiceName).
+					Err(err).
+					Msg("Failed to encode error response")
 			}
 			return
 		}
@@ -322,7 +338,10 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 			}
 
 			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
-				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+				m.cfg.Logger.Error().
+					Str("Service", m.cfg.ServiceName).
+					Err(err).
+					Msg("Failed to encode error response")
 			}
 			return
 		}
@@ -362,7 +381,10 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 			}
 
 			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
-				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+				m.cfg.Logger.Error().
+					Str("Service", m.cfg.ServiceName).
+					Err(err).
+					Msg("Failed to encode error response")
 			}
 			return
 		}
@@ -402,7 +424,10 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 			}
 
 			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
-				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+				m.cfg.Logger.Error().
+					Str("Service", m.cfg.ServiceName).
+					Err(err).
+					Msg("Failed to encode error response")
 			}
 			return
 		}
@@ -606,7 +631,10 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
 				if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType)); err != nil {
-					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+					m.cfg.Logger.Error().
+						Str("Service", m.cfg.ServiceName).
+						Err(err).
+						Msg("Failed to encode error response")
 				}
 				return
 			}
@@ -616,7 +644,10 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusRequestEntityTooLarge)
 				if err := json.NewEncoder(w).Encode(response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge)); err != nil {
-					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+					m.cfg.Logger.Error().
+						Str("Service", m.cfg.ServiceName).
+						Err(err).
+						Msg("Failed to encode error response")
 				}
 				return
 			}
@@ -633,7 +664,10 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusRequestEntityTooLarge)
 				if err := json.NewEncoder(w).Encode(response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge)); err != nil {
-					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+					m.cfg.Logger.Error().
+						Str("Service", m.cfg.ServiceName).
+						Err(err).
+						Msg("Failed to encode error response")
 				}
 				return
 			}
@@ -751,7 +785,10 @@ func (m *Manager) MethodOnly(method string, next http.Handler) http.Handler {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			if err := json.NewEncoder(w).Encode(response.MethodNotAllowed(r.Context(), constants.ErrMsgMethodNotAllowed)); err != nil {
-				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+				m.cfg.Logger.Error().
+					Str("Service", m.cfg.ServiceName).
+					Err(err).
+					Msg("Failed to encode error response")
 			}
 			return
 		}
@@ -798,7 +835,10 @@ func (m *Manager) EnsurePreSignHeaders(next http.Handler) http.Handler {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidIP)); err != nil {
-				m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+				m.cfg.Logger.Error().
+					Str("Service", m.cfg.ServiceName).
+					Err(err).
+					Msg("Failed to encode error response")
 			}
 			return
 		}
@@ -818,7 +858,10 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 				// Invalid request
 				w.WriteHeader(http.StatusBadRequest)
 				if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidRequest)); err != nil {
-					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+					m.cfg.Logger.Error().
+						Str("Service", m.cfg.ServiceName).
+						Err(err).
+						Msg("Failed to encode error response")
 				}
 				return
 			}
@@ -828,7 +871,10 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), validator.GetErrorsFullStr(err))); err != nil {
-					m.cfg.Logger.Error().Err(err).Msg("Failed to encode error response")
+					m.cfg.Logger.Error().
+						Str("Service", m.cfg.ServiceName).
+						Err(err).
+						Msg("Failed to encode error response")
 				}
 				return
 			}
