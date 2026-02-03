@@ -29,7 +29,7 @@ type ChainConfig struct {
 
 	// Throttle backlog (max queue size)
 	ThrottleBacklog int
-	LimiterConfig   configLimiter
+	LimiterConfig   ConfigLimiter
 }
 
 // DefaultChainConfig returns recommended chain configuration
@@ -48,7 +48,7 @@ func DefaultChainConfig() ChainConfig {
 		ThrottleBacklog:       50,   // User-requested: specific Chi throttle backlog
 		UseChiRateLimitAuth:   true, // Enabled by default
 		UseChiRateLimitPublic: true, // Enabled by default
-		LimiterConfig: configLimiter{
+		LimiterConfig: ConfigLimiter{
 			RateLimitRequests: 120,             // User-requested: specific Chi rate limit requests
 			RateLimitWindow:   1 * time.Minute, // User-requested: specific Chi rate limit window
 			PreRequestOnBeforeLimiter: func(w http.ResponseWriter, r *http.Request) bool {

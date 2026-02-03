@@ -65,7 +65,7 @@ func (m *Manager) ChiThrottleBacklog(limit int, backlog int, backlogTimeout time
 }
 
 // Rate limit configuration
-type configLimiter struct {
+type ConfigLimiter struct {
 	RateLimitRequests         int
 	RateLimitWindow           time.Duration
 	Counter                   httprate.LimitCounter
@@ -75,7 +75,7 @@ type configLimiter struct {
 
 // RateLimit is a middleware that limits the rate of requests to a handler.
 func RateLimit(
-	cfg configLimiter,
+	cfg ConfigLimiter,
 	signatureSecret string,
 ) func(http.Handler) http.Handler {
 
