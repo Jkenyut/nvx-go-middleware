@@ -14,6 +14,10 @@ const (
 	HeaderPlatform      = "NVX-Platform"
 	HeaderUserAgent     = "User-Agent"
 	HeaderXHashBody     = "NVX-Hash-Body"
+	HeaderAuthType      = "NVX-Auth-Type"
+	AuthTypePublic      = "public"
+	AuthTypePublicAuth  = "public_auth"
+	AuthTypeInternal    = "internal"
 )
 
 // Error messages

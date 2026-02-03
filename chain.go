@@ -3,9 +3,6 @@ package middleware
 import (
 	"net/http"
 	"time"
-
-	"github.com/Jkenyut/nvx-go-middleware/constants"
-	"github.com/go-chi/httprate"
 )
 
 // ChainConfig configures which middleware to use
@@ -30,14 +27,7 @@ type ChainConfig struct {
 
 	// Throttle backlog (max queue size)
 	ThrottleBacklog int
-
-	// Rate limit configuration
-	RateLimitRequests int
-	RateLimitWindow   time.Duration
-
-	// PreSignChain middleware toggles
-	PreRequestOnBeforeLimiter func(w http.ResponseWriter, r *http.Request) bool
-	PreRequestOnAfterLimiter  func(w http.ResponseWriter, r *http.Request) bool
+	LimiterConfig   configLimiter
 }
 
 // DefaultChainConfig returns recommended chain configuration
@@ -53,16 +43,19 @@ func DefaultChainConfig() ChainConfig {
 		ThrottleLimit:      100,             // User-requested: specific Chi throttle limit
 		ThrottleTimeout:    1 * time.Minute, // User-requested: specific Chi throttle timeout
 
-		ThrottleBacklog:       50,              // User-requested: specific Chi throttle backlog
-		UseChiRateLimitAuth:   true,            // Enabled by default
-		UseChiRateLimitPublic: true,            // Enabled by default
-		RateLimitRequests:     120,             // User-requested: specific Chi rate limit requests
-		RateLimitWindow:       1 * time.Minute, // User-requested: specific Chi rate limit window
-		PreRequestOnBeforeLimiter: func(w http.ResponseWriter, r *http.Request) bool {
-			return true // TODO: implement pre request on before limiter
-		},
-		PreRequestOnAfterLimiter: func(w http.ResponseWriter, r *http.Request) bool {
-			return true // TODO: implement pre request on after limiter
+		ThrottleBacklog:       50,   // User-requested: specific Chi throttle backlog
+		UseChiRateLimitAuth:   true, // Enabled by default
+		UseChiRateLimitPublic: true, // Enabled by default
+		LimiterConfig: configLimiter{
+			RateLimitRequests: 120,             // User-requested: specific Chi rate limit requests
+			RateLimitWindow:   1 * time.Minute, // User-requested: specific Chi rate limit window
+			PreRequestOnBeforeLimiter: func(w http.ResponseWriter, r *http.Request) bool {
+				return true // TODO: implement pre request on before limiter
+			},
+			PreRequestOnAfterLimiter: func(w http.ResponseWriter, r *http.Request) bool {
+				return true // TODO: implement pre request on after limiter
+			},
+			Counter: nil,
 		},
 	}
 }
@@ -135,15 +128,8 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 
 		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitPublic {
-
-			opts := []httprate.KeyFunc{
-				httprate.KeyByIP,
-				httprate.KeyByEndpoint,
-				KeyByHeaderSignature(m.cfg.PrivateKeySignature, constants.HeaderUserAgent),
-				KeyByHeader(constants.HeaderAPIKey),
-			}
 			// Apply Chi rate limit
-			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, cfg.PreRequestOnBeforeLimiter, cfg.PreRequestOnAfterLimiter, opts...)(handler)
+			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
@@ -164,16 +150,7 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 
 		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitAuth {
-			opts := []httprate.KeyFunc{
-				httprate.KeyByIP,
-				httprate.KeyByEndpoint,
-				KeyByHeaderSignature(m.cfg.PrivateKeySignature, constants.HeaderUserAgent),
-				KeyByHeader(constants.HeaderUserID),
-				KeyByHeader(constants.HeaderUserType),
-				KeyByHeader(constants.HeaderAPIKey),
-			}
-
-			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, cfg.PreRequestOnBeforeLimiter, cfg.PreRequestOnAfterLimiter, opts...)(handler)
+			handler = RateLimit(cfg.LimiterConfig, m.cfg.PrivateKeySignature)(handler)
 		}
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
@@ -241,14 +218,7 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 		// Apply Chi rate limit
 		// Note: PreSignChain uses public rate limit settings in the original code, preserved here.
 		if cfg.UseChiRateLimitPublic {
-			opts := []httprate.KeyFunc{
-				httprate.KeyByIP,
-				httprate.KeyByEndpoint,
-				KeyByHeaderSignature(m.cfg.PrivateKeySignature, constants.HeaderUserAgent),
-				KeyByHeader(constants.HeaderAPIKey),
-			}
-
-			handler = RateLimit(cfg.RateLimitRequests, cfg.RateLimitWindow, nil, cfg.PreRequestOnBeforeLimiter, cfg.PreRequestOnAfterLimiter, opts...)(handler)
+			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
