@@ -299,30 +299,6 @@ curl -X POST http://localhost:8080/api/register \
 
 ## 🎨 Architecture
 
-```
-Request
-  ↓
-Recoverer (panic handling)
-  ↓
-Logger (audit logging)
-  ↓
-RealIP (extract client IP)
-  ↓
-EnsureCommonHeaders (validate required headers)
-  ↓
-SecureHeaders (inject security headers)
-  ↓
-Compress (gzip)
-  ↓
-MaxBodySize (limit body)
-  ↓
-CORS
-  ↓
-[Route-Specific Middleware]
-  ↓
-Handler
-```
-
 ## 📊 Audit Log Structure
 
 ```go

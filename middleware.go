@@ -436,6 +436,13 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 	})
 }
 
+func (m *Manager) SetHeaderAuthType(next http.Handler, authType string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Set(constants.HeaderAuthType, authType)
+		next.ServeHTTP(w, r)
+	})
+}
+
 // validateHeaders checks if all required headers are present in the request.
 // If any headers are missing, it returns false and writes a 400 Bad Request response.
 func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, headers []string) bool {

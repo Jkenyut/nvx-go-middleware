@@ -3,6 +3,8 @@ package middleware
 import (
 	"net/http"
 	"time"
+
+	"github.com/Jkenyut/nvx-go-middleware/constants"
 )
 
 // ChainConfig configures which middleware to use
@@ -131,10 +133,10 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 			// Apply Chi rate limit
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
+		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
 		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
-
 		return handler
 	}
 }
@@ -152,10 +154,10 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 		if cfg.UseChiRateLimitAuth {
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PrivateKeySignature)(handler)
 		}
+		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAuth)
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
 		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
-
 		return handler
 	}
 }
@@ -169,9 +171,9 @@ func (m *Manager) InternalChain(cfg ChainConfig) func(http.Handler) http.Handler
 
 		handler = m.GlobalChain(cfg)(handler)
 
+		handler = m.SetHeaderAuthType(handler, constants.AuthTypeInternal)
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
 		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
-
 		return handler
 	}
 }
@@ -220,10 +222,10 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 		if cfg.UseChiRateLimitPublic {
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
+		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
 		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
-
 		return handler
 	}
 }
