@@ -16,6 +16,7 @@ const (
 	HeaderUserAgent     = "User-Agent"
 	HeaderXHashBody     = "NVX-Hash-Body"
 	HeaderAuthType      = "NVX-Auth-Type"
+	HeaderRateKey       = "NVX-Rate-Key"
 	AuthTypePublic      = "public"
 	AuthTypePublicAuth  = "public_auth"
 	AuthTypeInternal    = "internal"

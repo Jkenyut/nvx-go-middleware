@@ -180,7 +180,7 @@ func RateLimit(
 }
 
 func keyByHeaderAuthType(r *http.Request) (string, error) {
-	return keyByHeader(r, constants.HeaderAuthType)
+	return keyByHeader(r, constants.HeaderRateKey)
 }
 
 // KeyByHeader returns a keying function that keys requests by the value of a specific header.
@@ -225,13 +225,13 @@ func rateKeyInjector(signature string) func(http.Handler) http.Handler {
 			switch r.Header.Get(constants.HeaderAuthType) {
 			case constants.AuthTypePublic:
 				key := buildRateKeyPublic(r, constants.AuthTypePublic, signature)
-				r.Header.Set("NVX-Rate-Key", key)
+				r.Header.Set(constants.HeaderRateKey, key)
 			case constants.AuthTypePublicAuth:
 				key := buildRateKeyPublicAuth(r, constants.AuthTypePublicAuth, signature)
-				r.Header.Set("NVX-Rate-Key", key)
+				r.Header.Set(constants.HeaderRateKey, key)
 			case constants.AuthTypeInternal:
 				key := buildRateKeyPublicAuth(r, constants.AuthTypeInternal, signature)
-				r.Header.Set("NVX-Rate-Key", key)
+				r.Header.Set(constants.HeaderRateKey, key)
 			}
 			next.ServeHTTP(w, r)
 		})
