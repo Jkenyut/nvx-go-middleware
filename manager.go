@@ -79,6 +79,11 @@ func New(cfg Config) *Manager {
 		cfg.RequiredPublicHeaders = constants.RequiredPublicHeaders
 	}
 
+	// Set default RequiredInternalHeaders if not set
+	if len(cfg.RequiredInternalHeaders) == 0 {
+		cfg.RequiredInternalHeaders = constants.RequiredInternalHeaders
+	}
+
 	// Set default RequiredSignatureHeadersPublicAuth if not set
 	if len(cfg.RequiredSignatureHeadersPublicAuth) == 0 {
 		cfg.RequiredSignatureHeadersPublicAuth = constants.RequiredSignatureHeadersPublicAuth
@@ -87,6 +92,11 @@ func New(cfg Config) *Manager {
 	// Set default RequiredSignatureHeadersPublic if not set
 	if len(cfg.RequiredSignatureHeadersPublic) == 0 {
 		cfg.RequiredSignatureHeadersPublic = constants.RequiredSignatureHeadersPublic
+	}
+
+	// Set default RequiredSignatureHeadersInternal if not set
+	if len(cfg.RequiredSignatureHeadersInternal) == 0 {
+		cfg.RequiredSignatureHeadersInternal = constants.RequiredSignatureHeadersInternal
 	}
 
 	// Set default SecurityHeaders if not set

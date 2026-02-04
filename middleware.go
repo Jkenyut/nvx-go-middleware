@@ -308,7 +308,7 @@ func (w *headerCleanerResponseWriter) Write(b []byte) (int, error) {
 func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Validate Headers Presence
-		valid := m.validateHeaders(w, r, m.cfg.RequiredPublicAuthHeaders)
+		valid := m.validateHeaders(w, r, m.cfg.RequiredInternalHeaders)
 		if !valid {
 			return
 		}
@@ -497,8 +497,8 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 
 // validateSignatureAuthHeaders validates the signature auth headers.
 func (m *Manager) validateSignatureInternalHeaders(r *http.Request) (bool, string) {
-	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublicAuth))
-	for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublicAuth {
+	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersInternal))
+	for _, nameHeader := range m.cfg.RequiredSignatureHeadersInternal {
 		authHeaders = append(authHeaders, r.Header.Get(nameHeader))
 	}
 

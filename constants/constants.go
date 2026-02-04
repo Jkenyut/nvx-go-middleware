@@ -61,23 +61,26 @@ var (
 		HeaderSignature,
 	}
 
-	// RequiredPublicAuthHeaders are headers required for authenticated public requests
-	RequiredPublicAuthHeaders = []string{
-		HeaderToken,
-		HeaderUserID,
-		HeaderUserType,
-	}
-
 	// RequiredPublicHeaders are headers required for public requests
 	RequiredPublicHeaders = []string{
 		HeaderXHashBody,
 	}
 
-	// RequiredSignatureHeadersPublicAuth are headers required for signature validation for public authenticated requests
-	RequiredSignatureHeadersPublicAuth = []string{
+	// RequiredPublicAuthHeaders are headers required for authenticated public requests
+	RequiredPublicAuthHeaders = []string{
+		HeaderToken,
+	}
+
+	// RequiredInternalHeaders are headers required for internal requests
+	RequiredInternalHeaders = []string{
 		HeaderToken,
 		HeaderUserID,
 		HeaderUserType,
+	}
+
+	// RequiredSignatureHeadersPublicAuth are headers required for signature validation for public authenticated requests
+	RequiredSignatureHeadersPublicAuth = []string{
+		HeaderToken,
 		HeaderRequestID,
 		HeaderAPIKey,
 		HeaderPlatform,
@@ -87,6 +90,18 @@ var (
 
 	// RequiredSignatureHeadersPublic are headers required for signature validation for public requests
 	RequiredSignatureHeadersPublic = []string{
+		HeaderRequestID,
+		HeaderAPIKey,
+		HeaderPlatform,
+		HeaderUserAgent,
+		HeaderTimestamp,
+	}
+
+	// RequiredSignatureHeadersInternal are headers required for signature validation for internal requests
+	RequiredSignatureHeadersInternal = []string{
+		HeaderToken,
+		HeaderUserID,
+		HeaderUserType,
 		HeaderRequestID,
 		HeaderAPIKey,
 		HeaderPlatform,

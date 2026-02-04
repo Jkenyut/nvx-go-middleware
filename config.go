@@ -40,8 +40,10 @@ type Config struct {
 	RequiredCommonHeaders              []string
 	RequiredPublicAuthHeaders          []string
 	RequiredPublicHeaders              []string
+	RequiredInternalHeaders            []string
 	RequiredSignatureHeadersPublicAuth []string
 	RequiredSignatureHeadersPublic     []string
+	RequiredSignatureHeadersInternal   []string
 
 	// Custom Context Injector
 	ContextInjector func(r *http.Request) *http.Request
