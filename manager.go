@@ -127,6 +127,7 @@ func New(cfg Config) *Manager {
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredCommonHeaders...)
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicAuthHeaders...)
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicHeaders...)
+		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredInternalHeaders...)
 	}
 
 	// Set default HeadersToRemove if not set
