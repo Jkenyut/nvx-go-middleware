@@ -1,6 +1,7 @@
 package constants
 
 // Header constants
+// Header constants define the standard headers used across the NVX middleware.
 const (
 	HeaderTransactionID = "NVX-Transaction-ID"
 	HeaderRequestID     = "NVX-Request-ID"
@@ -21,6 +22,7 @@ const (
 )
 
 // Error messages
+// Error messages for common middleware failures.
 const (
 	ErrMsgMissingHeaders         = "Missing required headers"
 	ErrMsgInvalidIP              = "Invalid IP address format"
@@ -36,6 +38,7 @@ const (
 	ErrMsgSignatureInvalid       = "Signature invalid"
 )
 
+// Configuration defaults and limits.
 const (
 	RequestBodyLimitSize        = 2 * 1024 * 1024 * 1024 // 2 GB
 	RequestBodyNonFileLimitSize = 3 * 1024 * 1024        // 3 MB
@@ -52,6 +55,7 @@ const (
 
 // Required headers for different request types
 var (
+	// RequiredCommonHeaders are headers required for all requests.
 	RequiredCommonHeaders = []string{
 		HeaderRequestID,
 		HeaderAPIKey,
@@ -111,6 +115,7 @@ var (
 )
 
 // Valid platforms
+// CheckPlatform defines the list of valid client platforms.
 var CheckPlatform = []string{
 	"android",
 	"ios",
@@ -120,6 +125,7 @@ var CheckPlatform = []string{
 }
 
 // Default security headers
+// SecurityHeaders defines the default security headers applied to responses.
 var SecurityHeaders = map[string]string{
 	"X-Content-Type-Options":    "nosniff",
 	"X-Frame-Options":           "DENY",

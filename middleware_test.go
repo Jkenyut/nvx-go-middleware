@@ -131,7 +131,8 @@ func TestEnsureCommonHeaders(t *testing.T) {
 				constants.HeaderPlatform:  "web",
 				// HeaderIP is populated by TrustProxy/RealIP, we mock it via TrustProxy if needed or assume set by previous middleware?
 				// Actually EnsureCommonHeaders checks it from request header which *should* be there.
-				constants.HeaderIP: "192.168.1.1",
+				constants.HeaderIP:        "192.168.1.1",
+				constants.HeaderUserAgent: "Mozilla/5.0",
 			},
 			wantStatus: http.StatusOK,
 		},

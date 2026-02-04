@@ -5,17 +5,20 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// LogStore defines the interface for storing log entries.
+// LogStore defines the interface for storing audit log entries.
+// Implementations can store logs to various backends like databases, files, or external services.
 type LogStore interface {
+	// Save persists an audit log entry.
 	Save(entry model.AuditLog) error
 }
 
-// ConsoleStore is a default implementation of LogStore that writes to the console.
+// ConsoleStore is a default implementation of LogStore that writes log entries to the standard output
+// using structured logging.
 type ConsoleStore struct {
 	logger *zerolog.Logger
 }
 
-// Save writes the audit log entry to the configured logger or stdout.
+// Save writes the audit log entry to the configured logger.
 func (c *ConsoleStore) Save(entry model.AuditLog) error {
 	// Log structured data using zerolog
 	c.logger.Info().

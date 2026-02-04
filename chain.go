@@ -7,32 +7,43 @@ import (
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 )
 
-// ChainConfig configures which middleware to use
+// ChainConfig configures which middleware to use in a middleware chain.
+// It allows toggling specific Chi middleware and configuring parameters like compression, throttling, and rate limiting.
 type ChainConfig struct {
-	// Chi middleware toggles
-	UseChiRealIP          bool
-	UseChiCompress        bool
-	UseChiTimeout         bool
-	UseChiThrottle        bool
-	UseChiRateLimitAuth   bool
+	// UseChiRealIP enables the Chi RealIP middleware, which sets the X-Real-IP header.
+	// Defaults to false in DefaultChainConfig in favor of secure TrustProxy.
+	UseChiRealIP bool
+	// UseChiCompress enables the Chi Compress middleware for response compression.
+	UseChiCompress bool
+	// UseChiTimeout enables the Chi Timeout middleware to set a request processing timeout.
+	UseChiTimeout bool
+	// UseChiThrottle enables the Chi Throttle middleware to limit concurrent requests.
+	UseChiThrottle bool
+	// UseChiRateLimitAuth enables rate limiting for authenticated routes.
+	UseChiRateLimitAuth bool
+	// UseChiRateLimitPublic enables rate limiting for public routes.
 	UseChiRateLimitPublic bool
-	UseChiStripSlashes    bool
+	// UseChiStripSlashes enables the Chi StripSlashes middleware to handle trailing slashes.
+	UseChiStripSlashes bool
 
-	// Compression level (1-9)
+	// CompressionLevel sets the compression level (1-9) if UseChiCompress is true.
 	CompressionLevel int
 
-	// Throttle limit (concurrent requests)
+	// ThrottleLimit sets the maximum number of concurrent requests if UseChiThrottle is true.
 	ThrottleLimit int
 
-	// Throttle timeout (duration)
+	// ThrottleTimeout sets the max duration to wait for a slot if UseChiThrottle is true.
 	ThrottleTimeout time.Duration
 
-	// Throttle backlog (max queue size)
+	// ThrottleBacklog sets the maximum size of the backlog queue for throttled requests.
 	ThrottleBacklog int
-	LimiterConfig   ConfigLimiter
+	// LimiterConfig holds the configuration for the custom rate limiter.
+	LimiterConfig ConfigLimiter
 }
 
-// DefaultChainConfig returns recommended chain configuration
+// DefaultChainConfig returns a ChainConfig with recommended default values.
+// It sets up reasonable defaults for compression, throttling, and rate limiting,
+// and enables specific middleware like Compress and StripSlashes.
 func DefaultChainConfig() ChainConfig {
 	return ChainConfig{
 
@@ -62,7 +73,9 @@ func DefaultChainConfig() ChainConfig {
 	}
 }
 
-// GlobalChain creates a middleware chain with both custom and Chi middleware
+// GlobalChain creates a middleware chain suitable for application-wide use.
+// It applies common headers, base middleware stacks (logging, recovery, security),
+// and configured Chi middleware.
 func (m *Manager) GlobalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := next
@@ -77,7 +90,9 @@ func (m *Manager) GlobalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	}
 }
 
-// applyBaseMiddleware applies the core middleware stack common to most chains
+// applyBaseMiddleware applies the core set of middleware common to most chains.
+// This includes timeouts, body size limits, header management, recovery, logging,
+// compression, trust proxy, and throttling based on the provided configuration.
 func (m *Manager) applyBaseMiddleware(handler http.Handler, cfg ChainConfig) http.Handler {
 
 	// Apply Chi middleware
@@ -119,7 +134,9 @@ func (m *Manager) applyBaseMiddleware(handler http.Handler, cfg ChainConfig) htt
 	return handler
 }
 
-// PublicChain creates a chain for public routes (with device validation)
+// PublicChain creates a middleware chain for public routes that do not require user authentication.
+// It ensures the request is treated as public, runs the global chain, applies public rate limits,
+// sets the auth type to public, and handles CORS.
 func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := next
@@ -141,7 +158,9 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	}
 }
 
-// PublicAuthChain creates a chain for authenticated public routes
+// PublicAuthChain creates a middleware chain for public routes that require authentication (e.g., user login).
+// It ensures public auth requirements, runs the global chain, applies authenticated rate limits,
+// sets the auth type to public-auth, and handles CORS.
 func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := next
@@ -162,7 +181,9 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 	}
 }
 
-// InternalChain creates a chain for internal routes
+// InternalChain creates a middleware chain for internal service-to-service routes.
+// It ensures internal request requirements, runs the global chain, sets the auth type to internal,
+// and helps manage CORS for internal communication.
 func (m *Manager) InternalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := next
@@ -178,7 +199,9 @@ func (m *Manager) InternalChain(cfg ChainConfig) func(http.Handler) http.Handler
 	}
 }
 
-// AdminChain creates a chain for admin routes
+// AdminChain creates a middleware chain for admin routes.
+// It builds upon the InternalChain and adds an additional adminCheck middleware
+// for specific administrative authorization.
 func (m *Manager) AdminChain(cfg ChainConfig, adminCheck func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return m.InternalChain(cfg)(
@@ -187,7 +210,9 @@ func (m *Manager) AdminChain(cfg ChainConfig, adminCheck func(http.Handler) http
 	}
 }
 
-// ApplyMiddleware applies multiple middleware in order (left to right)
+// ApplyMiddleware applies a list of middleware to a handler.
+// The middleware are applied in reverse order so that the first middleware in the list
+// is the first one to process the request (outermost).
 func ApplyMiddleware(handler http.Handler, middlewares ...func(http.Handler) http.Handler) http.Handler {
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		handler = middlewares[i](handler)
@@ -195,7 +220,9 @@ func ApplyMiddleware(handler http.Handler, middlewares ...func(http.Handler) htt
 	return handler
 }
 
-// Heartbeat creates a simple health check endpoint
+// Heartbeat creates a simple heartbeat/health-check middleware handler.
+// It intercepts requests to the specified path and returns a 200 OK "OK" plain text response,
+// bypassing subsequent middleware.
 func Heartbeat(path string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == path {
@@ -206,7 +233,8 @@ func Heartbeat(path string) http.HandlerFunc {
 	}
 }
 
-// PreSignChain creates a middleware chain with both custom and Chi middleware
+// PreSignChain creates a middleware chain specifically for pre-signed requests.
+// It handles pre-sign specific headers, applies base middleware, and enforces public rate limits.
 func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := next
@@ -230,7 +258,9 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 	}
 }
 
-// WebhookChain creates a chain for webhook routes
+// WebhookChain creates a middleware chain specialized for handling webhooks.
+// It focuses on processing reliability and logging, applying timeouts, body limits,
+// header cleanup, recovery, logging, and compression, while trusting proxies.
 func (m *Manager) WebhookChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := next

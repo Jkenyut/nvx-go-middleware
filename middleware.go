@@ -28,6 +28,9 @@ import (
 // Recoverer is a middleware that recovers from panics, logs the panic (and a backtrace),
 // and returns a HTTP 500 (Internal Server Error) status if possible.
 // Recoverer prints a request ID if one is provided.
+// Recoverer is a middleware that recovers from panics, logs the panic details,
+// and returns a HTTP 500 (Internal Server Error) response.
+// It also ensures that the response writer is in a valid state before writing the error.
 func (m *Manager) Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
@@ -85,6 +88,9 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 // along with useful information about what was requested, what the response status was,
 // and how long it took to return. When a request is completed, a log entry is saved
 // using the configured LogStore.
+// Logger is a middleware that logs the start and completion of each request.
+// It captures request/response details, latency, status code, and creates an audit log entry.
+// It supports context injection and transaction ID propagation.
 func (m *Manager) Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Wrap response writer to capture status and body
@@ -217,6 +223,9 @@ func normalizeHeadersJSON(h http.Header) json.RawMessage {
 // EnsureCommonHeaders validates that common required headers are present in all requests.
 // These headers are: NVX-Request-ID, NVX-API-Key, and NVX-IP.
 // It also validates that NVX-IP contains a valid IP address format.
+// EnsureCommonHeaders validates that common required headers are present in all requests.
+// These headers typically include request IDs and IP addresses.
+// It enforces strict validation rules and returns 400 Bad Request if validation fails.
 func (m *Manager) EnsureCommonHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Validate Headers Presence
@@ -246,6 +255,8 @@ func (m *Manager) EnsureCommonHeaders(next http.Handler) http.Handler {
 // SecureHeaders adds security-related headers to the response.
 // These headers help protect against common web vulnerabilities like XSS,
 // clickjacking, and MIME type sniffing.
+// SecureHeaders adds a set of security-related headers to the response.
+// These headers correspond to the SecurityHeaders configuration map.
 func (m *Manager) SecureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for key, value := range m.cfg.SecurityHeaders {
@@ -257,6 +268,8 @@ func (m *Manager) SecureHeaders(next http.Handler) http.Handler {
 
 // RemoveHeaders removes specified headers from the response.
 // This is useful for removing headers like Server, X-Powered-By, etc.
+// RemoveHeaders removes specific headers from the response as configured in HeadersToRemove.
+// This is useful for stripping sensitive or unnecessary headers before sending the response to the client.
 func (m *Manager) RemoveHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// If no headers to remove, skip wrapper overhead
@@ -305,6 +318,8 @@ func (w *headerCleanerResponseWriter) Write(b []byte) (int, error) {
 // EnsureInternal validates headers required for internal requests.
 // It checks for the presence of NVX-Token and NVX-User-ID headers,
 // and validates the request signature to ensure authenticity.
+// EnsureInternal validates that headers required for internal service communication are present and valid.
+// It checks for authentication tokens and verifies the internal request signature.
 func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Validate Headers Presence
@@ -353,6 +368,8 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 // EnsurePublicAuth validates headers required for authenticated public requests.
 // This includes device information (User-Agent, Device-ID, Platform, Mac-Address)
 // and validates the request signature for public endpoints.
+// EnsurePublicAuth validates that headers required for authenticated public requests are present and valid.
+// It checks key signature authentication headers and verifies the request signature.
 func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Validate Headers Presence
@@ -396,6 +413,8 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 // EnsurePublic validates headers required for public requests.
 // This includes device information (User-Agent, Device-ID, Platform, Mac-Address)
 // and validates the request signature for public endpoints.
+// EnsurePublic validates that headers required for public (unauthenticated) requests are present and valid.
+// It ensures basic request integrity and verifies the public request signature.
 func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Validate Headers Presence
@@ -436,6 +455,8 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 	})
 }
 
+// SetHeaderAuthType sets the "NVX-Auth-Type" header to the specified authType.
+// This is used by downstream handlers or rate limiters to identify the authentication context of the request.
 func (m *Manager) SetHeaderAuthType(next http.Handler, authType string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Header.Set(constants.HeaderAuthType, authType)
@@ -556,6 +577,9 @@ func (_ *Manager) validateSignatureHeaders(r *http.Request, keySignature string,
 }
 
 // TrustProxy validates the remote IP address of the request.
+// TrustProxy checks if the request comes from a trusted proxy and updates the RemoteAddr
+// and other headers based on X-Forwarded-For if configured.
+// It ensures that the application sees the real client IP.
 func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
@@ -614,6 +638,9 @@ func isMultipart(contentType string) bool {
 
 // MaxBodySize returns a middleware that limits the maximum size of the request body.
 // It also restricts the allowed Content-Types based on the configuration.
+// MaxBodySize returns a middleware that limits the size of the request body.
+// It supports different limits for file uploads (multipart) vs regular requests.
+// It also enforces allowed content types.
 func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -689,6 +716,8 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 // CORS adds Cross-Origin Resource Sharing (CORS) headers to responses.
 // It handles preflight OPTIONS requests and sets appropriate headers
 // based on the configured allowed origins.
+// CORS returns a middleware that handles Cross-Origin Resource Sharing (CORS).
+// It sets Access-Control-Allow-Origin/Methods/Headers based on configuration.
 func (m *Manager) CORS(
 	next http.Handler,
 	allowedOrigins []string,
@@ -730,6 +759,8 @@ func (m *Manager) CORS(
 
 // FullURL reconstructs the full URL of the request, including scheme, host, and path.
 // It respects X-Forwarded-Proto and X-Forwarded-Host headers if present.
+// FullURL constructs the full URL of the request, considering X-Forwarded-Proto
+// and X-Forwarded-Host headers to reconstruct the original requested URL.
 func FullURL(r *http.Request) string {
 	scheme := "http"
 	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
@@ -764,6 +795,9 @@ func (_ *Manager) injectContext(r *http.Request) *http.Request {
 // ReadAndRestoreBody reads the request body and restores it for later use.
 // It returns the body as a byte slice and an error if the read fails.
 // If the request body is nil or the content type is multipart, it returns nil and no error.
+// ReadAndRestoreBody reads the request body fully and then restores it
+// so that it can be read again by subsequent handlers.
+// It respects the configured body size limit.
 func ReadAndRestoreBody(r *http.Request) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
@@ -786,6 +820,8 @@ func ReadAndRestoreBody(r *http.Request) ([]byte, error) {
 
 // MethodOnly restricts a handler to only accept a specific HTTP method.
 // If the request method doesn't match, it returns a 405 Method Not Allowed response.
+// MethodOnly returns a middleware that enforces the HTTP method.
+// Calls to other methods will receive a 405 Method Not Allowed response.
 func (m *Manager) MethodOnly(method string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != method {
@@ -807,6 +843,9 @@ func (m *Manager) MethodOnly(method string, next http.Handler) http.Handler {
 // If the content type is multipart, it returns "UNSIGNED".
 // If the body is empty, it returns "EMPTY".
 // Otherwise, it returns the SHA-256 hash of the body.
+// ResolveBodyToken computes a hash token for the request body.
+// It returns "UNSIGNED" for multipart requests, "EMPTY" for empty bodies,
+// or the SHA256 hex digest for other content.
 func ResolveBodyToken(contentType string, body []byte) string {
 	ct := strings.ToLower(strings.TrimSpace(contentType))
 
@@ -828,6 +867,8 @@ func ResolveBodyToken(contentType string, body []byte) string {
 // EnsurePreSignHeaders validates that common required headers are present in all requests.
 // These headers are: NVX-Request-ID, NVX-API-Key, NVX-Platform, and NVX-Timestamp.
 // It also validates that NVX-IP contains a valid IP address format.
+// EnsurePreSignHeaders validates that headers required for presigned requests are present.
+// It checks for request ID, API key, platform, timestamp, and signature headers.
 func (m *Manager) EnsurePreSignHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Validate Headers Presence
@@ -855,6 +896,8 @@ func (m *Manager) EnsurePreSignHeaders(next http.Handler) http.Handler {
 }
 
 // PreSignHandler creates a handler for presigning requests
+// PreSignHandler creates a handler that generates presigned signatures.
+// It expects a POST request with specific headers and a JSON body describing the request to sign.
 func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 	return m.MethodOnly("POST", m.PreSignChain(cfg)(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

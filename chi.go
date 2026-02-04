@@ -13,67 +13,90 @@ import (
 	"github.com/go-chi/httprate"
 )
 
-// ChiRealIP wraps Chi's RealIP middleware
+// ChiRealIP wraps Chi's RealIP middleware.
+// It sets a http.Handler that puts the X-Real-IP and X-Forwarded-For headers into the context.
 func (m *Manager) ChiRealIP(next http.Handler) http.Handler {
 	return chimiddleware.RealIP(next)
 }
 
-// ChiCompress wraps Chi's Compress middleware
+// ChiCompress wraps Chi's Compress middleware.
+// It returns a middleware that compresses the response body based on the client's Accept-Encoding header.
+// Level is the compression level (1-9).
 func (m *Manager) ChiCompress(level int) func(http.Handler) http.Handler {
 	return chimiddleware.Compress(level)
 }
 
-// ChiTimeout wraps Chi's Timeout middleware
+// ChiTimeout wraps Chi's Timeout middleware.
+// It returns a middleware that cancels the context after the given timeout.
 func (m *Manager) ChiTimeout(timeout time.Duration) func(http.Handler) http.Handler {
 	return chimiddleware.Timeout(timeout)
 }
 
-// ChiThrottle wraps Chi's Throttle middleware
+// ChiThrottle wraps Chi's Throttle middleware.
+// It returns a middleware that limits the number of concurrent requests to the handler.
 func (m *Manager) ChiThrottle(limit int) func(http.Handler) http.Handler {
 	return chimiddleware.Throttle(limit)
 }
 
-// ChiStripSlashes wraps Chi's StripSlashes middleware
+// ChiStripSlashes wraps Chi's StripSlashes middleware.
+// It returns a middleware that will match a request against a path without a trailing slash
+// if the original request had one and no handler was found.
 func (m *Manager) ChiStripSlashes(next http.Handler) http.Handler {
 	return chimiddleware.StripSlashes(next)
 }
 
-// ChiNoCache wraps Chi's NoCache middleware
+// ChiNoCache wraps Chi's NoCache middleware.
+// It returns a middleware that sets headers to prevent caching of the response.
 func (m *Manager) ChiNoCache(next http.Handler) http.Handler {
 	return chimiddleware.NoCache(next)
 }
 
-// ChiHeartbeat wraps Chi's Heartbeat middleware
+// ChiHeartbeat wraps Chi's Heartbeat middleware.
+// It returns a middleware that responds to a specific path with a 200 OK status.
 func (m *Manager) ChiHeartbeat(endpoint string) func(http.Handler) http.Handler {
 	return chimiddleware.Heartbeat(endpoint)
 }
 
-// ChiProfiler wraps Chi's Profiler middleware (for debugging)
+// ChiProfiler wraps Chi's Profiler middleware.
+// It returns a middleware that mounts pprof endpoints at /debug/pprof.
+// This is strictly for debugging and should not be enabled in production public endpoints.
 func (m *Manager) ChiProfiler() http.Handler {
 	return chimiddleware.Profiler()
 }
 
-// WrapWithChiWriter wraps response writer with Chi's WrapResponseWriter
-// This is useful for compatibility with Chi middleware
+// WrapWithChiWriter wraps a standard http.ResponseWriter with Chi's WrapResponseWriter.
+// This provides additional functionality like capturing the status code and bytes written,
+// which is useful for logging and other middleware that need to inspect the response.
 func (m *Manager) WrapWithChiWriter(w http.ResponseWriter, r *http.Request) chimiddleware.WrapResponseWriter {
 	return chimiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
 }
 
-// ChiThrottleBacklog wraps Chi's ThrottleBacklog middleware
+// ChiThrottleBacklog wraps Chi's ThrottleBacklog middleware.
+// It returns a middleware that limits concurrent requests and maintains a backlog of requests
+// waiting for a slot, with a timeout for how long they can wait in the queue.
 func (m *Manager) ChiThrottleBacklog(limit int, backlog int, backlogTimeout time.Duration) func(http.Handler) http.Handler {
 	return chimiddleware.ThrottleBacklog(limit, backlog, backlogTimeout)
 }
 
-// Rate limit configuration
+// ConfigLimiter holds configuration for the custom rate limiter.
 type ConfigLimiter struct {
-	RateLimitRequests         int
-	RateLimitWindow           time.Duration
-	Counter                   httprate.LimitCounter
+	// RateLimitRequests is the number of requests allowed per window.
+	RateLimitRequests int
+	// RateLimitWindow is the duration of the rate limit window.
+	RateLimitWindow time.Duration
+	// Counter is the backend storage for the rate limiter limits (e.g., memory, redis).
+	Counter httprate.LimitCounter
+	// PreRequestOnBeforeLimiter is a hook executed before the rate limiter check.
+	// Return false to abort the request.
 	PreRequestOnBeforeLimiter func(w http.ResponseWriter, r *http.Request) bool
-	PreRequestOnAfterLimiter  func(w http.ResponseWriter, r *http.Request) bool
+	// PreRequestOnAfterLimiter is a hook executed after the rate limiter check but before the handler.
+	// Return false to abort the request.
+	PreRequestOnAfterLimiter func(w http.ResponseWriter, r *http.Request) bool
 }
 
-// RateLimit is a middleware that limits the rate of requests to a handler.
+// RateLimit creates a rate limiting middleware based on the provided configuration.
+// It supports per-header keying (e.g., by IP, API Key, User ID) and custom limiter hooks.
+// It adds standard rate limit headers to the response (X-RateLimit-Limit, etc.).
 func RateLimit(
 	cfg ConfigLimiter,
 	signatureSecret string,
@@ -160,7 +183,8 @@ func keyByHeaderAuthType(r *http.Request) (string, error) {
 	return keyByHeader(r, constants.HeaderAuthType)
 }
 
-// KeyByHeader returns a key function that returns the value of the specified header
+// KeyByHeader returns a keying function that keys requests by the value of a specific header.
+// If the header is missing, it returns "unknown".
 func keyByHeader(r *http.Request, header string) (string, error) {
 	headerName := r.Header.Get(header)
 	if headerName == "" {

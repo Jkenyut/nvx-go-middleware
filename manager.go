@@ -11,13 +11,15 @@ import (
 )
 
 // Manager holds the middleware configuration and provides middleware methods.
+// It is the central entry point for creating and managing middleware chains.
 type Manager struct {
 	cfg     Config
 	counter httprate.LimitCounter
 }
 
 // New creates a new Middleware Manager with the given configuration.
-// It initializes required fields and sets default values if they are missing.
+// It initializes required fields, sets default values for missing configuration using safe defaults,
+// and validates the configuration. Panics if validation fails.
 func New(cfg Config) *Manager {
 	// Set default logger if not set
 	if cfg.Logger == nil {
@@ -140,7 +142,8 @@ func New(cfg Config) *Manager {
 	return &Manager{cfg: cfg}
 }
 
-// Config returns a copy of the manager's configuration
+// Config returns a copy of the manager's configuration.
+// This is useful for inspecting the current configuration state.
 func (m *Manager) Config() Config {
 	return m.cfg
 }
