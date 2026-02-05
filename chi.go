@@ -92,8 +92,8 @@ type ConfigLimiter struct {
 	// PreRequestOnAfterLimiter is a hook executed after the rate limiter check but before the handler.
 	// Return false to abort the request.
 	PreRequestOnAfterLimiter func(w http.ResponseWriter, r *http.Request) bool
-	// LimiterFunc is the rate limiter function to use.
-	LimiterFunc func(http.Handler) http.Handler
+	// LimiterHook is the rate limiter function to use.
+	LimiterHook func(http.Handler) http.Handler
 }
 
 // RateLimit creates a rate limiting middleware based on the provided configuration.
@@ -102,7 +102,6 @@ type ConfigLimiter struct {
 func RateLimit(
 	cfg ConfigLimiter,
 	signatureSecret string,
-	limiterFunc func(http.Handler) http.Handler,
 ) func(http.Handler) http.Handler {
 
 	opts := []httprate.Option{
@@ -170,8 +169,8 @@ func RateLimit(
 
 			var handlerLayer3 http.Handler
 			// LAYER 3: Rate Limiter
-			if limiterFunc != nil {
-				handlerLayer3 = limiterFunc(handlerLayer2) // Limiter wraps Layer 2
+			if cfg.LimiterHook != nil {
+				handlerLayer3 = cfg.LimiterHook(handlerLayer2) // Limiter wraps Layer 2
 			} else {
 				handlerLayer3 = limiter(handlerLayer2)
 			}

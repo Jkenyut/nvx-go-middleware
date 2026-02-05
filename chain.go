@@ -69,7 +69,7 @@ func DefaultChainConfig() ChainConfig {
 				return true // TODO: implement pre request on after limiter
 			},
 			Counter:     nil,
-			LimiterFunc: nil,
+			LimiterHook: nil,
 		},
 	}
 }
@@ -149,7 +149,7 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitPublic {
 			// Apply Chi rate limit
-			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature, cfg.LimiterConfig.LimiterFunc)(handler)
+			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
 
@@ -172,7 +172,7 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 
 		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitAuth {
-			handler = RateLimit(cfg.LimiterConfig, m.cfg.PrivateKeySignature, cfg.LimiterConfig.LimiterFunc)(handler)
+			handler = RateLimit(cfg.LimiterConfig, m.cfg.PrivateKeySignature)(handler)
 		}
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAuth)
 
@@ -249,7 +249,7 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 		// Apply Chi rate limit
 		// Note: PreSignChain uses public rate limit settings in the original code, preserved here.
 		if cfg.UseChiRateLimitPublic {
-			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature, cfg.LimiterConfig.LimiterFunc)(handler)
+			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
 
