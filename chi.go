@@ -92,6 +92,8 @@ type ConfigLimiter struct {
 	// PreRequestOnAfterLimiter is a hook executed after the rate limiter check but before the handler.
 	// Return false to abort the request.
 	PreRequestOnAfterLimiter func(w http.ResponseWriter, r *http.Request) bool
+	// LimiterFunc is the rate limiter function to use.
+	LimiterFunc func(http.Handler) http.Handler
 }
 
 // RateLimit creates a rate limiting middleware based on the provided configuration.
@@ -100,6 +102,7 @@ type ConfigLimiter struct {
 func RateLimit(
 	cfg ConfigLimiter,
 	signatureSecret string,
+	limiterFunc func(http.Handler) http.Handler,
 ) func(http.Handler) http.Handler {
 
 	opts := []httprate.Option{
@@ -165,8 +168,13 @@ func RateLimit(
 				handlerLayer1.ServeHTTP(w2, r2) // Call Layer 1
 			})
 
+			var handlerLayer3 http.Handler
 			// LAYER 3: Rate Limiter
-			handlerLayer3 := limiter(handlerLayer2) // Limiter wraps Layer 2
+			if limiterFunc != nil {
+				handlerLayer3 = limiterFunc(handlerLayer2) // Limiter wraps Layer 2
+			} else {
+				handlerLayer3 = limiter(handlerLayer2)
+			}
 
 			// LAYER 4: Rate Key Injector
 			handlerLayer4 := rateKeyInjector(signatureSecret)(handlerLayer3) // Inject wraps Layer 3
@@ -219,6 +227,7 @@ func buildRateKeyPublicAuth(r *http.Request, zone string, signature string) stri
 	return fmt.Sprintf("zone:%s:ip:%s:endpoint:%s:useragent:%s:userid:%s:usertype:%s:apikey:%s", zone, ip, endpoint, userAgent, userID, userType, apiKey)
 }
 
+// RateKeyInjector injects a rate key into the request header based on the authentication type.
 func rateKeyInjector(signature string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
