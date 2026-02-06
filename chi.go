@@ -200,30 +200,18 @@ func keyByHeader(r *http.Request, header string) (string, error) {
 	return headerName, nil
 }
 
-func keyByHeaderSignature(r *http.Request, secret, name string) (string, error) {
-	headerName := r.Header.Get(name)
-	if headerName == "" {
-		headerName = "unknown"
-	}
-	return cryptoutil.Signature(secret, headerName), nil
-}
-
 func buildRateKeyPublic(r *http.Request, zone string, signature string) string {
 	ip, _ := httprate.KeyByIP(r)
 	endpoint, _ := httprate.KeyByEndpoint(r)
-	userAgent, _ := keyByHeaderSignature(r, signature, constants.HeaderUserAgent)
+	userAgent, _ := keyByHeader(r, constants.HeaderUserAgent)
 	apiKey, _ := keyByHeader(r, constants.HeaderAPIKey)
-	return fmt.Sprintf("zone:%s:ip:%s:endpoint:%s:useragent:%s:apikey:%s", zone, ip, endpoint, userAgent, apiKey)
+	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:ip:%s:endpoint:%s:useragent:%s:apikey:%s", zone, ip, endpoint, userAgent, apiKey))
 }
 
 func buildRateKeyPublicAuth(r *http.Request, zone string, signature string) string {
-	ip, _ := httprate.KeyByIP(r)
 	endpoint, _ := httprate.KeyByEndpoint(r)
-	userAgent, _ := keyByHeaderSignature(r, signature, constants.HeaderUserAgent)
-	userID, _ := keyByHeader(r, constants.HeaderUserID)
-	userType, _ := keyByHeader(r, constants.HeaderUserType)
 	apiKey, _ := keyByHeader(r, constants.HeaderAPIKey)
-	return fmt.Sprintf("zone:%s:ip:%s:endpoint:%s:useragent:%s:userid:%s:usertype:%s:apikey:%s", zone, ip, endpoint, userAgent, userID, userType, apiKey)
+	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:endpoint:%s:apikey:%s", zone, endpoint, apiKey))
 }
 
 // RateKeyInjector injects a rate key into the request header based on the authentication type.
