@@ -17,6 +17,7 @@ const (
 	HeaderXHashBody     = "NVX-Hash-Body"
 	HeaderAuthType      = "NVX-Auth-Type"
 	HeaderRateKey       = "NVX-Rate-Key"
+	HeaderAppID         = "NVX-App-ID"
 	AuthTypePublic      = "public"
 	AuthTypePublicAuth  = "public_auth"
 	AuthTypeInternal    = "internal"
@@ -59,7 +60,7 @@ var (
 	// RequiredCommonHeaders are headers required for all requests.
 	RequiredCommonHeaders = []string{
 		HeaderRequestID,
-		HeaderAPIKey,
+		HeaderAppID,
 		HeaderPlatform,
 		HeaderUserAgent,
 		HeaderTimestamp,
@@ -74,6 +75,7 @@ var (
 	// RequiredPublicAuthHeaders are headers required for authenticated public requests
 	RequiredPublicAuthHeaders = []string{
 		HeaderToken,
+		HeaderAPIKey,
 	}
 
 	// RequiredInternalHeaders are headers required for internal requests
@@ -86,8 +88,9 @@ var (
 	// RequiredSignatureHeadersPublicAuth are headers required for signature validation for public authenticated requests
 	RequiredSignatureHeadersPublicAuth = []string{
 		HeaderToken,
-		HeaderRequestID,
 		HeaderAPIKey,
+		HeaderRequestID,
+		HeaderAppID,
 		HeaderPlatform,
 		HeaderUserAgent,
 		HeaderTimestamp,
@@ -96,7 +99,7 @@ var (
 	// RequiredSignatureHeadersPublic are headers required for signature validation for public requests
 	RequiredSignatureHeadersPublic = []string{
 		HeaderRequestID,
-		HeaderAPIKey,
+		HeaderAppID,
 		HeaderPlatform,
 		HeaderUserAgent,
 		HeaderTimestamp,
@@ -108,7 +111,7 @@ var (
 		HeaderUserID,
 		HeaderUserType,
 		HeaderRequestID,
-		HeaderAPIKey,
+		HeaderAppID,
 		HeaderPlatform,
 		HeaderUserAgent,
 		HeaderTimestamp,

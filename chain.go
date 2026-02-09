@@ -56,11 +56,11 @@ func DefaultChainConfig() ChainConfig {
 		ThrottleLimit:      100,             // User-requested: specific Chi throttle limit
 		ThrottleTimeout:    1 * time.Minute, // User-requested: specific Chi throttle timeout
 
-		ThrottleBacklog:       50,   // User-requested: specific Chi throttle backlog
-		UseChiRateLimitAuth:   true, // Enabled by default
-		UseChiRateLimitPublic: true, // Enabled by default
+		ThrottleBacklog:       50,    // User-requested: specific Chi throttle backlog
+		UseChiRateLimitAuth:   false, // Enabled by default
+		UseChiRateLimitPublic: false, // Enabled by default
 		LimiterConfig: ConfigLimiter{
-			RateLimitRequests: 120,             // User-requested: specific Chi rate limit requests
+			RateLimitRequests: 60,              // User-requested: specific Chi rate limit requests
 			RateLimitWindow:   1 * time.Minute, // User-requested: specific Chi rate limit window
 			PreRequestOnBeforeLimiter: func(w http.ResponseWriter, r *http.Request) bool {
 				return true // TODO: implement pre request on before limiter

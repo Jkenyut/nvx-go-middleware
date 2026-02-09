@@ -150,7 +150,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			FullURL:         FullURL(r),
 			StatusCode:      statusCode,
 			LatencyMS:       int(time.Since(start).Milliseconds()),
-			APIKey:          r.Header.Get(constants.HeaderAPIKey),
+			AppID:           r.Header.Get(constants.HeaderAppID),
 			ClientIP:        r.Header.Get(constants.HeaderIP),
 			RequestID:       r.Header.Get(constants.HeaderRequestID),
 			CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
