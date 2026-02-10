@@ -102,17 +102,10 @@ func (m *Manager) applyBaseMiddleware(handler http.Handler, cfg ChainConfig) htt
 	}
 
 	// Apply custom middleware (inner to outer)
-	handler = m.MaxBodySize()(handler)
 	handler = m.RemoveHeaders(handler)
-	handler = m.SecureHeaders(handler)
-	// Note: header validation is applied by the caller (GlobalChain vs PreSignChain)
-	handler = m.Recoverer(handler)
-	handler = m.Logger(handler)
 
-	// Apply Chi compression
-	if cfg.UseChiCompress {
-		handler = m.ChiCompress(cfg.CompressionLevel)(handler)
-	}
+	// Note: header validation is applied by the caller (GlobalChain vs PreSignChain)
+	handler = m.Logger(handler)
 
 	// Apply Chi strip slashes
 	if cfg.UseChiStripSlashes {
@@ -151,8 +144,15 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 			// Apply Chi rate limit
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
-		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
 
+		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
+		handler = m.MaxBodySize()(handler)
+		handler = m.SecureHeaders(handler)
+		// Apply Chi compression
+		if cfg.UseChiCompress {
+			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
+		}
+		handler = m.Recoverer(handler)
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
 		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
 		return handler
@@ -175,7 +175,13 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PrivateKeySignature)(handler)
 		}
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAuth)
-
+		handler = m.MaxBodySize()(handler)
+		handler = m.SecureHeaders(handler)
+		// Apply Chi compression
+		if cfg.UseChiCompress {
+			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
+		}
+		handler = m.Recoverer(handler)
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
 		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
 		return handler
@@ -194,6 +200,13 @@ func (m *Manager) InternalChain(cfg ChainConfig) func(http.Handler) http.Handler
 		handler = m.GlobalChain(cfg)(handler)
 
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypeInternal)
+		handler = m.MaxBodySize()(handler)
+		handler = m.SecureHeaders(handler)
+		// Apply Chi compression
+		if cfg.UseChiCompress {
+			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
+		}
+		handler = m.Recoverer(handler)
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
 		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
 		return handler
@@ -252,7 +265,13 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
-
+		handler = m.MaxBodySize()(handler)
+		handler = m.SecureHeaders(handler)
+		// Apply Chi compression
+		if cfg.UseChiCompress {
+			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
+		}
+		handler = m.Recoverer(handler)
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
 		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
 		return handler
