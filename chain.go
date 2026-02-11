@@ -104,13 +104,13 @@ func (m *Manager) applyBaseMiddleware(handler http.Handler, cfg ChainConfig) htt
 	// Apply custom middleware (inner to outer)
 	handler = m.RemoveHeaders(handler)
 
-	// Note: header validation is applied by the caller (GlobalChain vs PreSignChain)
-	handler = m.Logger(handler)
-
 	// Apply Chi strip slashes
 	if cfg.UseChiStripSlashes {
 		handler = m.ChiStripSlashes(handler)
 	}
+
+	// Note: header validation is applied by the caller (GlobalChain vs PreSignChain)
+	handler = m.Logger(handler)
 
 	// Apply Chi real IP
 	if cfg.UseChiRealIP {
@@ -291,24 +291,24 @@ func (m *Manager) WebhookChain(cfg ChainConfig) func(http.Handler) http.Handler 
 		}
 
 		// Apply custom middleware (inner to outer)
-		handler = m.MaxBodySize()(handler)
 		handler = m.RemoveHeaders(handler)
-		// Note: header validation is applied by the caller if needed, typically webhooks trust the source via signature
-		handler = m.Recoverer(handler)
-		handler = m.Logger(handler)
-
-		// Apply Chi compression
-		if cfg.UseChiCompress {
-			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
-		}
-
 		// Apply Chi strip slashes
 		if cfg.UseChiStripSlashes {
 			handler = m.ChiStripSlashes(handler)
 		}
 
+		// Note: header validation is applied by the caller if needed, typically webhooks trust the source via signature
+		handler = m.Logger(handler)
+
 		// Always apply TrustProxy to populate NVX-IP safely
 		handler = m.TrustProxy(handler)
+		handler = m.MaxBodySize()(handler)
+		handler = m.SecureHeaders(handler)
+		// Apply Chi compression
+		if cfg.UseChiCompress {
+			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
+		}
+		handler = m.Recoverer(handler)
 
 		return handler
 	}
