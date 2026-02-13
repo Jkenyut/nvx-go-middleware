@@ -66,11 +66,6 @@ func New(cfg Config) *Manager {
 		panic(fmt.Sprintf("middleware configuration error: %v", err))
 	}
 
-	// Set default RequiredCommonHeaders if not set
-	if len(cfg.RequiredCommonHeaders) == 0 {
-		cfg.RequiredCommonHeaders = constants.RequiredCommonHeaders
-	}
-
 	// Set default RequiredPublicAuthHeaders if not set
 	if len(cfg.RequiredPublicAuthHeaders) == 0 {
 		cfg.RequiredPublicAuthHeaders = constants.RequiredPublicAuthHeaders
@@ -124,7 +119,6 @@ func New(cfg Config) *Manager {
 	// Set default AllowedHeaders if not set
 	if len(cfg.AllowedHeaders) == 0 {
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, "Accept", "Authorization", "Content-Type")
-		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredCommonHeaders...)
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicAuthHeaders...)
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicHeaders...)
 		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredInternalHeaders...)

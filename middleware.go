@@ -220,38 +220,6 @@ func normalizeHeadersJSON(h http.Header) json.RawMessage {
 	return json.RawMessage(b)
 }
 
-// EnsureCommonHeaders validates that common required headers are present in all requests.
-// These headers are: NVX-Request-ID, NVX-API-Key, and NVX-IP.
-// It also validates that NVX-IP contains a valid IP address format.
-// EnsureCommonHeaders validates that common required headers are present in all requests.
-// These headers typically include request IDs and IP addresses.
-// It enforces strict validation rules and returns 400 Bad Request if validation fails.
-func (m *Manager) EnsureCommonHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Validate Headers Presence
-		valid := m.validateHeaders(w, r, m.cfg.RequiredCommonHeaders)
-		if !valid {
-			return
-		}
-
-		// Validate IP Format
-		ipStr := r.Header.Get(constants.HeaderIP)
-		if net.ParseIP(ipStr) == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidIP)); err != nil {
-				m.cfg.Logger.Error().
-					Str("Service", m.cfg.ServiceName).
-					Err(err).
-					Msg("Failed to encode error response")
-			}
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
 // SecureHeaders adds security-related headers to the response.
 // These headers help protect against common web vulnerabilities like XSS,
 // clickjacking, and MIME type sniffing.
@@ -739,7 +707,7 @@ func (m *Manager) CORS(
 		}
 
 		if allowed {
-			// echo origin (WAJIB)
+			// echo origin
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Add("Vary", "Origin")
 		}
@@ -936,7 +904,6 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 				return
-
 			}
 
 			// Create canonical

@@ -57,32 +57,43 @@ const (
 
 // Required headers for different request types
 var (
-	// RequiredCommonHeaders are headers required for all requests.
-	RequiredCommonHeaders = []string{
+	// RequiredPublicHeaders are headers required for public requests
+	RequiredPublicHeaders = []string{
 		HeaderRequestID,
 		HeaderAppID,
 		HeaderPlatform,
 		HeaderUserAgent,
+		HeaderXHashBody,
 		HeaderTimestamp,
 		HeaderSignature,
 	}
 
-	// RequiredPublicHeaders are headers required for public requests
-	RequiredPublicHeaders = []string{
-		HeaderXHashBody,
-	}
-
 	// RequiredPublicAuthHeaders are headers required for authenticated public requests
 	RequiredPublicAuthHeaders = []string{
+		HeaderRequestID,
+		HeaderAppID,
+		HeaderPlatform,
 		HeaderToken,
+		HeaderTimestamp,
+		HeaderSignature,
+	}
+
+	// RequiredPublicAPIKeyHeaders are headers required for authenticated public requests
+	RequiredPublicAPIKeyHeaders = []string{
+		HeaderRequestID,
+		HeaderAppID,
+		HeaderPlatform,
 		HeaderAPIKey,
+		HeaderTimestamp,
+		HeaderSignature,
 	}
 
 	// RequiredInternalHeaders are headers required for internal requests
 	RequiredInternalHeaders = []string{
-		HeaderToken,
-		HeaderUserID,
-		HeaderUserType,
+		HeaderRequestID,
+		HeaderPlatform,
+		HeaderTimestamp,
+		HeaderSignature,
 	}
 
 	// RequiredSignatureHeadersPublicAuth are headers required for signature validation for public authenticated requests
@@ -107,14 +118,10 @@ var (
 
 	// RequiredSignatureHeadersInternal are headers required for signature validation for internal requests
 	RequiredSignatureHeadersInternal = []string{
-		HeaderToken,
-		HeaderUserID,
-		HeaderUserType,
 		HeaderRequestID,
-		HeaderAppID,
 		HeaderPlatform,
-		HeaderUserAgent,
 		HeaderTimestamp,
+		HeaderSignature,
 	}
 )
 

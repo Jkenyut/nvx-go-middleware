@@ -56,8 +56,6 @@ type Config struct {
 	SignatureTimestampExpired int64
 
 	// Required Headers
-	// RequiredCommonHeaders is a list of headers required for all requests.
-	RequiredCommonHeaders []string
 	// RequiredPublicAuthHeaders is a list of headers required for generic authenticated requests.
 	RequiredPublicAuthHeaders []string
 	// RequiredPublicHeaders is a list of headers required for public requests.
