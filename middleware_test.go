@@ -107,7 +107,6 @@ func TestRecoverer(t *testing.T) {
 	}
 }
 
-
 func TestLogger(t *testing.T) {
 	mockStore := &MockLogStore{}
 	mgr := New(Config{

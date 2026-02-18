@@ -208,11 +208,18 @@ func buildRateKeyPublic(r *http.Request, zone string, signature string) string {
 	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:ip:%s:endpoint:%s:useragent:%s:appid:%s", zone, ip, endpoint, userAgent, appID))
 }
 
-func buildRateKeyPublicAuth(r *http.Request, zone string, signature string) string {
+func buildRateKeyPublicAPIKey(r *http.Request, zone string, signature string) string {
 	endpoint, _ := httprate.KeyByEndpoint(r)
 	apiKey, _ := keyByHeader(r, constants.HeaderAPIKey)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
 	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:endpoint:%s:apikey:%s:appid:%s", zone, endpoint, apiKey, appID))
+}
+
+func buildRateKeyPublicAuth(r *http.Request, zone string, signature string) string {
+	endpoint, _ := httprate.KeyByEndpoint(r)
+	tokenKey, _ := keyByHeader(r, constants.HeaderToken)
+	appID, _ := keyByHeader(r, constants.HeaderAppID)
+	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:endpoint:%s:token:%s:appid:%s", zone, endpoint, tokenKey, appID))
 }
 
 // RateKeyInjector injects a rate key into the request header based on the authentication type.
@@ -223,11 +230,11 @@ func rateKeyInjector(signature string) func(http.Handler) http.Handler {
 			case constants.AuthTypePublic:
 				key := buildRateKeyPublic(r, constants.AuthTypePublic, signature)
 				r.Header.Set(constants.HeaderRateKey, key)
+			case constants.AuthTypePublicAPIKey:
+				key := buildRateKeyPublicAPIKey(r, constants.AuthTypePublicAPIKey, signature)
+				r.Header.Set(constants.HeaderRateKey, key)
 			case constants.AuthTypePublicAuth:
 				key := buildRateKeyPublicAuth(r, constants.AuthTypePublicAuth, signature)
-				r.Header.Set(constants.HeaderRateKey, key)
-			case constants.AuthTypeInternal:
-				key := buildRateKeyPublicAuth(r, constants.AuthTypeInternal, signature)
 				r.Header.Set(constants.HeaderRateKey, key)
 			}
 			next.ServeHTTP(w, r)

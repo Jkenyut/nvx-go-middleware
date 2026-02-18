@@ -62,12 +62,12 @@ type Config struct {
 	RequiredPublicHeaders []string
 	// RequiredInternalHeaders is a list of headers required for internal service requests.
 	RequiredInternalHeaders []string
-	// RequiredSignatureHeadersPublicAuth is the list of headers included in the signature for authenticated requests.
-	RequiredSignatureHeadersPublicAuth []string
-	// RequiredSignatureHeadersPublic is the list of headers included in the signature for public requests.
-	RequiredSignatureHeadersPublic []string
-	// RequiredSignatureHeadersInternal is the list of headers included in the signature for internal requests.
-	RequiredSignatureHeadersInternal []string
+	// RequiredPublicAPIkeyHeaders is a list of headers required for public requests with API key.
+	RequiredPublicAPIKeyHeaders []string
+	// RequiredSignaturePublicHeaders is the list of headers included in the signature for public requests.
+	RequiredSignaturePublicHeaders []string
+	// RequiredSignatureInternalHeaders is the list of headers included in the signature for internal requests.
+	RequiredSignatureInternalHeaders []string
 
 	// Custom Context Injector
 	// ContextInjector is a custom function to modify the request context before processing.

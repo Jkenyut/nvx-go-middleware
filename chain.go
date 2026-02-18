@@ -60,7 +60,7 @@ func DefaultChainConfig() ChainConfig {
 		UseChiRateLimitAuth:   false, // Enabled by default
 		UseChiRateLimitPublic: false, // Enabled by default
 		LimiterConfig: ConfigLimiter{
-			RateLimitRequests: 30,              // User-requested: specific Chi rate limit requests
+			RateLimitRequests: 10,              // User-requested: specific Chi rate limit requests
 			RateLimitWindow:   1 * time.Minute, // User-requested: specific Chi rate limit window
 			PreRequestOnBeforeLimiter: func(w http.ResponseWriter, r *http.Request) bool {
 				return true // TODO: implement pre request on before limiter
@@ -200,6 +200,75 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
 		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
+		// Apply Chi throttle
+		if cfg.UseChiThrottle {
+			handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
+		}
+
+		return handler
+	}
+}
+
+// PublicAPIKeyChain creates a middleware chain for public routes that do not require user authentication.
+// It ensures the request is treated as public, runs the global chain, applies public rate limits,
+// sets the auth type to public, and handles CORS.
+func (m *Manager) PublicAPIKeyChain(cfg ChainConfig) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		handler := next
+
+		// Apply Chi middleware
+		if cfg.UseChiTimeout {
+			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
+		}
+
+		// Apply custom middleware (inner to outer)
+		handler = m.RemoveHeaders(handler)
+
+		// Apply Chi strip slashes
+		if cfg.UseChiStripSlashes {
+			handler = m.ChiStripSlashes(handler)
+		}
+
+		// Note: header validation is applied by the caller (GlobalChain vs PreSignChain)
+		handler = m.Logger(handler)
+
+		// Apply Chi real IP
+		if cfg.UseChiRealIP {
+			handler = m.ChiRealIP(handler)
+		}
+
+		// Always apply TrustProxy to populate NVX-IP safely
+		handler = m.TrustProxy(handler)
+
+		// Apply Auth Rate Limit
+		if cfg.UseChiRateLimitPublic {
+			// Apply Chi rate limit
+			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
+		}
+
+		// set auth type to public
+		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAPIKey)
+
+		// set max body size
+		handler = m.MaxBodySize()(handler)
+
+		// Apply Chi compression
+		if cfg.UseChiCompress {
+			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
+		}
+
+		// Apply secure headers
+		handler = m.SecureHeaders(handler)
+
+		// Ensure Public API Key
+		handler = m.EnsurePublicAPIKey(handler)
+
+		// Apply recoverer
+		handler = m.Recoverer(handler)
+
+		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
+		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
+
 		// Apply Chi throttle
 		if cfg.UseChiThrottle {
 			handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)

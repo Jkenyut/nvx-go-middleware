@@ -3,24 +3,25 @@ package constants
 // Header constants
 // Header constants define the standard headers used across the NVX middleware.
 const (
-	HeaderTransactionID = "NVX-Transaction-ID"
-	HeaderRequestID     = "NVX-Request-ID"
-	HeaderAPIKey        = "NVX-API-Key"
-	HeaderUserID        = "NVX-User-ID"
-	HeaderIP            = "NVX-IP"
-	HeaderUserType      = "NVX-User-Type"
-	HeaderToken         = "NVX-Token"
-	HeaderTimestamp     = "NVX-Timestamp"
-	HeaderSignature     = "NVX-Signature"
-	HeaderPlatform      = "NVX-Platform"
-	HeaderUserAgent     = "User-Agent"
-	HeaderXHashBody     = "NVX-Hash-Body"
-	HeaderAuthType      = "NVX-Auth-Type"
-	HeaderRateKey       = "NVX-Rate-Key"
-	HeaderAppID         = "NVX-App-ID"
-	AuthTypePublic      = "public"
-	AuthTypePublicAuth  = "public_auth"
-	AuthTypeInternal    = "internal"
+	HeaderTransactionID  = "NVX-Transaction-ID"
+	HeaderRequestID      = "NVX-Request-ID"
+	HeaderAPIKey         = "NVX-API-Key"
+	HeaderUserID         = "NVX-User-ID"
+	HeaderIP             = "NVX-IP"
+	HeaderUserType       = "NVX-User-Type"
+	HeaderToken          = "NVX-Token"
+	HeaderTimestamp      = "NVX-Timestamp"
+	HeaderSignature      = "NVX-Signature"
+	HeaderPlatform       = "NVX-Platform"
+	HeaderUserAgent      = "User-Agent"
+	HeaderXHashBody      = "NVX-Hash-Body"
+	HeaderAuthType       = "NVX-Auth-Type"
+	HeaderRateKey        = "NVX-Rate-Key"
+	HeaderAppID          = "NVX-App-ID"
+	AuthTypePublic       = "public"
+	AuthTypePublicAuth   = "public-auth"
+	AuthTypePublicAPIKey = "public-api-key"
+	AuthTypeInternal     = "internal"
 )
 
 // Error messages
@@ -38,6 +39,7 @@ const (
 	ErrMsgUnsupportedContentType = "Unsupported content type"
 	ErrMsgInvalidRequest         = "Invalid request"
 	ErrMsgSignatureInvalid       = "Signature invalid"
+	ErrMsgInvalidContentType     = "Invalid content type"
 )
 
 // Configuration defaults and limits.
@@ -63,8 +65,8 @@ var (
 		HeaderAppID,
 		HeaderPlatform,
 		HeaderUserAgent,
-		HeaderXHashBody,
 		HeaderTimestamp,
+		HeaderXHashBody,
 		HeaderSignature,
 	}
 
@@ -75,6 +77,7 @@ var (
 		HeaderPlatform,
 		HeaderToken,
 		HeaderTimestamp,
+		HeaderXHashBody,
 		HeaderSignature,
 	}
 
@@ -85,6 +88,7 @@ var (
 		HeaderPlatform,
 		HeaderAPIKey,
 		HeaderTimestamp,
+		HeaderXHashBody,
 		HeaderSignature,
 	}
 
@@ -93,35 +97,23 @@ var (
 		HeaderRequestID,
 		HeaderPlatform,
 		HeaderTimestamp,
+		HeaderXHashBody,
 		HeaderSignature,
 	}
 
-	// RequiredSignatureHeadersPublicAuth are headers required for signature validation for public authenticated requests
-	RequiredSignatureHeadersPublicAuth = []string{
-		HeaderToken,
-		HeaderAPIKey,
+	// RequiredSignatureInternalHeaders are headers required for signature validation for internal requests
+	RequiredSignatureInternalHeaders = []string{
 		HeaderRequestID,
-		HeaderAppID,
 		HeaderPlatform,
-		HeaderUserAgent,
 		HeaderTimestamp,
 	}
 
-	// RequiredSignatureHeadersPublic are headers required for signature validation for public requests
-	RequiredSignatureHeadersPublic = []string{
+	// RequiredSignaturePublicHeaders are headers required for signature validation for public requests
+	RequiredSignaturePublicHeaders = []string{
 		HeaderRequestID,
 		HeaderAppID,
 		HeaderPlatform,
-		HeaderUserAgent,
 		HeaderTimestamp,
-	}
-
-	// RequiredSignatureHeadersInternal are headers required for signature validation for internal requests
-	RequiredSignatureHeadersInternal = []string{
-		HeaderRequestID,
-		HeaderPlatform,
-		HeaderTimestamp,
-		HeaderSignature,
 	}
 )
 

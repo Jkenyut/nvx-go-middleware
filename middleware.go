@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -114,7 +115,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		if m.cfg.ContextInjector != nil {
 			r = m.cfg.ContextInjector(r)
 		} else {
-			r = m.injectContext(r)
+			r = injectContext(r)
 		}
 
 		start := time.Now()
@@ -125,7 +126,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 
 		// Normalize request body if logging is enabled
 		if m.cfg.LogRequestBodies {
-			raw, _ := ReadAndRestoreBody(r)
+			raw, _ := ReadAndCacheBody(r, m.cfg.RequestBodyNonFileLimitSize)
 			reqBodyBytes = normalizeBodyRaw(raw)
 		}
 
@@ -357,7 +358,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 		}
 
 		// Validate Signature Headers
-		if validSignature, signatureServer := m.validateSignaturePublicAuthHeaders(r); !validSignature {
+		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			errMsg := constants.ErrMsgSignatureInvalid
@@ -399,6 +400,50 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 
+		}
+
+		// Validate Signature Headers
+		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			errMsg := constants.ErrMsgSignatureInvalid
+			if !m.envProd() {
+				errMsg = fmt.Sprintf("%s - Expected: %s", constants.ErrMsgSignatureInvalid, signatureServer)
+			}
+
+			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
+				m.cfg.Logger.Error().
+					Str("Service", m.cfg.ServiceName).
+					Err(err).
+					Msg("Failed to encode error response")
+			}
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// EnsurePublicAPIKey validates headers required for public requests.
+// This includes device information (User-Agent, Device-ID, Platform, Mac-Address)
+// and validates the request signature for public endpoints.
+// EnsurePublicAPIKey validates that headers required for public (unauthenticated) requests are present and valid.
+// It ensures basic request integrity and verifies the public request signature.
+func (m *Manager) EnsurePublicAPIKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Validate Headers Presence
+		valid := m.validateHeaders(w, r, m.cfg.RequiredPublicAPIKeyHeaders)
+		if !valid {
+			return
+		}
+
+		// Validate Timestamp
+		err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.SignatureTimestampExpired)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
+			return
 		}
 
 		// Validate Signature Headers
@@ -481,46 +526,37 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 		return false
 	}
 
+	if r.Header.Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidContentType))
+		return false
+	}
+
 	return true
 }
 
 // validateSignatureAuthHeaders validates the signature auth headers.
 func (m *Manager) validateSignatureInternalHeaders(r *http.Request) (bool, string) {
-	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersInternal))
-	for _, nameHeader := range m.cfg.RequiredSignatureHeadersInternal {
+	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureInternalHeaders))
+	for _, nameHeader := range m.cfg.RequiredSignatureInternalHeaders {
 		authHeaders = append(authHeaders, r.Header.Get(nameHeader))
 	}
 
 	return m.validateSignatureHeaders(r, m.cfg.PrivateKeySignature, authHeaders)
 }
 
-// validateSignaturePublicAuthHeaders validates the signature public auth headers.
-func (m *Manager) validateSignaturePublicAuthHeaders(r *http.Request) (bool, string) {
-	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublicAuth)+3)
-	authHeaders = append(authHeaders, strings.ToUpper(r.Method))
-	authHeaders = append(authHeaders, r.RequestURI)
-	for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublicAuth {
-		authHeaders = append(authHeaders, r.Header.Get(nameHeader))
-	}
-
-	bodyBytes, _ := ReadAndRestoreBody(r)
-	bodyToken := ResolveBodyToken(r.Header.Get("Content-Type"), bodyBytes)
-
-	authHeaders = append(authHeaders, string(bodyToken))
-
-	return m.validateSignatureHeaders(r, m.cfg.PublicKeySignature, authHeaders)
-}
-
 // validateSignaturePublicHeaders validates the signature public headers.
 func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string) {
-	publicHeaders := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublic)+3)
+	publicHeaders := make([]string, 0, len(m.cfg.RequiredSignaturePublicHeaders)+3)
 	publicHeaders = append(publicHeaders, strings.ToUpper(r.Method))
 	publicHeaders = append(publicHeaders, r.RequestURI)
-	for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublic {
+	for _, nameHeader := range m.cfg.RequiredSignaturePublicHeaders {
 		publicHeaders = append(publicHeaders, r.Header.Get(nameHeader))
 	}
 
-	bodyBytes, _ := ReadAndRestoreBody(r)
+	bodyBytes, _ := ReadAndCacheBody(r, m.cfg.RequestBodyNonFileLimitSize)
+
 	bodyToken := ResolveBodyToken(r.Header.Get("Content-Type"), bodyBytes)
 
 	publicHeaders = append(publicHeaders, string(bodyToken))
@@ -746,7 +782,7 @@ func FullURL(r *http.Request) string {
 }
 
 // injectContext injects common headers into the request context.
-func (_ *Manager) injectContext(r *http.Request) *http.Request {
+func injectContext(r *http.Request) *http.Request {
 	h := r.Header
 	ctx := r.Context()
 
@@ -766,7 +802,7 @@ func (_ *Manager) injectContext(r *http.Request) *http.Request {
 // ReadAndRestoreBody reads the request body fully and then restores it
 // so that it can be read again by subsequent handlers.
 // It respects the configured body size limit.
-func ReadAndRestoreBody(r *http.Request) ([]byte, error) {
+func ReadAndRestoreBody(r *http.Request, limit int64) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
 	}
@@ -776,13 +812,15 @@ func ReadAndRestoreBody(r *http.Request) ([]byte, error) {
 		return nil, nil
 	}
 
-	limitReader := io.LimitReader(r.Body, constants.RequestBodyNonFileLimitSize)
+	limitReader := io.LimitReader(r.Body, limit)
 	bodyBytes, err := io.ReadAll(limitReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read request body: %w", err)
 	}
 
-	r.Body = io.NopCloser(io.MultiReader(bytes.NewBuffer(bodyBytes), r.Body))
+	// restore body from buffer (fresh reader)
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
 	return bodyBytes, nil
 }
 
@@ -840,22 +878,8 @@ func ResolveBodyToken(contentType string, body []byte) string {
 func (m *Manager) EnsurePreSignHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Validate Headers Presence
-		valid := m.validateHeaders(w, r, m.cfg.RequiredSignatureHeadersPublic)
+		valid := m.validateHeaders(w, r, m.cfg.RequiredSignaturePublicHeaders)
 		if !valid {
-			return
-		}
-
-		// Validate IP Format
-		ipStr := r.Header.Get(constants.HeaderIP)
-		if net.ParseIP(ipStr) == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidIP)); err != nil {
-				m.cfg.Logger.Error().
-					Str("Service", m.cfg.ServiceName).
-					Err(err).
-					Msg("Failed to encode error response")
-			}
 			return
 		}
 
@@ -907,15 +931,15 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 			}
 
 			// Create canonical
-			publicCanonical := make([]string, 0, len(m.cfg.RequiredSignatureHeadersPublic)+3)
+			publicCanonical := make([]string, 0, len(m.cfg.RequiredSignaturePublicHeaders)+3)
 			publicCanonical = append(publicCanonical, strings.ToUpper(req.Method))
 			publicCanonical = append(publicCanonical, req.Uri)
-			for _, nameHeader := range m.cfg.RequiredSignatureHeadersPublic {
+			for _, nameHeader := range m.cfg.RequiredSignaturePublicHeaders {
 				publicCanonical = append(publicCanonical, r.Header.Get(nameHeader))
 			}
 
 			// Add body token
-			bodyBytes, _ := ReadAndRestoreBody(r)
+			bodyBytes, _ := ReadAndCacheBody(r, m.cfg.RequestBodyNonFileLimitSize)
 			bodyToken := ResolveBodyToken(req.ContentType, bodyBytes)
 			publicCanonical = append(publicCanonical, string(bodyToken))
 
@@ -944,4 +968,22 @@ func checkTimestamp(timestampStr string, allowedSkewSec int64) error {
 	}
 
 	return nil
+}
+
+type ctxKey string
+
+const bodyKey ctxKey = "cached_body"
+
+func ReadAndCacheBody(r *http.Request, limit int64) ([]byte, error) {
+	if b, ok := r.Context().Value(bodyKey).([]byte); ok {
+		return b, nil
+	}
+
+	body, err := ReadAndRestoreBody(r, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	*r = *r.WithContext(context.WithValue(r.Context(), bodyKey, body))
+	return body, nil
 }

@@ -81,19 +81,19 @@ func New(cfg Config) *Manager {
 		cfg.RequiredInternalHeaders = constants.RequiredInternalHeaders
 	}
 
-	// Set default RequiredSignatureHeadersPublicAuth if not set
-	if len(cfg.RequiredSignatureHeadersPublicAuth) == 0 {
-		cfg.RequiredSignatureHeadersPublicAuth = constants.RequiredSignatureHeadersPublicAuth
+	// Set default RequiredPublicAPIKeyHeaders if not set
+	if len(cfg.RequiredPublicAPIKeyHeaders) == 0 {
+		cfg.RequiredPublicAPIKeyHeaders = constants.RequiredPublicAPIKeyHeaders
 	}
 
-	// Set default RequiredSignatureHeadersPublic if not set
-	if len(cfg.RequiredSignatureHeadersPublic) == 0 {
-		cfg.RequiredSignatureHeadersPublic = constants.RequiredSignatureHeadersPublic
+	// Set default RequiredSignaturePublicHeaders if not set
+	if len(cfg.RequiredSignaturePublicHeaders) == 0 {
+		cfg.RequiredSignaturePublicHeaders = constants.RequiredSignaturePublicHeaders
 	}
 
-	// Set default RequiredSignatureHeadersInternal if not set
-	if len(cfg.RequiredSignatureHeadersInternal) == 0 {
-		cfg.RequiredSignatureHeadersInternal = constants.RequiredSignatureHeadersInternal
+	// Set default RequiredSignatureInternalHeaders if not set
+	if len(cfg.RequiredSignatureInternalHeaders) == 0 {
+		cfg.RequiredSignatureInternalHeaders = constants.RequiredSignatureInternalHeaders
 	}
 
 	// Set default SecurityHeaders if not set
@@ -118,10 +118,13 @@ func New(cfg Config) *Manager {
 
 	// Set default AllowedHeaders if not set
 	if len(cfg.AllowedHeaders) == 0 {
-		cfg.AllowedHeaders = append(cfg.AllowedHeaders, "Accept", "Authorization", "Content-Type")
-		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicAuthHeaders...)
-		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredPublicHeaders...)
-		cfg.AllowedHeaders = append(cfg.AllowedHeaders, cfg.RequiredInternalHeaders...)
+		cfg.AllowedHeaders = uniqueStrings(
+			[]string{"Accept", "Authorization", "Content-Type"},
+			cfg.RequiredPublicAuthHeaders,
+			cfg.RequiredPublicHeaders,
+			cfg.RequiredInternalHeaders,
+			cfg.RequiredPublicAPIKeyHeaders,
+		)
 	}
 
 	// Set default HeadersToRemove if not set
@@ -145,4 +148,20 @@ func (m *Manager) Config() Config {
 
 func (m *Manager) envProd() bool {
 	return m.cfg.Env == "prod" || m.cfg.Env == "production"
+}
+
+func uniqueStrings(items ...[]string) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+
+	for _, list := range items {
+		for _, v := range list {
+			if _, ok := seen[v]; !ok {
+				seen[v] = struct{}{}
+				out = append(out, v)
+			}
+		}
+	}
+
+	return out
 }
