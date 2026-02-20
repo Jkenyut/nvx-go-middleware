@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -126,7 +125,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 
 		// Normalize request body if logging is enabled
 		if m.cfg.LogRequestBodies {
-			raw, _ := ReadAndCacheBody(r, m.cfg.RequestBodyNonFileLimitSize)
+			raw, _ := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
 			reqBodyBytes = normalizeBodyRaw(raw)
 		}
 
@@ -526,13 +525,6 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 		return false
 	}
 
-	if r.Header.Get("Content-Type") == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidContentType))
-		return false
-	}
-
 	return true
 }
 
@@ -555,7 +547,7 @@ func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string)
 		publicHeaders = append(publicHeaders, r.Header.Get(nameHeader))
 	}
 
-	bodyBytes, _ := ReadAndCacheBody(r, m.cfg.RequestBodyNonFileLimitSize)
+	bodyBytes, _ := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
 
 	bodyToken := ResolveBodyToken(r.Header.Get("Content-Type"), bodyBytes)
 
@@ -807,20 +799,22 @@ func ReadAndRestoreBody(r *http.Request, limit int64) ([]byte, error) {
 		return nil, nil
 	}
 
-	// skip read body if multipart
 	if isMultipart(r.Header.Get("Content-Type")) {
 		return nil, nil
 	}
 
-	limitReader := io.LimitReader(r.Body, limit)
+	// read limit+1 to detect overflow
+	limitReader := io.LimitReader(r.Body, limit+1)
 	bodyBytes, err := io.ReadAll(limitReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read request body: %w", err)
 	}
 
-	// restore body from buffer (fresh reader)
-	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	if int64(len(bodyBytes)) > limit {
+		return nil, fmt.Errorf("request body too large (max %d bytes)", limit)
+	}
 
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	return bodyBytes, nil
 }
 
@@ -939,7 +933,7 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 			}
 
 			// Add body token
-			bodyBytes, _ := ReadAndCacheBody(r, m.cfg.RequestBodyNonFileLimitSize)
+			bodyBytes, _ := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
 			bodyToken := ResolveBodyToken(req.ContentType, bodyBytes)
 			publicCanonical = append(publicCanonical, string(bodyToken))
 
@@ -968,22 +962,4 @@ func checkTimestamp(timestampStr string, allowedSkewSec int64) error {
 	}
 
 	return nil
-}
-
-type ctxKey string
-
-const bodyKey ctxKey = "cached_body"
-
-func ReadAndCacheBody(r *http.Request, limit int64) ([]byte, error) {
-	if b, ok := r.Context().Value(bodyKey).([]byte); ok {
-		return b, nil
-	}
-
-	body, err := ReadAndRestoreBody(r, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	*r = *r.WithContext(context.WithValue(r.Context(), bodyKey, body))
-	return body, nil
 }

@@ -60,7 +60,7 @@ func DefaultChainConfig() ChainConfig {
 		UseChiRateLimitAuth:   false, // Enabled by default
 		UseChiRateLimitPublic: false, // Enabled by default
 		LimiterConfig: ConfigLimiter{
-			RateLimitRequests: 10,              // User-requested: specific Chi rate limit requests
+			RateLimitRequests: 30,              // User-requested: specific Chi rate limit requests
 			RateLimitWindow:   1 * time.Minute, // User-requested: specific Chi rate limit window
 			PreRequestOnBeforeLimiter: func(w http.ResponseWriter, r *http.Request) bool {
 				return true // TODO: implement pre request on before limiter
@@ -114,6 +114,12 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 		// set auth type to public
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
 
+		// Apply secure headers
+		handler = m.SecureHeaders(handler)
+
+		// Ensure Public
+		handler = m.EnsurePublic(handler)
+
 		// set max body size
 		handler = m.MaxBodySize()(handler)
 
@@ -121,12 +127,6 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 		if cfg.UseChiCompress {
 			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
 		}
-
-		// Apply secure headers
-		handler = m.SecureHeaders(handler)
-
-		// Ensure Public
-		handler = m.EnsurePublic(handler)
 
 		// Apply recoverer
 		handler = m.Recoverer(handler)
@@ -182,18 +182,18 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 		// set auth type to public auth
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAuth)
 
+		// apply secure headers
+		handler = m.SecureHeaders(handler)
+
+		// Ensure Public Auth
+		handler = m.EnsurePublicAuth(handler)
+
 		// set max body size
 		handler = m.MaxBodySize()(handler)
 		// Apply Chi compression
 		if cfg.UseChiCompress {
 			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
 		}
-
-		// apply secure headers
-		handler = m.SecureHeaders(handler)
-
-		// Ensure Public Auth
-		handler = m.EnsurePublicAuth(handler)
 
 		// apply recoverer
 		handler = m.Recoverer(handler)
@@ -249,19 +249,18 @@ func (m *Manager) PublicAPIKeyChain(cfg ChainConfig) func(http.Handler) http.Han
 		// set auth type to public
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAPIKey)
 
-		// set max body size
-		handler = m.MaxBodySize()(handler)
-
-		// Apply Chi compression
-		if cfg.UseChiCompress {
-			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
-		}
-
 		// Apply secure headers
 		handler = m.SecureHeaders(handler)
 
 		// Ensure Public API Key
 		handler = m.EnsurePublicAPIKey(handler)
+
+		// set max body size
+		handler = m.MaxBodySize()(handler)
+		// Apply Chi compression
+		if cfg.UseChiCompress {
+			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
+		}
 
 		// Apply recoverer
 		handler = m.Recoverer(handler)
@@ -312,6 +311,11 @@ func (m *Manager) InternalChain(cfg ChainConfig) func(http.Handler) http.Handler
 		// set auth type to internal
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypeInternal)
 
+		// set secure headers
+		handler = m.SecureHeaders(handler)
+		// Ensure Internal Headers (specific to InternalChain)
+		handler = m.EnsureInternal(handler)
+
 		// set max body size
 		handler = m.MaxBodySize()(handler)
 
@@ -320,10 +324,6 @@ func (m *Manager) InternalChain(cfg ChainConfig) func(http.Handler) http.Handler
 			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
 		}
 
-		// set secure headers
-		handler = m.SecureHeaders(handler)
-		// Ensure Internal Headers (specific to InternalChain)
-		handler = m.EnsureInternal(handler)
 		// Apply recoverer
 		handler = m.Recoverer(handler)
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
@@ -407,6 +407,12 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 		}
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
 
+		// Apply secure headers
+		handler = m.SecureHeaders(handler)
+
+		// Ensure PreSign Headers (specific to PreSignChain)
+		handler = m.EnsurePreSignHeaders(handler)
+
 		// set max body size
 		handler = m.MaxBodySize()(handler)
 
@@ -414,12 +420,6 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 		if cfg.UseChiCompress {
 			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
 		}
-
-		// Apply secure headers
-		handler = m.SecureHeaders(handler)
-
-		// Ensure PreSign Headers (specific to PreSignChain)
-		handler = m.EnsurePreSignHeaders(handler)
 
 		handler = m.Recoverer(handler)
 		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
@@ -458,15 +458,15 @@ func (m *Manager) WebhookChain(cfg ChainConfig) func(http.Handler) http.Handler 
 		// Always apply TrustProxy to populate NVX-IP safely
 		handler = m.TrustProxy(handler)
 
+		// Apply secure headers
+		handler = m.SecureHeaders(handler)
+
 		handler = m.MaxBodySize()(handler)
 
 		// Apply Chi compression
 		if cfg.UseChiCompress {
 			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
 		}
-
-		// Apply secure headers
-		handler = m.SecureHeaders(handler)
 
 		// Apply recoverer
 		handler = m.Recoverer(handler)

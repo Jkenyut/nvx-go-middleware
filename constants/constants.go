@@ -39,7 +39,6 @@ const (
 	ErrMsgUnsupportedContentType = "Unsupported content type"
 	ErrMsgInvalidRequest         = "Invalid request"
 	ErrMsgSignatureInvalid       = "Signature invalid"
-	ErrMsgInvalidContentType     = "Invalid content type"
 )
 
 // Configuration defaults and limits.
