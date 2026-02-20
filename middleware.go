@@ -77,7 +77,6 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 				if err := json.NewEncoder(w).Encode(response.InternalError(r.Context())); err != nil {
 					m.cfg.Logger.Error().
 						Str("Service", m.cfg.ServiceName).
-						Str("Service", m.cfg.ServiceName).
 						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 						Err(err).
 						Msg("Failed to encode error response")
@@ -186,7 +185,6 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				if rec := recover(); rec != nil {
 					m.cfg.Logger.Error().
 						Str("Service", m.cfg.ServiceName).
-						Str("Service", m.cfg.ServiceName).
 						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 						Str("transaction_id", transactionID).
 						Interface("panic", rec).
@@ -197,7 +195,6 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			// Save log asynchronously with proper error handling
 			if err := m.cfg.LogStore.Save(entry); err != nil {
 				m.cfg.Logger.Error().
-					Str("Service", m.cfg.ServiceName).
 					Str("Service", m.cfg.ServiceName).
 					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Str("transaction_id", transactionID).
