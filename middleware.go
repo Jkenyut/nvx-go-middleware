@@ -40,6 +40,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 
 				m.cfg.Logger.Error().
 					Str("Service", m.cfg.ServiceName).
+					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Str("error", fmt.Sprintf("%v", rec)).
 					Str("method", r.Method).
 					Str("path", r.URL.Path).
@@ -51,6 +52,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					if ww.Status() != 0 {
 						m.cfg.Logger.Error().
 							Str("Service", m.cfg.ServiceName).
+							Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 							Msg("Response already written, cannot recover")
 						return
 					}
@@ -61,6 +63,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					if rw.Status() != 0 {
 						m.cfg.Logger.Error().
 							Str("Service", m.cfg.ServiceName).
+							Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 							Msg("Response already written, cannot recover")
 						return
 					}
@@ -74,6 +77,8 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 				if err := json.NewEncoder(w).Encode(response.InternalError(r.Context())); err != nil {
 					m.cfg.Logger.Error().
 						Str("Service", m.cfg.ServiceName).
+						Str("Service", m.cfg.ServiceName).
+						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 						Err(err).
 						Msg("Failed to encode error response")
 				}
@@ -129,6 +134,8 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			if err != nil {
 				m.cfg.Logger.Error().
 					Str("Service", m.cfg.ServiceName).
+					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
+					Str("transaction_id", transactionID).
 					Err(err).
 					Msg("Failed to read request body")
 
@@ -179,6 +186,9 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				if rec := recover(); rec != nil {
 					m.cfg.Logger.Error().
 						Str("Service", m.cfg.ServiceName).
+						Str("Service", m.cfg.ServiceName).
+						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
+						Str("transaction_id", transactionID).
 						Interface("panic", rec).
 						Msg("Panic in async log save")
 				}
@@ -188,8 +198,10 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			if err := m.cfg.LogStore.Save(entry); err != nil {
 				m.cfg.Logger.Error().
 					Str("Service", m.cfg.ServiceName).
-					Err(err).
+					Str("Service", m.cfg.ServiceName).
+					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Str("transaction_id", transactionID).
+					Err(err).
 					Msg("Failed to save audit log")
 			}
 		}()
@@ -315,6 +327,7 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken)); err != nil {
 				m.cfg.Logger.Error().
 					Str("Service", m.cfg.ServiceName).
+					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Err(err).
 					Msg("Failed to encode error response")
 			}
@@ -334,6 +347,7 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
 				m.cfg.Logger.Error().
 					Str("Service", m.cfg.ServiceName).
+					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Err(err).
 					Msg("Failed to encode error response")
 			}
@@ -379,6 +393,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
 				m.cfg.Logger.Error().
 					Str("Service", m.cfg.ServiceName).
+					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Err(err).
 					Msg("Failed to encode error response")
 			}
@@ -424,6 +439,7 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
 				m.cfg.Logger.Error().
 					Str("Service", m.cfg.ServiceName).
+					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Err(err).
 					Msg("Failed to encode error response")
 			}
@@ -468,6 +484,7 @@ func (m *Manager) EnsurePublicAPIKey(next http.Handler) http.Handler {
 			if err := json.NewEncoder(w).Encode(response.Unauthorized(r.Context(), errMsg)); err != nil {
 				m.cfg.Logger.Error().
 					Str("Service", m.cfg.ServiceName).
+					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Err(err).
 					Msg("Failed to encode error response")
 			}
@@ -562,6 +579,7 @@ func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string)
 	if err != nil {
 		m.cfg.Logger.Error().
 			Str("Service", m.cfg.ServiceName).
+			Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 			Err(err).
 			Msg("Failed to read request body")
 		return false, err.Error()
@@ -681,6 +699,7 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 				if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType)); err != nil {
 					m.cfg.Logger.Error().
 						Str("Service", m.cfg.ServiceName).
+						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 						Err(err).
 						Msg("Failed to encode error response")
 				}
@@ -694,6 +713,7 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 				if err := json.NewEncoder(w).Encode(response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge)); err != nil {
 					m.cfg.Logger.Error().
 						Str("Service", m.cfg.ServiceName).
+						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 						Err(err).
 						Msg("Failed to encode error response")
 				}
@@ -714,6 +734,7 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 				if err := json.NewEncoder(w).Encode(response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge)); err != nil {
 					m.cfg.Logger.Error().
 						Str("Service", m.cfg.ServiceName).
+						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 						Err(err).
 						Msg("Failed to encode error response")
 				}
@@ -848,6 +869,7 @@ func (m *Manager) MethodOnly(method string, next http.Handler) http.Handler {
 			if err := json.NewEncoder(w).Encode(response.MethodNotAllowed(r.Context(), constants.ErrMsgMethodNotAllowed)); err != nil {
 				m.cfg.Logger.Error().
 					Str("Service", m.cfg.ServiceName).
+					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Err(err).
 					Msg("Failed to encode error response")
 			}
@@ -914,6 +936,7 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 				if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgInvalidRequest)); err != nil {
 					m.cfg.Logger.Error().
 						Str("Service", m.cfg.ServiceName).
+						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 						Err(err).
 						Msg("Failed to encode error response")
 				}
@@ -927,6 +950,7 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 				if err := json.NewEncoder(w).Encode(response.BadRequest(r.Context(), validator.GetErrorsFullStr(err))); err != nil {
 					m.cfg.Logger.Error().
 						Str("Service", m.cfg.ServiceName).
+						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 						Err(err).
 						Msg("Failed to encode error response")
 				}
@@ -955,6 +979,7 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 			if err != nil {
 				m.cfg.Logger.Error().
 					Str("Service", m.cfg.ServiceName).
+					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Err(err).
 					Msg("Failed to read request body")
 				w.Header().Set("Content-Type", "application/json")
