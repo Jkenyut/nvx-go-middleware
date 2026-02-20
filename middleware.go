@@ -125,7 +125,18 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 
 		// Normalize request body if logging is enabled
 		if m.cfg.LogRequestBodies {
-			raw, _ := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
+			raw, err := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
+			if err != nil {
+				m.cfg.Logger.Error().
+					Str("Service", m.cfg.ServiceName).
+					Err(err).
+					Msg("Failed to read request body")
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType))
+				return
+			}
 			reqBodyBytes = normalizeBodyRaw(raw)
 		}
 
@@ -547,7 +558,14 @@ func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string)
 		publicHeaders = append(publicHeaders, r.Header.Get(nameHeader))
 	}
 
-	bodyBytes, _ := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
+	bodyBytes, err := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
+	if err != nil {
+		m.cfg.Logger.Error().
+			Str("Service", m.cfg.ServiceName).
+			Err(err).
+			Msg("Failed to read request body")
+		return false, err.Error()
+	}
 
 	bodyToken := ResolveBodyToken(r.Header.Get("Content-Type"), bodyBytes)
 
@@ -933,7 +951,18 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 			}
 
 			// Add body token
-			bodyBytes, _ := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
+			bodyBytes, err := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
+			if err != nil {
+				m.cfg.Logger.Error().
+					Str("Service", m.cfg.ServiceName).
+					Err(err).
+					Msg("Failed to read request body")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType))
+				return
+			}
+
 			bodyToken := ResolveBodyToken(req.ContentType, bodyBytes)
 			publicCanonical = append(publicCanonical, string(bodyToken))
 
