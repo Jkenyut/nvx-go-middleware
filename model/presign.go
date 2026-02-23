@@ -8,8 +8,6 @@ type PresignRequest struct {
 	Method string `json:"method" validate:"required"`
 	// Uri is the URI path of the request to sign.
 	Uri string `json:"uri" validate:"required"`
-	// ContentType is the Content-Type header of the request to sign.
-	ContentType string `json:"content_type" validate:"required"`
 	// Body is the request body to sign (or a representation of it).
 	Body string `json:"body" validate:"required"`
 }

@@ -22,7 +22,7 @@ func main() {
 		HeadersToRemove:           []string{},
 		LogRequestBodies:          true,
 		LogResponseBodies:         true,
-		AllowedContentTypes:       []string{"application/json", "text/plain"},
+		AllowedContentTypes:       []string{"application/json", "text/plain", "multipart/form-data", "form-data"},
 		SignatureTimestampExpired: 6000000,
 	})
 

@@ -14,7 +14,6 @@ const (
 	HeaderSignature      = "NVX-Signature"
 	HeaderPlatform       = "NVX-Platform"
 	HeaderUserAgent      = "User-Agent"
-	HeaderXHashBody      = "NVX-Hash-Body"
 	HeaderAuthType       = "NVX-Auth-Type"
 	HeaderRateKey        = "NVX-Rate-Key"
 	HeaderAppID          = "NVX-App-ID"
@@ -27,14 +26,14 @@ const (
 // Error messages
 // Error messages for common middleware failures.
 const (
-	ErrMsgMissingHeaders         = "Missing required headers"
-	ErrMsgInvalidIP              = "Invalid IP address format"
-	ErrMsgInvalidToken           = "Invalid or missing authentication token"
-	ErrMsgInvalidSignature       = "Invalid request signature"
-	ErrMsgInvalidPlatform        = "Invalid platform"
-	ErrMsgMethodNotAllowed       = "Method not allowed"
-	ErrMsgPayloadTooLarge        = "Request payload too large"
-	ErrMsgRequestTimeout         = "Request timeout"
+	ErrMsgMissingHeaders = "Missing required headers"
+
+	ErrMsgInvalidToken     = "Invalid or missing authentication token"
+	ErrMsgInvalidSignature = "Invalid request signature"
+	ErrMsgInvalidPlatform  = "Invalid platform"
+	ErrMsgMethodNotAllowed = "Method not allowed"
+	ErrMsgPayloadTooLarge  = "Request payload too large"
+
 	ErrMsgInvalidTimestamp       = "Invalid timestamp format"
 	ErrMsgUnsupportedContentType = "Unsupported content type"
 	ErrMsgInvalidRequest         = "Invalid request"
@@ -65,7 +64,6 @@ var (
 		HeaderPlatform,
 		HeaderUserAgent,
 		HeaderTimestamp,
-		HeaderXHashBody,
 		HeaderSignature,
 	}
 
@@ -76,7 +74,6 @@ var (
 		HeaderPlatform,
 		HeaderToken,
 		HeaderTimestamp,
-		HeaderXHashBody,
 		HeaderSignature,
 	}
 
@@ -87,7 +84,6 @@ var (
 		HeaderPlatform,
 		HeaderAPIKey,
 		HeaderTimestamp,
-		HeaderXHashBody,
 		HeaderSignature,
 	}
 
@@ -96,7 +92,6 @@ var (
 		HeaderRequestID,
 		HeaderPlatform,
 		HeaderTimestamp,
-		HeaderXHashBody,
 		HeaderSignature,
 	}
 

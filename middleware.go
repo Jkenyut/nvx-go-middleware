@@ -33,6 +33,11 @@ import (
 // It also ensures that the response writer is in a valid state before writing the error.
 func (m *Manager) Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := r.Header
+		ctx := r.Context()
+		ctx = activity.WithRequestID(ctx, h.Get(constants.HeaderRequestID))
+		r = r.WithContext(ctx)
+
 		defer func() {
 			// Handle panic
 			if rec := recover(); rec != nil {
@@ -114,11 +119,18 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 
 		rw.Header().Set(constants.HeaderTransactionID, transactionID)
 
+		h := r.Header
+		ctx := r.Context()
+		ctx = activity.WithTransactionID(ctx, h.Get(constants.HeaderTransactionID))
+		ctx = activity.WithAPIKey(ctx, h.Get(constants.HeaderAPIKey))
+		ctx = activity.WithUserID(ctx, h.Get(constants.HeaderUserID))
+		ctx = activity.WithUserIP(ctx, h.Get(constants.HeaderIP))
+		ctx = activity.WithUserType(ctx, h.Get(constants.HeaderUserType))
+		r = r.WithContext(ctx)
+
 		// Inject context
 		if m.cfg.ContextInjector != nil {
 			r = m.cfg.ContextInjector(r)
-		} else {
-			r = injectContext(r)
 		}
 
 		start := time.Now()
@@ -809,21 +821,6 @@ func FullURL(r *http.Request) string {
 	return scheme + "://" + host + r.RequestURI
 }
 
-// injectContext injects common headers into the request context.
-func injectContext(r *http.Request) *http.Request {
-	h := r.Header
-	ctx := r.Context()
-
-	ctx = activity.WithTransactionID(ctx, h.Get(constants.HeaderTransactionID))
-	ctx = activity.WithRequestID(ctx, h.Get(constants.HeaderRequestID))
-	ctx = activity.WithAPIKey(ctx, h.Get(constants.HeaderAPIKey))
-	ctx = activity.WithUserID(ctx, h.Get(constants.HeaderUserID))
-	ctx = activity.WithUserIP(ctx, h.Get(constants.HeaderIP))
-	ctx = activity.WithUserType(ctx, h.Get(constants.HeaderUserType))
-
-	return r.WithContext(ctx)
-}
-
 // ReadAndRestoreBody reads the request body and restores it for later use.
 // It returns the body as a byte slice and an error if the read fails.
 // If the request body is nil or the content type is multipart, it returns nil and no error.
@@ -885,7 +882,7 @@ func (m *Manager) MethodOnly(method string, next http.Handler) http.Handler {
 // or the SHA256 hex digest for other content.
 func ResolveBodyToken(contentType string, body []byte) string {
 	ct := strings.ToLower(strings.TrimSpace(contentType))
-
+	fmt.Println(ct)
 	// multipart / file upload → UNSIGNED
 	if strings.HasPrefix(ct, "multipart/") {
 		return "UNSIGNED"
@@ -970,23 +967,7 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 			for _, nameHeader := range m.cfg.RequiredSignaturePublicHeaders {
 				publicCanonical = append(publicCanonical, r.Header.Get(nameHeader))
 			}
-
-			// Add body token
-			bodyBytes, err := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
-			if err != nil {
-				m.cfg.Logger.Error().
-					Str("Service", m.cfg.ServiceName).
-					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
-					Err(err).
-					Msg("Failed to read request body")
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType))
-				return
-			}
-
-			bodyToken := ResolveBodyToken(req.ContentType, bodyBytes)
-			publicCanonical = append(publicCanonical, string(bodyToken))
+			publicCanonical = append(publicCanonical, req.Body)
 
 			// Sign canonical
 			json.NewEncoder(w).Encode(response.Success(r.Context(), model.PresignResponse{
