@@ -18,8 +18,6 @@ type AuditLog struct {
 	StatusCode int `json:"status_code"`
 	// Latency MS is the time taken to process the request in milliseconds.
 	LatencyMS int `json:"latency_ms"`
-	// App ID is the App ID used for the request.
-	AppID string `json:"app_id"`
 	// Client IP is the IP address of the client.
 	ClientIP string `json:"client_ip"`
 	// Request ID is the unique request identifier.
