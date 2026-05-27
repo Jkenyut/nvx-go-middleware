@@ -41,14 +41,14 @@ type ChainConfig struct {
 // DefaultChainConfig returns a ChainConfig with recommended default values.
 func DefaultChainConfig() ChainConfig {
 	return ChainConfig{
-		UseChiCompress:     true,
-		UseChiTimeout:      true,
-		UseChiThrottle:     false,
-		UseChiStripSlashes: true,
-		CompressionLevel:   5,
-		ThrottleLimit:      100,
-		ThrottleTimeout:    1 * time.Minute,
-		ThrottleBacklog:    50,
+		UseChiCompress:        true,
+		UseChiTimeout:         true,
+		UseChiThrottle:        false,
+		UseChiStripSlashes:    true,
+		CompressionLevel:      5,
+		ThrottleLimit:         100,
+		ThrottleTimeout:       1 * time.Minute,
+		ThrottleBacklog:       50,
 		UseChiRateLimitAuth:   false,
 		UseChiRateLimitPublic: false,
 		LimiterConfig: ConfigLimiter{

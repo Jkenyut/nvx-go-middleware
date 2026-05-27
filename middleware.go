@@ -81,13 +81,14 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		} else {
 			rw = wrapResponseWriter(w, r, int(m.cfg.ResponseBodyLogLimitSize))
 		}
+		IDAuditLog := cryptoutil.V7()
 
 		// Generate or propagate Transaction ID
 		transactionID := r.Header.Get(constants.HeaderTransactionID)
 		if transactionID == "" {
 			transactionID = cryptoutil.V7()
+			rw.Header().Set(constants.HeaderTransactionID, transactionID)
 		}
-		rw.Header().Set(constants.HeaderTransactionID, transactionID)
 
 		// ── Context injection ─────────────────────────────────────
 		r = WithActivityContext(r)
@@ -115,30 +116,53 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			reqBodyBytes = normalizeBodyRaw(raw)
 		}
 
-		next.ServeHTTP(rw, r)
-
-		statusCode := rw.Status()
-		responseHeadersBytes := normalizeHeadersJSON(rw.Header())
-
-		var responseBody any
-		if m.cfg.LogResponseBodies {
-			responseBody = normalizeBodyRaw(rw.body.Bytes())
-		}
-
+		// --- PHASE 1: Push Incoming Request ---
 		entry := model.AuditLog{
+			ID:              IDAuditLog,
 			Method:          r.Method,
 			FullURL:         FullURL(r),
-			StatusCode:      statusCode,
-			LatencyMS:       int(time.Since(start).Milliseconds()),
+			StatusCode:      0, // Not yet known
+			LatencyMS:       0, // Not yet known
 			ClientIP:        r.Header.Get(constants.HeaderIP),
 			RequestID:       r.Header.Get(constants.HeaderRequestID),
 			CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
 			CreatedAt:       format.NowUTC(),
 			TransactionID:   transactionID,
 			RequestHeaders:  requestHeadersBytes,
-			ResponseHeaders: responseHeadersBytes,
+			ResponseHeaders: nil, // Not yet known
 			RequestBody:     reqBodyBytes,
-			ResponseBody:    responseBody,
+			ResponseBody:    nil, // Not yet known
+			Protocol:        "HTTP " + r.Proto,
+		}
+
+		// Push 1: Copy entry to avoid data race
+		entryReq := entry
+		go func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					m.cfg.Logger.Error().
+						Str("service", m.cfg.ServiceName).
+						Str("transaction_id", transactionID).
+						Interface("panic", rec).
+						Msg("panic in async log save (request phase)")
+				}
+			}()
+			_ = m.cfg.LogStore.Save(r.Context(), entryReq)
+		}()
+
+		// --- EXECUTE APPLICATION LOGIC ---
+		next.ServeHTTP(rw, r)
+
+		// --- PHASE 2: Push Outgoing Response (Upsert) ---
+		// Note: If next.ServeHTTP panics, this code is skipped, which is intentional
+		// so the broker knows the response never completed.
+
+		entry.StatusCode = rw.Status()
+		entry.LatencyMS = int(time.Since(start).Milliseconds())
+		entry.ResponseHeaders = normalizeHeadersJSON(rw.Header())
+
+		if m.cfg.LogResponseBodies {
+			entry.ResponseBody = normalizeBodyRaw(rw.body.Bytes())
 		}
 
 		go func() {
@@ -148,7 +172,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 						Str("service", m.cfg.ServiceName).
 						Str("transaction_id", transactionID).
 						Interface("panic", rec).
-						Msg("panic in async log save")
+						Msg("panic in async log save (response phase)")
 				}
 			}()
 			if err := m.cfg.LogStore.Save(r.Context(), entry); err != nil {
@@ -156,7 +180,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 					Str("service", m.cfg.ServiceName).
 					Str("transaction_id", transactionID).
 					Err(err).
-					Msg("failed to save audit log")
+					Msg("failed to save audit log (response phase)")
 			}
 		}()
 	})

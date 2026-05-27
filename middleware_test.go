@@ -153,17 +153,27 @@ func TestLogger(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // wait for async save
 
 	logs := store.GetLogs()
-	if len(logs) != 1 {
-		t.Fatalf("expected 1 log entry, got %d", len(logs))
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 log entries, got %d", len(logs))
 	}
-	log := logs[0]
-	if log.Method != "POST" {
-		t.Errorf("expected POST, got %s", log.Method)
+
+	var logReq, logRes model.AuditLog
+	for _, log := range logs {
+		if log.StatusCode == 0 {
+			logReq = log
+		} else {
+			logRes = log
+		}
 	}
-	if log.StatusCode != http.StatusOK {
-		t.Errorf("expected 200, got %d", log.StatusCode)
+
+	if logReq.Method != "POST" {
+		t.Errorf("expected POST, got %s", logReq.Method)
 	}
-	if log.TransactionID == "" {
+
+	if logRes.StatusCode != http.StatusOK {
+		t.Errorf("expected phase 2 status to be 200, got %d", logRes.StatusCode)
+	}
+	if logRes.TransactionID == "" {
 		t.Error("TransactionID should be set")
 	}
 }
@@ -174,7 +184,7 @@ func TestMaxBodySize(t *testing.T) {
 	mgr := newTestManager(func(c *Config) {
 		// Set both limits; non-file (JSON) limit is the tighter constraint for regular requests.
 		c.RequestBodyLimitSize = 1024 * 1024 // 1 MB (file)
-		c.RequestBodyNonFileLimitSize = 100   // 100 bytes (non-file: JSON etc.)
+		c.RequestBodyNonFileLimitSize = 100  // 100 bytes (non-file: JSON etc.)
 		c.AllowedContentTypes = []string{"application/json", "multipart/form-data"}
 	})
 
