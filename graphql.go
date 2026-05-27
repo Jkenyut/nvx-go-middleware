@@ -8,7 +8,9 @@ import (
 
 	"github.com/Jkenyut/nvx-go-helper/activity"
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
+	"github.com/Jkenyut/nvx-go-helper/format"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
+	"github.com/Jkenyut/nvx-go-middleware/model"
 	"github.com/bytedance/sonic"
 )
 
@@ -91,17 +93,52 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 			start := time.Now()
 			rw := wrapResponseWriter(w, r, int(m.cfg.ResponseBodyLogLimitSize))
 
-			next.ServeHTTP(rw, r)
+			IDAuditLog := cryptoutil.V7()
+			entry := model.AuditLog{
+				ID:              IDAuditLog,
+				Method:          r.Method,
+				FullURL:         FullURL(r),
+				StatusCode:      0,
+				LatencyMS:       0,
+				ClientIP:        r.Header.Get(constants.HeaderIP),
+				RequestID:       r.Header.Get(constants.HeaderRequestID),
+				CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
+				CreatedAt:       format.NowUTC(),
+				TransactionID:   transactionID,
+				RequestHeaders:  normalizeHeadersJSON(r.Header),
+				ResponseHeaders: nil,
+				RequestBody:     gqlBody,
+				ResponseBody:    nil,
+				Protocol:        "GraphQL",
+			}
 
-			// ── Access log ────────────────────────────────────────────
-			m.cfg.Logger.Info().
-				Str("service", m.cfg.ServiceName).
-				Str("transaction_id", transactionID).
-				Str("operation", operationName).
-				Str("remote_ip", r.Header.Get(constants.HeaderIP)).
-				Interface("status", rw.Status()).
-				Interface("latency_ms", time.Since(start).Milliseconds()).
-				Msg("GraphQL request")
+			entryReq := entry
+			go func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async graphql log save (request)")
+					}
+				}()
+				_ = m.cfg.LogStore.Save(r.Context(), entryReq)
+			}()
+
+			next.ServeHTTP(rw, r)
+			entry.StatusCode = rw.Status()
+
+			entry.LatencyMS = int(time.Since(start).Milliseconds())
+			entry.ResponseHeaders = normalizeHeadersJSON(rw.Header())
+			if m.cfg.LogResponseBodies {
+				entry.ResponseBody = normalizeBodyRaw(rw.body.Bytes())
+			}
+
+			go func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async graphql log save (response)")
+					}
+				}()
+				_ = m.cfg.LogStore.Save(r.Context(), entry)
+			}()
 		})
 	}
 }

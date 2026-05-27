@@ -7,7 +7,9 @@ import (
 
 	"github.com/Jkenyut/nvx-go-helper/activity"
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
+	"github.com/Jkenyut/nvx-go-helper/format"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
+	"github.com/Jkenyut/nvx-go-middleware/model"
 )
 
 // wsResponseWriter wraps http.ResponseWriter to detect the WebSocket upgrade
@@ -83,16 +85,54 @@ func (m *Manager) WebSocketChain(
 			start := time.Now()
 			ww := &wsResponseWriter{ResponseWriter: w}
 
+			IDAuditLog := cryptoutil.V7()
+			entry := model.AuditLog{
+				ID:              IDAuditLog,
+				Method:          r.Method,
+				FullURL:         FullURL(r),
+				StatusCode:      0,
+				LatencyMS:       0,
+				ClientIP:        r.Header.Get(constants.HeaderIP),
+				RequestID:       r.Header.Get(constants.HeaderRequestID),
+				CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
+				CreatedAt:       format.NowUTC(),
+				TransactionID:   transactionID,
+				RequestHeaders:  normalizeHeadersJSON(r.Header),
+				ResponseHeaders: nil,
+				RequestBody:     nil, // WebSockets upgrade requests have no body
+				ResponseBody:    nil,
+				Protocol:        "WebSocket",
+			}
+
+			entryReq := entry
+			go func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async ws log save (request)")
+					}
+				}()
+				_ = m.cfg.LogStore.Save(r.Context(), entryReq)
+			}()
+
 			next.ServeHTTP(ww, r)
 
-			m.cfg.Logger.Info().
-				Str("service", m.cfg.ServiceName).
-				Str("transaction_id", transactionID).
-				Str("remote_ip", r.Header.Get(constants.HeaderIP)).
-				Str("path", r.URL.Path).
-				Interface("upgraded", ww.hijacked).
-				Interface("latency_ms", time.Since(start).Milliseconds()).
-				Msg("WebSocket connection")
+			statusCode := http.StatusBadRequest
+			if ww.hijacked {
+				statusCode = http.StatusSwitchingProtocols
+			}
+
+			entry.StatusCode = statusCode
+			entry.LatencyMS = int(time.Since(start).Milliseconds())
+			entry.ResponseHeaders = normalizeHeadersJSON(ww.Header())
+
+			go func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async ws log save (response)")
+					}
+				}()
+				_ = m.cfg.LogStore.Save(r.Context(), entry)
+			}()
 		})
 	}
 }

@@ -34,6 +34,6 @@ func (c *ConsoleStore) Save(_ context.Context, entry model.AuditLog) error {
 		Interface("response_headers", entry.ResponseHeaders).
 		Interface("request_body", entry.RequestBody).
 		Interface("response_body", entry.ResponseBody).
-		Msg("HTTP Request")
+		Msg(entry.Protocol)
 	return nil
 }

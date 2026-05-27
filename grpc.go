@@ -7,7 +7,10 @@ import (
 
 	"github.com/Jkenyut/nvx-go-helper/activity"
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
+	"github.com/Jkenyut/nvx-go-helper/format"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
+	"github.com/Jkenyut/nvx-go-middleware/model"
+	"github.com/bytedance/sonic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -52,6 +55,37 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 
 		start := time.Now()
 
+		IDAuditLog := cryptoutil.V7()
+		reqHeadersBytes, _ := sonic.ConfigDefault.Marshal(md)
+
+		entry := model.AuditLog{
+			ID:              IDAuditLog,
+			Method:          "POST",
+			FullURL:         info.FullMethod,
+			StatusCode:      0,
+			LatencyMS:       0,
+			ClientIP:        get(constants.HeaderIP),
+			RequestID:       get(constants.HeaderRequestID),
+			CreatedBy:       format.ToInt64(get(constants.HeaderUserID)),
+			CreatedAt:       format.NowUTC(),
+			TransactionID:   transactionID,
+			RequestHeaders:  reqHeadersBytes,
+			ResponseHeaders: nil,
+			RequestBody:     req,
+			ResponseBody:    nil,
+			Protocol:        "gRPC Unary",
+		}
+
+		entryReq := entry
+		go func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async grpc log save (request)")
+				}
+			}()
+			_ = m.cfg.LogStore.Save(ctx, entryReq)
+		}()
+
 		// Panic recovery
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -68,13 +102,27 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 
 		resp, err = handler(ctx, req)
 
-		m.cfg.Logger.Info().
-			Str("service", m.cfg.ServiceName).
-			Str("transaction_id", transactionID).
-			Str("method", info.FullMethod).
-			Interface("latency_ms", time.Since(start).Milliseconds()).
-			Interface("error", err).
-			Msg("gRPC unary call")
+		statusCode := 200
+		if err != nil {
+			if st, ok := status.FromError(err); ok {
+				statusCode = int(st.Code())
+			} else {
+				statusCode = 500
+			}
+		}
+
+		entry.StatusCode = statusCode
+		entry.LatencyMS = int(time.Since(start).Milliseconds())
+		entry.ResponseBody = resp
+
+		go func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async grpc log save (response)")
+				}
+			}()
+			_ = m.cfg.LogStore.Save(ctx, entry)
+		}()
 
 		return resp, err
 	}
@@ -117,6 +165,37 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 		wrapped := &wrappedServerStream{ServerStream: ss, ctx: ctx}
 		start := time.Now()
 
+		IDAuditLog := cryptoutil.V7()
+		reqHeadersBytes, _ := sonic.ConfigDefault.Marshal(md)
+
+		entry := model.AuditLog{
+			ID:              IDAuditLog,
+			Method:          "STREAM",
+			FullURL:         info.FullMethod,
+			StatusCode:      0,
+			LatencyMS:       0,
+			ClientIP:        get(constants.HeaderIP),
+			RequestID:       get(constants.HeaderRequestID),
+			CreatedBy:       format.ToInt64(get(constants.HeaderUserID)),
+			CreatedAt:       format.NowUTC(),
+			TransactionID:   transactionID,
+			RequestHeaders:  reqHeadersBytes,
+			ResponseHeaders: nil,
+			RequestBody:     nil,
+			ResponseBody:    nil,
+			Protocol:        "gRPC Stream",
+		}
+
+		entryReq := entry
+		go func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async grpc stream log save (request)")
+				}
+			}()
+			_ = m.cfg.LogStore.Save(ctx, entryReq)
+		}()
+
 		defer func() {
 			if rec := recover(); rec != nil {
 				stack := string(debug.Stack())
@@ -132,13 +211,26 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 
 		err = handler(srv, wrapped)
 
-		m.cfg.Logger.Info().
-			Str("service", m.cfg.ServiceName).
-			Str("transaction_id", transactionID).
-			Str("method", info.FullMethod).
-			Interface("latency_ms", time.Since(start).Milliseconds()).
-			Interface("error", err).
-			Msg("gRPC stream call")
+		statusCode := 200
+		if err != nil {
+			if st, ok := status.FromError(err); ok {
+				statusCode = int(st.Code())
+			} else {
+				statusCode = 500
+			}
+		}
+
+		entry.StatusCode = statusCode
+		entry.LatencyMS = int(time.Since(start).Milliseconds())
+
+		go func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async grpc stream log save (response)")
+				}
+			}()
+			_ = m.cfg.LogStore.Save(ctx, entry)
+		}()
 
 		return err
 	}

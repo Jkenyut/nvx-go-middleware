@@ -9,7 +9,7 @@ import (
 // It contains detailed information about the request, response, and execution context.
 type AuditLog struct {
 	// ID is the unique identifier for the log entry.
-	ID int64 `json:"id"`
+	ID string `json:"id"`
 	// Method is the HTTP method (GET, POST, etc.).
 	Method string `json:"method"`
 	// Full URL is the complete URL requested.
@@ -36,4 +36,5 @@ type AuditLog struct {
 	CreatedBy int64 `json:"created_by"`
 	// Created At is the timestamp when the log entry was created.
 	CreatedAt time.Time `json:"created_at"`
+	Protocol  string    `json:"protocol"`
 }
