@@ -326,7 +326,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 📄 License
 
-MIT License - see LICENSE file for details.
+apache 2.0 License - see LICENSE file for details.
 
 ## 🔗 Dependencies
 
@@ -341,7 +341,3 @@ MIT License - see LICENSE file for details.
 ## 📞 Support
 
 For issues, questions, or contributions, please open an issue on GitHub.
-
----
-
-Made with ❤️ by NVX Team
