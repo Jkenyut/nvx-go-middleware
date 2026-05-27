@@ -357,16 +357,19 @@ func ApplyMiddleware(handler http.Handler, middlewares ...func(http.Handler) htt
 	return handler
 }
 
-// Heartbeat creates a simple heartbeat/health-check middleware handler.
-// It intercepts requests to the specified path and returns a 200 OK "OK" plain text response,
-// bypassing subsequent middleware.
-func Heartbeat(path string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == path {
-			w.Header().Set("Content-Type", "text/plain")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("OK"))
-		}
+// Heartbeat returns a handler that responds to the given path with 200 OK "OK".
+// Requests to other paths are forwarded to next.
+func Heartbeat(path string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == path {
+				w.Header().Set("Content-Type", "text/plain")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("OK"))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
 	}
 }
 

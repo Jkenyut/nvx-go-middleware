@@ -2,12 +2,13 @@ package middleware
 
 import (
 	"fmt"
-	"os"
+	"net/http"
 	"time"
 
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/go-chi/httprate"
 	"github.com/rs/zerolog"
+	"os"
 )
 
 // Manager holds the middleware configuration and provides middleware methods.
@@ -18,105 +19,88 @@ type Manager struct {
 }
 
 // New creates a new Middleware Manager with the given configuration.
-// It initializes required fields, sets default values for missing configuration using safe defaults,
-// and validates the configuration. Panics if validation fails.
+// Panics if the configuration is invalid.
+//
+// Deprecated: Use NewWithError for safer construction without panic.
 func New(cfg Config) *Manager {
-	// Set default logger if not set
+	m, err := NewWithError(cfg)
+	if err != nil {
+		panic(fmt.Sprintf("middleware configuration error: %v", err))
+	}
+	return m
+}
+
+// NewWithError creates a new Middleware Manager, returning an error instead of panicking
+// if the configuration is invalid. Prefer this over New for production use.
+func NewWithError(cfg Config) (*Manager, error) {
+	// Validate required fields BEFORE applying defaults that might mask missing values.
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	cfg = applyDefaults(cfg)
+	return &Manager{cfg: cfg}, nil
+}
+
+// applyDefaults fills in all missing Config fields with safe defaults.
+func applyDefaults(cfg Config) Config {
 	if cfg.Logger == nil {
 		l := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
-		cfg.Logger = &l
+		cfg.Logger = NewZerologLogger(&l)
 	}
 
-	// Set default LogStore if nil
 	if cfg.LogStore == nil {
-		cfg.LogStore = &ConsoleStore{
-			logger: cfg.Logger,
-		}
+		cfg.LogStore = &ConsoleStore{logger: cfg.Logger}
 	}
 
-	// Set default RequestTimeout if not set
 	if cfg.RequestTimeout == 0 {
 		cfg.RequestTimeout = 60 * time.Second
 	}
-	// Set default RequestBodyLimit if not set (2GB)
 	if cfg.RequestBodyLimitSize == 0 {
 		cfg.RequestBodyLimitSize = constants.RequestBodyLimitSize
 	}
-	// Set default RequestBodyNonFileLimit if not set (3 MB)
 	if cfg.RequestBodyNonFileLimitSize == 0 {
 		cfg.RequestBodyNonFileLimitSize = constants.RequestBodyNonFileLimitSize
 	}
-
-	// Set default ResponseBodyLogLimit (5 MB) if not set
 	if cfg.ResponseBodyLogLimitSize == 0 {
 		cfg.ResponseBodyLogLimitSize = constants.ResponseBodyLogLimitSize
 	}
-
 	if cfg.ServiceName == "" {
 		cfg.ServiceName = "unknown-service"
 	}
-
-	// Set default env if not set
 	if cfg.Env == "" {
 		cfg.Env = "development"
 	}
 
-	// Validate configuration
-	if err := cfg.Validate(); err != nil {
-		panic(fmt.Sprintf("middleware configuration error: %v", err))
-	}
-
-	// Set default RequiredPublicAuthHeaders if not set
 	if len(cfg.RequiredPublicAuthHeaders) == 0 {
 		cfg.RequiredPublicAuthHeaders = constants.RequiredPublicAuthHeaders
 	}
-
-	// Set default RequiredPublicHeaders if not set
 	if len(cfg.RequiredPublicHeaders) == 0 {
 		cfg.RequiredPublicHeaders = constants.RequiredPublicHeaders
 	}
-
-	// Set default RequiredInternalHeaders if not set
 	if len(cfg.RequiredInternalHeaders) == 0 {
 		cfg.RequiredInternalHeaders = constants.RequiredInternalHeaders
 	}
-
-	// Set default RequiredPublicAPIKeyHeaders if not set
 	if len(cfg.RequiredPublicAPIKeyHeaders) == 0 {
 		cfg.RequiredPublicAPIKeyHeaders = constants.RequiredPublicAPIKeyHeaders
 	}
-
-	// Set default RequiredSignaturePublicHeaders if not set
 	if len(cfg.RequiredSignaturePublicHeaders) == 0 {
 		cfg.RequiredSignaturePublicHeaders = constants.RequiredSignaturePublicHeaders
 	}
-
-	// Set default RequiredSignatureInternalHeaders if not set
 	if len(cfg.RequiredSignatureInternalHeaders) == 0 {
 		cfg.RequiredSignatureInternalHeaders = constants.RequiredSignatureInternalHeaders
 	}
-
-	// Set default SecurityHeaders if not set
 	if cfg.SecurityHeaders == nil {
 		cfg.SecurityHeaders = constants.SecurityHeaders
 	}
-
-	// Set default TrustedProxies if not set
 	if len(cfg.TrustedProxies) == 0 {
 		cfg.TrustedProxies = []string{}
 	}
-
-	// Set default AllowedOrigins if not set
 	if len(cfg.AllowedOrigins) == 0 {
 		cfg.AllowedOrigins = []string{"*"}
 	}
-
-	// Set default AllowedContentTypes if not set
 	if len(cfg.AllowedContentTypes) == 0 {
 		cfg.AllowedContentTypes = []string{"application/json", "multipart/form-data"}
 	}
-
-	// Set default AllowedHeaders if not set
 	if len(cfg.AllowedHeaders) == 0 {
 		cfg.AllowedHeaders = uniqueStrings(
 			[]string{"Accept", "Authorization", "Content-Type"},
@@ -126,22 +110,17 @@ func New(cfg Config) *Manager {
 			cfg.RequiredPublicAPIKeyHeaders,
 		)
 	}
-
-	// Set default HeadersToRemove if not set
 	if len(cfg.HeadersToRemove) == 0 {
 		cfg.HeadersToRemove = []string{}
 	}
-
-	// Set default SignatureTimestampExpired if not set
 	if cfg.SignatureTimestampExpired == 0 {
 		cfg.SignatureTimestampExpired = constants.TimestampExpired
 	}
 
-	return &Manager{cfg: cfg}
+	return cfg
 }
 
 // Config returns a copy of the manager's configuration.
-// This is useful for inspecting the current configuration state.
 func (m *Manager) Config() Config {
 	return m.cfg
 }
@@ -153,7 +132,6 @@ func (m *Manager) envProd() bool {
 func uniqueStrings(items ...[]string) []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0)
-
 	for _, list := range items {
 		for _, v := range list {
 			if _, ok := seen[v]; !ok {
@@ -162,6 +140,13 @@ func uniqueStrings(items ...[]string) []string {
 			}
 		}
 	}
-
 	return out
+}
+
+// SetHeaderAuthType sets the NVX-Auth-Type header to identify the authentication context.
+func (m *Manager) SetHeaderAuthType(next http.Handler, authType string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Set(constants.HeaderAuthType, authType)
+		next.ServeHTTP(w, r)
+	})
 }

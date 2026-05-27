@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -9,6 +8,7 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/response"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
+	"github.com/bytedance/sonic"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
 )
@@ -109,7 +109,7 @@ func RateLimit(
 		httprate.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPreconditionRequired)
-			json.NewEncoder(w).Encode(response.PreconditionRequired(r.Context(), "precondition required"))
+			_ = sonic.ConfigDefault.NewEncoder(w).Encode(response.PreconditionRequired(r.Context(), "precondition required"))
 		}),
 		httprate.WithResponseHeaders(httprate.ResponseHeaders{
 			Limit:      "NVX-RateLimit-Limit",
@@ -121,7 +121,7 @@ func RateLimit(
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
-			json.NewEncoder(w).Encode(response.TooManyRequests(r.Context(), "too many requests"))
+			_ = sonic.ConfigDefault.NewEncoder(w).Encode(response.TooManyRequests(r.Context(), "too many requests"))
 		}),
 	}
 
