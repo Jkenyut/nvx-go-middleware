@@ -10,9 +10,6 @@ import (
 // ChainConfig configures which middleware to use in a middleware chain.
 // It allows toggling specific Chi middleware and configuring parameters like compression, throttling, and rate limiting.
 type ChainConfig struct {
-	// UseChiRealIP enables the Chi RealIP middleware, which sets the X-Real-IP header.
-	// Defaults to false in DefaultChainConfig in favor of secure TrustProxy.
-	UseChiRealIP bool
 	// UseChiCompress enables the Chi Compress middleware for response compression.
 	UseChiCompress bool
 	// UseChiTimeout enables the Chi Timeout middleware to set a request processing timeout.
@@ -42,31 +39,26 @@ type ChainConfig struct {
 }
 
 // DefaultChainConfig returns a ChainConfig with recommended default values.
-// It sets up reasonable defaults for compression, throttling, and rate limiting,
-// and enables specific middleware like Compress and StripSlashes.
 func DefaultChainConfig() ChainConfig {
 	return ChainConfig{
-
-		UseChiRealIP:       false, // Disabled in favor of secure TrustProxy
 		UseChiCompress:     true,
-		UseChiTimeout:      true,            // User-requested: specific Chi timeout
-		UseChiThrottle:     false,           // Enable per route
-		UseChiStripSlashes: true,            // User-requested: specific Chi strip slashes
-		CompressionLevel:   5,               // User-requested: specific Chi compression level
-		ThrottleLimit:      100,             // User-requested: specific Chi throttle limit
-		ThrottleTimeout:    1 * time.Minute, // User-requested: specific Chi throttle timeout
-
-		ThrottleBacklog:       50,    // User-requested: specific Chi throttle backlog
-		UseChiRateLimitAuth:   false, // Enabled by default
-		UseChiRateLimitPublic: false, // Enabled by default
+		UseChiTimeout:      true,
+		UseChiThrottle:     false,
+		UseChiStripSlashes: true,
+		CompressionLevel:   5,
+		ThrottleLimit:      100,
+		ThrottleTimeout:    1 * time.Minute,
+		ThrottleBacklog:    50,
+		UseChiRateLimitAuth:   false,
+		UseChiRateLimitPublic: false,
 		LimiterConfig: ConfigLimiter{
-			RateLimitRequests: 30,              // User-requested: specific Chi rate limit requests
-			RateLimitWindow:   1 * time.Minute, // User-requested: specific Chi rate limit window
+			RateLimitRequests: 30,
+			RateLimitWindow:   1 * time.Minute,
 			PreRequestOnBeforeLimiter: func(w http.ResponseWriter, r *http.Request) bool {
-				return true // TODO: implement pre request on before limiter
+				return true
 			},
 			PreRequestOnAfterLimiter: func(w http.ResponseWriter, r *http.Request) bool {
-				return true // TODO: implement pre request on after limiter
+				return true
 			},
 			Counter:     nil,
 			LimiterHook: nil,
@@ -74,271 +66,107 @@ func DefaultChainConfig() ChainConfig {
 	}
 }
 
+// buildInnerChain applies the innermost core middleware.
+// Because it sits inside the Rate Limiter and Auth Validator, the Logger will ONLY
+// record requests that successfully passed DDoS protection and authentication.
+func (m *Manager) buildInnerChain(cfg ChainConfig, next http.Handler) http.Handler {
+	handler := next
+
+	handler = m.MaxBodySize()(handler)
+	if cfg.UseChiStripSlashes {
+		handler = m.ChiStripSlashes(handler)
+	}
+	handler = m.RemoveHeaders(handler)
+	handler = m.SecureHeaders(handler)
+
+	if cfg.UseChiCompress {
+		handler = m.ChiCompress(cfg.CompressionLevel)(handler)
+	}
+
+	// Logger only records requests that survived Outer layers (DDoS, Bad Auth)
+	handler = m.Logger(handler)
+
+	return handler
+}
+
+// buildOuterChain applies the outermost core middleware.
+// This executes BEFORE validation, logging, and application logic.
+func (m *Manager) buildOuterChain(cfg ChainConfig, handler http.Handler) http.Handler {
+	// TrustProxy MUST run before RateLimit and Validation to resolve Real IP accurately.
+	handler = m.TrustProxy(handler)
+
+	if cfg.UseChiTimeout {
+		handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
+	}
+	if cfg.UseChiThrottle {
+		handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
+	}
+
+	handler = m.Recoverer(handler)
+	handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
+
+	return handler
+}
+
 // PublicChain creates a middleware chain for public routes that do not require user authentication.
-// It ensures the request is treated as public, runs the global chain, applies public rate limits,
-// sets the auth type to public, and handles CORS.
+// Execution Order: TrustProxy -> EnsurePublic -> RateLimit -> Logger -> App
 func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		handler := next
+		handler := m.buildInnerChain(cfg, next)
 
-		// Apply Chi middleware
-		if cfg.UseChiTimeout {
-			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
-		}
-
-		// Apply custom middleware (inner to outer)
-		handler = m.RemoveHeaders(handler)
-
-		// Apply Chi strip slashes
-		if cfg.UseChiStripSlashes {
-			handler = m.ChiStripSlashes(handler)
-		}
-
-		// Note: header validation is applied by the caller (GlobalChain vs PreSignChain)
-		handler = m.Logger(handler)
-
-		// Apply Chi real IP
-		if cfg.UseChiRealIP {
-			handler = m.ChiRealIP(handler)
-		}
-
-		// Always apply TrustProxy to populate NVX-IP safely
-		handler = m.TrustProxy(handler)
-
-		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitPublic {
-			// Apply Chi rate limit
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
-
-		// set auth type to public
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
+		handler = m.EnsurePublic(handler) // Rejects bad signatures before RateLimit processes them
 
-		// Apply secure headers
-		handler = m.SecureHeaders(handler)
-
-		// Ensure Public
-		handler = m.EnsurePublic(handler)
-
-		// set max body size
-		handler = m.MaxBodySize()(handler)
-
-		// Apply Chi compression
-		if cfg.UseChiCompress {
-			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
-		}
-
-		// Apply recoverer
-		handler = m.Recoverer(handler)
-
-		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
-		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
-
-		// Apply Chi throttle
-		if cfg.UseChiThrottle {
-			handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
-		}
-
-		return handler
+		return m.buildOuterChain(cfg, handler)
 	}
 }
 
-// PublicAuthChain creates a middleware chain for public routes that require authentication (e.g., user login).
-// It ensures public auth requirements, runs the global chain, applies authenticated rate limits,
-// sets the auth type to public-auth, and handles CORS.
+// PublicAuthChain creates a middleware chain for public routes that require authentication.
 func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		handler := next
+		handler := m.buildInnerChain(cfg, next)
 
-		// Apply Chi middleware
-		if cfg.UseChiTimeout {
-			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
-		}
-
-		// Apply custom middleware (inner to outer)
-		handler = m.RemoveHeaders(handler)
-
-		// Apply Chi strip slashes
-		if cfg.UseChiStripSlashes {
-			handler = m.ChiStripSlashes(handler)
-		}
-
-		// Note: header validation is applied by the caller (GlobalChain vs PreSignChain)
-		handler = m.Logger(handler)
-
-		// Apply Chi real IP
-		if cfg.UseChiRealIP {
-			handler = m.ChiRealIP(handler)
-		}
-
-		// Always apply TrustProxy to populate NVX-IP safely
-		handler = m.TrustProxy(handler)
-
-		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitAuth {
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PrivateKeySignature)(handler)
 		}
-
-		// set auth type to public auth
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAuth)
-
-		// apply secure headers
-		handler = m.SecureHeaders(handler)
-
-		// Ensure Public Auth
 		handler = m.EnsurePublicAuth(handler)
 
-		// set max body size
-		handler = m.MaxBodySize()(handler)
-		// Apply Chi compression
-		if cfg.UseChiCompress {
-			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
-		}
-
-		// apply recoverer
-		handler = m.Recoverer(handler)
-
-		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
-		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
-		// Apply Chi throttle
-		if cfg.UseChiThrottle {
-			handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
-		}
-
-		return handler
+		return m.buildOuterChain(cfg, handler)
 	}
 }
 
-// PublicAPIKeyChain creates a middleware chain for public routes that do not require user authentication.
-// It ensures the request is treated as public, runs the global chain, applies public rate limits,
-// sets the auth type to public, and handles CORS.
+// PublicAPIKeyChain creates a middleware chain for public routes using API Key authentication.
 func (m *Manager) PublicAPIKeyChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		handler := next
+		handler := m.buildInnerChain(cfg, next)
 
-		// Apply Chi middleware
-		if cfg.UseChiTimeout {
-			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
-		}
-
-		// Apply custom middleware (inner to outer)
-		handler = m.RemoveHeaders(handler)
-
-		// Apply Chi strip slashes
-		if cfg.UseChiStripSlashes {
-			handler = m.ChiStripSlashes(handler)
-		}
-
-		// Note: header validation is applied by the caller (GlobalChain vs PreSignChain)
-		handler = m.Logger(handler)
-
-		// Apply Chi real IP
-		if cfg.UseChiRealIP {
-			handler = m.ChiRealIP(handler)
-		}
-
-		// Always apply TrustProxy to populate NVX-IP safely
-		handler = m.TrustProxy(handler)
-
-		// Apply Auth Rate Limit
 		if cfg.UseChiRateLimitPublic {
-			// Apply Chi rate limit
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
-
-		// set auth type to public
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAPIKey)
-
-		// Apply secure headers
-		handler = m.SecureHeaders(handler)
-
-		// Ensure Public API Key
 		handler = m.EnsurePublicAPIKey(handler)
 
-		// set max body size
-		handler = m.MaxBodySize()(handler)
-		// Apply Chi compression
-		if cfg.UseChiCompress {
-			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
-		}
-
-		// Apply recoverer
-		handler = m.Recoverer(handler)
-
-		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
-		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
-
-		// Apply Chi throttle
-		if cfg.UseChiThrottle {
-			handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
-		}
-
-		return handler
+		return m.buildOuterChain(cfg, handler)
 	}
 }
 
 // InternalChain creates a middleware chain for internal service-to-service routes.
-// It ensures internal request requirements, runs the global chain, sets the auth type to internal,
-// and helps manage CORS for internal communication.
 func (m *Manager) InternalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		handler := next
+		handler := m.buildInnerChain(cfg, next)
 
-		// Apply Chi middleware
-		if cfg.UseChiTimeout {
-			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
-		}
-
-		// Apply custom middleware (inner to outer)
-		handler = m.RemoveHeaders(handler)
-
-		// Apply Chi strip slashes
-		if cfg.UseChiStripSlashes {
-			handler = m.ChiStripSlashes(handler)
-		}
-
-		// Note: header validation is applied by the caller (GlobalChain vs PreSignChain)
-		handler = m.Logger(handler)
-
-		// Apply Chi real IP
-		if cfg.UseChiRealIP {
-			handler = m.ChiRealIP(handler)
-		}
-
-		// Always apply TrustProxy to populate NVX-IP safely
-		handler = m.TrustProxy(handler)
-
-		// set auth type to internal
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypeInternal)
-
-		// set secure headers
-		handler = m.SecureHeaders(handler)
-		// Ensure Internal Headers (specific to InternalChain)
 		handler = m.EnsureInternal(handler)
 
-		// set max body size
-		handler = m.MaxBodySize()(handler)
-
-		// Apply Chi compression
-		if cfg.UseChiCompress {
-			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
-		}
-
-		// Apply recoverer
-		handler = m.Recoverer(handler)
-		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
-		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
-		// Apply Chi throttle
-		if cfg.UseChiThrottle {
-			handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
-		}
-		return handler
+		return m.buildOuterChain(cfg, handler)
 	}
 }
 
 // AdminChain creates a middleware chain for admin routes.
-// It builds upon the InternalChain and adds an additional adminCheck middleware
-// for specific administrative authorization.
 func (m *Manager) AdminChain(cfg ChainConfig, adminCheck func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return m.InternalChain(cfg)(
@@ -358,7 +186,6 @@ func ApplyMiddleware(handler http.Handler, middlewares ...func(http.Handler) htt
 }
 
 // Heartbeat returns a handler that responds to the given path with 200 OK "OK".
-// Requests to other paths are forwarded to next.
 func Heartbeat(path string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -374,106 +201,24 @@ func Heartbeat(path string) func(http.Handler) http.Handler {
 }
 
 // PreSignChain creates a middleware chain specifically for pre-signed requests.
-// It handles pre-sign specific headers, applies base middleware, and enforces public rate limits.
 func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		handler := next
+		handler := m.buildInnerChain(cfg, next)
 
-		// Apply Chi middleware
-		if cfg.UseChiTimeout {
-			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
-		}
-
-		// Apply custom middleware (inner to outer)
-		handler = m.RemoveHeaders(handler)
-
-		// Apply Chi strip slashes
-		if cfg.UseChiStripSlashes {
-			handler = m.ChiStripSlashes(handler)
-		}
-
-		// Note: header validation is applied by the caller (GlobalChain vs PreSignChain)
-		handler = m.Logger(handler)
-
-		// Apply Chi real IP
-		if cfg.UseChiRealIP {
-			handler = m.ChiRealIP(handler)
-		}
-
-		// Always apply TrustProxy to populate NVX-IP safely
-		handler = m.TrustProxy(handler)
-
-		// Apply Chi rate limit
-		// Note: PreSignChain uses public rate limit settings in the original code, preserved here.
 		if cfg.UseChiRateLimitPublic {
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
-
-		// Apply secure headers
-		handler = m.SecureHeaders(handler)
-
-		// Ensure PreSign Headers (specific to PreSignChain)
 		handler = m.EnsurePreSignHeaders(handler)
 
-		// set max body size
-		handler = m.MaxBodySize()(handler)
-
-		// Apply Chi compression
-		if cfg.UseChiCompress {
-			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
-		}
-
-		handler = m.Recoverer(handler)
-		// Apply CORS (Outer) - Ensures 429s/503s get CORS headers
-		handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
-		// Apply Chi throttle
-		if cfg.UseChiThrottle {
-			handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
-		}
-		return handler
+		return m.buildOuterChain(cfg, handler)
 	}
 }
 
 // WebhookChain creates a middleware chain specialized for handling webhooks.
-// It focuses on processing reliability and logging, applying timeouts, body limits,
-// header cleanup, recovery, logging, and compression, while trusting proxies.
 func (m *Manager) WebhookChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		handler := next
-
-		// Apply Chi middleware
-		if cfg.UseChiTimeout {
-			handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
-		}
-
-		// Apply custom middleware (inner to outer)
-		handler = m.RemoveHeaders(handler)
-
-		// Apply Chi strip slashes
-		if cfg.UseChiStripSlashes {
-			handler = m.ChiStripSlashes(handler)
-		}
-
-		// Note: header validation is applied by the caller if needed, typically webhooks trust the source via signature
-		handler = m.Logger(handler)
-
-		// Always apply TrustProxy to populate NVX-IP safely
-		handler = m.TrustProxy(handler)
-
-		// Apply secure headers
-		handler = m.SecureHeaders(handler)
-
-		handler = m.MaxBodySize()(handler)
-
-		// Apply Chi compression
-		if cfg.UseChiCompress {
-			handler = m.ChiCompress(cfg.CompressionLevel)(handler)
-		}
-
-		// Apply recoverer
-		handler = m.Recoverer(handler)
-
-		return handler
+		handler := m.buildInnerChain(cfg, next)
+		return m.buildOuterChain(cfg, handler)
 	}
 }

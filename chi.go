@@ -13,12 +13,6 @@ import (
 	"github.com/go-chi/httprate"
 )
 
-// ChiRealIP wraps Chi's RealIP middleware.
-// It sets a http.Handler that puts the X-Real-IP and X-Forwarded-For headers into the context.
-func (m *Manager) ChiRealIP(next http.Handler) http.Handler {
-	return chimiddleware.RealIP(next)
-}
-
 // ChiCompress wraps Chi's Compress middleware.
 // It returns a middleware that compresses the response body based on the client's Accept-Encoding header.
 // Level is the compression level (1-9).
@@ -201,7 +195,7 @@ func keyByHeader(r *http.Request, header string) (string, error) {
 }
 
 func buildRateKeyPublic(r *http.Request, zone string, signature string) string {
-	ip, _ := httprate.KeyByIP(r)
+	ip, _ := keyByHeader(r, constants.HeaderIP)
 	endpoint, _ := httprate.KeyByEndpoint(r)
 	userAgent, _ := keyByHeader(r, constants.HeaderUserAgent)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)

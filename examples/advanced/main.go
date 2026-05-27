@@ -23,7 +23,6 @@ func main() {
 
 	// Custom chain config for production
 	chainCfg := mw.ChainConfig{
-		UseChiRealIP:       true,
 		UseChiCompress:     true,
 		UseChiTimeout:      false, // Use custom timeout
 		UseChiThrottle:     true,

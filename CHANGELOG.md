@@ -40,11 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- Database log storage implementations (PostgreSQL, MySQL, MongoDB)
 - Metrics and monitoring integration
 - OpenTelemetry tracing support
 - Additional authentication methods (OAuth2, API keys)
 - Request/response encryption
-- IP-based rate limiting
 - Advanced CORS configuration
 - Webhook signature validation
