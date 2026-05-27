@@ -230,6 +230,9 @@ func rateKeyInjector(signature string) func(http.Handler) http.Handler {
 			case constants.AuthTypePublicAuth:
 				key := buildRateKeyPublicAuth(r, constants.AuthTypePublicAuth, signature)
 				r.Header.Set(constants.HeaderRateKey, key)
+			default:
+				key := buildRateKeyPublic(r, constants.AuthTypePublic, signature)
+				r.Header.Set(constants.HeaderRateKey, key)
 			}
 			next.ServeHTTP(w, r)
 		})
