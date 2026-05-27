@@ -157,15 +157,19 @@ func TestLogger(t *testing.T) {
 		t.Fatalf("expected 2 log entries, got %d", len(logs))
 	}
 
-	logReq := logs[0]
+	var logReq, logRes model.AuditLog
+	for _, log := range logs {
+		if log.StatusCode == 0 {
+			logReq = log
+		} else {
+			logRes = log
+		}
+	}
+
 	if logReq.Method != "POST" {
 		t.Errorf("expected POST, got %s", logReq.Method)
 	}
-	if logReq.StatusCode != 0 {
-		t.Errorf("expected phase 1 status to be 0, got %d", logReq.StatusCode)
-	}
 
-	logRes := logs[1]
 	if logRes.StatusCode != http.StatusOK {
 		t.Errorf("expected phase 2 status to be 200, got %d", logRes.StatusCode)
 	}
