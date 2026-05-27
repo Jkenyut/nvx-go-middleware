@@ -89,15 +89,8 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		}
 		rw.Header().Set(constants.HeaderTransactionID, transactionID)
 
-		// Inject context values
-		ctx := r.Context()
-		h := r.Header
-		ctx = activity.WithTransactionID(ctx, h.Get(constants.HeaderTransactionID))
-		ctx = activity.WithAPIKey(ctx, h.Get(constants.HeaderAPIKey))
-		ctx = activity.WithUserID(ctx, h.Get(constants.HeaderUserID))
-		ctx = activity.WithUserIP(ctx, h.Get(constants.HeaderIP))
-		ctx = activity.WithUserType(ctx, h.Get(constants.HeaderUserType))
-		r = r.WithContext(ctx)
+		// ── Context injection ─────────────────────────────────────
+		r = WithActivityContext(r)
 
 		if m.cfg.ContextInjector != nil {
 			r = m.cfg.ContextInjector(r)
