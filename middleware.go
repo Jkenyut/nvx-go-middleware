@@ -133,6 +133,9 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			RequestBody:     reqBodyBytes,
 			ResponseBody:    nil, // Not yet known
 			Protocol:        "HTTP " + r.Proto,
+			ServiceName:     m.cfg.ServiceName,
+			UserAgent:       r.UserAgent(),
+			ErrorMessage:    "",
 		}
 
 		// Push 1: Copy entry to avoid data race

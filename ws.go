@@ -102,6 +102,9 @@ func (m *Manager) WebSocketChain(
 				RequestBody:     nil, // WebSockets upgrade requests have no body
 				ResponseBody:    nil,
 				Protocol:        "WebSocket",
+				ServiceName:     m.cfg.ServiceName,
+				UserAgent:       r.UserAgent(),
+				ErrorMessage:    "",
 			}
 
 			entryReq := entry

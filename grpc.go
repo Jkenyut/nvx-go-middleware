@@ -74,6 +74,9 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 			RequestBody:     req,
 			ResponseBody:    nil,
 			Protocol:        "gRPC Unary",
+			ServiceName:     m.cfg.ServiceName,
+			UserAgent:       get("user-agent"),
+			ErrorMessage:    "",
 		}
 
 		entryReq := entry
@@ -104,6 +107,7 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 
 		statusCode := 200
 		if err != nil {
+			entry.ErrorMessage = err.Error()
 			if st, ok := status.FromError(err); ok {
 				statusCode = int(st.Code())
 			} else {
@@ -184,6 +188,9 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			RequestBody:     nil,
 			ResponseBody:    nil,
 			Protocol:        "gRPC Stream",
+			ServiceName:     m.cfg.ServiceName,
+			UserAgent:       get("user-agent"),
+			ErrorMessage:    "",
 		}
 
 		entryReq := entry
@@ -213,6 +220,7 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 
 		statusCode := 200
 		if err != nil {
+			entry.ErrorMessage = err.Error()
 			if st, ok := status.FromError(err); ok {
 				statusCode = int(st.Code())
 			} else {
