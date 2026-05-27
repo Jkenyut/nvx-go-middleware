@@ -37,4 +37,10 @@ type AuditLog struct {
 	// Created At is the timestamp when the log entry was created.
 	CreatedAt time.Time `json:"created_at"`
 	Protocol  string    `json:"protocol"`
+	// ServiceName identifies the microservice emitting this log.
+	ServiceName string `json:"service_name"`
+	// UserAgent is the client's user agent string.
+	UserAgent string `json:"user_agent"`
+	// ErrorMessage captures explicit error messages or panics (if any).
+	ErrorMessage string `json:"error_message,omitempty"`
 }

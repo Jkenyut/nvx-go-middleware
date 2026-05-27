@@ -110,6 +110,9 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				RequestBody:     gqlBody,
 				ResponseBody:    nil,
 				Protocol:        "GraphQL",
+				ServiceName:     m.cfg.ServiceName,
+				UserAgent:       r.UserAgent(),
+				ErrorMessage:    "",
 			}
 
 			entryReq := entry
