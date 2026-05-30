@@ -1,3 +1,4 @@
+// Main
 package main
 
 import (
@@ -11,7 +12,7 @@ import (
 
 func main() {
 	// Create middleware manager
-	mgr := mw.New(mw.Config{
+	mgr, err := mw.NewWithError(mw.Config{
 		PublicKeySignature:   "your-rsa-public-key-here",
 		PrivateKeySignature:  "your-rsa-private-key-here",
 		AllowedOrigins:       []string{"https://example.com"},
@@ -20,6 +21,9 @@ func main() {
 		RequestBodyLimitSize: 5 * 1024 * 1024, // 5MB
 		Env:                  "production",
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Custom chain config for production
 	chainCfg := mw.ChainConfig{
@@ -70,9 +74,9 @@ func main() {
 	// ========================================
 
 	mux.Handle("/webhooks/payment", mgr.WebhookChain(chainCfg)(
-		mgr.MethodOnly("POST", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mgr.MethodOnly("POST", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("Webhook received"))
+			_, _ = w.Write([]byte("Webhook received"))
 		})),
 	))
 
@@ -87,7 +91,7 @@ func main() {
 			if userType != "admin" {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusForbidden)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"meta": map[string]interface{}{
 						"success": false,
 						"message": "Admin access required",
@@ -120,9 +124,9 @@ func main() {
 	// HEALTH CHECK
 	// ========================================
 
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"status": "healthy",
 			"time":   time.Now(),
 		})
@@ -140,9 +144,9 @@ func main() {
 // HANDLERS
 // ========================================
 
-func registerHandler(w http.ResponseWriter, r *http.Request) {
+func registerHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"meta": map[string]interface{}{
 			"success": true,
 			"message": "User registered successfully",
@@ -155,9 +159,9 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func loginHandler(w http.ResponseWriter, r *http.Request) {
+func loginHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"meta": map[string]interface{}{
 			"success": true,
 			"message": "Login successful",
@@ -175,7 +179,7 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("NVX-User-ID")
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"meta": map[string]interface{}{
 			"success": true,
 			"message": "Profile retrieved",
@@ -190,9 +194,9 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func updateProfileHandler(w http.ResponseWriter, r *http.Request) {
+func updateProfileHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"meta": map[string]interface{}{
 			"success": true,
 			"message": "Profile updated successfully",
@@ -204,9 +208,9 @@ func updateProfileHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func createPostHandler(w http.ResponseWriter, r *http.Request) {
+func createPostHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"meta": map[string]interface{}{
 			"success": true,
 			"message": "Post created successfully",
@@ -219,9 +223,9 @@ func createPostHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func listPostsHandler(w http.ResponseWriter, r *http.Request) {
+func listPostsHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"meta": map[string]interface{}{
 			"success": true,
 			"message": "Posts retrieved",
@@ -242,9 +246,9 @@ func listPostsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func listUsersHandler(w http.ResponseWriter, r *http.Request) {
+func listUsersHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"meta": map[string]interface{}{
 			"success": true,
 			"message": "Users retrieved",
@@ -265,9 +269,9 @@ func listUsersHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func statsHandler(w http.ResponseWriter, r *http.Request) {
+func statsHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"meta": map[string]interface{}{
 			"success": true,
 			"message": "Stats retrieved",

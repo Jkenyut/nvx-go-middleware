@@ -97,10 +97,9 @@ func RateLimit(
 	cfg ConfigLimiter,
 	signatureSecret string,
 ) func(http.Handler) http.Handler {
-
 	opts := []httprate.Option{
 		httprate.WithKeyFuncs(keyByHeaderAuthType),
-		httprate.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
+		httprate.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, _ error) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPreconditionRequired)
 			_ = sonic.ConfigDefault.NewEncoder(w).Encode(response.PreconditionRequired(r.Context(), "precondition required"))

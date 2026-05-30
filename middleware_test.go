@@ -94,14 +94,6 @@ func TestNewWithError(t *testing.T) {
 	}
 }
 
-func TestNew_PanicsOnInvalidConfig(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("New() should panic on invalid config")
-		}
-	}()
-	New(Config{}) // missing keys and origins
-}
 
 // ─── Recoverer ───────────────────────────────────────────────────────────────
 

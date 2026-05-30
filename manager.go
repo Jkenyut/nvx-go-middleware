@@ -1,33 +1,18 @@
 package middleware
 
 import (
-	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/Jkenyut/nvx-go-middleware/constants"
-	"github.com/go-chi/httprate"
 	"github.com/rs/zerolog"
-	"os"
 )
 
 // Manager holds the middleware configuration and provides middleware methods.
 // It is the central entry point for creating and managing middleware chains.
 type Manager struct {
-	cfg     Config
-	counter httprate.LimitCounter
-}
-
-// New creates a new Middleware Manager with the given configuration.
-// Panics if the configuration is invalid.
-//
-// Deprecated: Use NewWithError for safer construction without panic.
-func New(cfg Config) *Manager {
-	m, err := NewWithError(cfg)
-	if err != nil {
-		panic(fmt.Sprintf("middleware configuration error: %v", err))
-	}
-	return m
+	cfg Config
 }
 
 // NewWithError creates a new Middleware Manager, returning an error instead of panicking

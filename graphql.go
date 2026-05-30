@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -37,7 +38,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// ── TrustProxy ────────────────────────────────────────────
-			m.TrustProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(w, r)
+			m.TrustProxy(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})).ServeHTTP(w, r)
 
 			// ── Context injection ─────────────────────────────────────
 			r = WithActivityContext(r)
@@ -115,33 +116,27 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				ErrorMessage:    "",
 			}
 
-			entryReq := entry
-			go func() {
-				defer func() {
-					if rec := recover(); rec != nil {
-						m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async graphql log save (request)")
-					}
-				}()
-				_ = m.cfg.LogStore.Save(r.Context(), entryReq)
+			reqCtx := context.WithoutCancel(r.Context())
+
+			defer func() {
+				entry.StatusCode = rw.Status()
+				entry.LatencyMS = int(time.Since(start).Milliseconds())
+				entry.ResponseHeaders = normalizeHeadersJSON(rw.Header())
+				if m.cfg.LogResponseBodies {
+					entry.ResponseBody = normalizeBodyRaw(rw.body.Bytes())
+				}
+
+				go func(logEntry model.AuditLog) {
+					defer func() {
+						if rec := recover(); rec != nil {
+							m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async graphql log save")
+						}
+					}()
+					_ = m.cfg.LogStore.Save(reqCtx, logEntry)
+				}(entry)
 			}()
 
 			next.ServeHTTP(rw, r)
-			entry.StatusCode = rw.Status()
-
-			entry.LatencyMS = int(time.Since(start).Milliseconds())
-			entry.ResponseHeaders = normalizeHeadersJSON(rw.Header())
-			if m.cfg.LogResponseBodies {
-				entry.ResponseBody = normalizeBodyRaw(rw.body.Bytes())
-			}
-
-			go func() {
-				defer func() {
-					if rec := recover(); rec != nil {
-						m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async graphql log save (response)")
-					}
-				}()
-				_ = m.cfg.LogStore.Save(r.Context(), entry)
-			}()
 		})
 	}
 }
@@ -150,22 +145,22 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 // It counts the maximum nesting level of `{` / `}` pairs, which is a safe approximation
 // of field selection depth without full AST parsing.
 func graphqlQueryDepth(query string) int {
-	max, cur := 0, 0
+	maxDepth, curDepth := 0, 0
 	for _, ch := range query {
 		switch ch {
 		case '{':
-			cur++
-			if cur > max {
-				max = cur
+			curDepth++
+			if curDepth > maxDepth {
+				maxDepth = curDepth
 			}
 		case '}':
-			if cur > 0 {
-				cur--
+			if curDepth > 0 {
+				curDepth--
 			}
 		}
 	}
 	// Subtract 1: the outermost { } wrapper is not a field level
-	return max - 1
+	return maxDepth - 1
 }
 
 // isGraphQLIntrospection reports whether the query appears to be a GraphQL introspection query.
