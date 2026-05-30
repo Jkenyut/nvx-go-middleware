@@ -1,33 +1,19 @@
 package middleware
 
 import (
-	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/Jkenyut/nvx-go-middleware/constants"
-	"github.com/go-chi/httprate"
 	"github.com/rs/zerolog"
-	"os"
+	"github.com/rs/zerolog/diode"
 )
 
 // Manager holds the middleware configuration and provides middleware methods.
 // It is the central entry point for creating and managing middleware chains.
 type Manager struct {
-	cfg     Config
-	counter httprate.LimitCounter
-}
-
-// New creates a new Middleware Manager with the given configuration.
-// Panics if the configuration is invalid.
-//
-// Deprecated: Use NewWithError for safer construction without panic.
-func New(cfg Config) *Manager {
-	m, err := NewWithError(cfg)
-	if err != nil {
-		panic(fmt.Sprintf("middleware configuration error: %v", err))
-	}
-	return m
+	cfg Config
 }
 
 // NewWithError creates a new Middleware Manager, returning an error instead of panicking
@@ -44,7 +30,13 @@ func NewWithError(cfg Config) (*Manager, error) {
 // applyDefaults fills in all missing Config fields with safe defaults.
 func applyDefaults(cfg Config) Config {
 	if cfg.Logger == nil {
-		l := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
+		w := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+		wr := diode.NewWriter(w, 1000, 10*time.Millisecond, func(_ int) {})
+		l := zerolog.New(wr).
+			With().
+			Timestamp().
+			Caller().
+			Logger()
 		cfg.Logger = NewZerologLogger(&l)
 	}
 

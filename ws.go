@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -49,7 +50,7 @@ func (m *Manager) WebSocketChain(
 			}
 
 			// Real IP
-			realIPHandler := m.TrustProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+			realIPHandler := m.TrustProxy(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
 			realIPHandler.ServeHTTP(w, r)
 
 			// Inject context values
@@ -107,35 +108,29 @@ func (m *Manager) WebSocketChain(
 				ErrorMessage:    "",
 			}
 
-			entryReq := entry
-			go func() {
-				defer func() {
-					if rec := recover(); rec != nil {
-						m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async ws log save (request)")
-					}
-				}()
-				_ = m.cfg.LogStore.Save(r.Context(), entryReq)
+			reqCtx := context.WithoutCancel(r.Context())
+
+			defer func() {
+				statusCode := http.StatusBadRequest
+				if ww.hijacked {
+					statusCode = http.StatusSwitchingProtocols
+				}
+
+				entry.StatusCode = statusCode
+				entry.LatencyMS = int(time.Since(start).Milliseconds())
+				entry.ResponseHeaders = normalizeHeadersJSON(ww.Header())
+
+				go func(logEntry model.AuditLog) {
+					defer func() {
+						if rec := recover(); rec != nil {
+							m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async ws log save")
+						}
+					}()
+					_ = m.cfg.LogStore.Save(reqCtx, logEntry)
+				}(entry)
 			}()
 
 			next.ServeHTTP(ww, r)
-
-			statusCode := http.StatusBadRequest
-			if ww.hijacked {
-				statusCode = http.StatusSwitchingProtocols
-			}
-
-			entry.StatusCode = statusCode
-			entry.LatencyMS = int(time.Since(start).Milliseconds())
-			entry.ResponseHeaders = normalizeHeadersJSON(ww.Header())
-
-			go func() {
-				defer func() {
-					if rec := recover(); rec != nil {
-						m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async ws log save (response)")
-					}
-				}()
-				_ = m.cfg.LogStore.Save(r.Context(), entry)
-			}()
 		})
 	}
 }

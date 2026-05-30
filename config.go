@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/Jkenyut/nvx-go-helper/activity"
-	"github.com/rs/zerolog"
 )
 
 // Config holds the configuration for the middleware manager.
@@ -103,12 +102,6 @@ var (
 	// ErrMissingOrigins is returned when AllowedOrigins is empty.
 	ErrMissingOrigins = fmt.Errorf("AllowedOrigins must not be empty")
 )
-
-// newLegacyZerologConfig is a helper to accept a raw *zerolog.Logger for backward compat.
-// Used only by tests that set cfg.Logger directly as *zerolog.Logger before the interface change.
-func newLegacyZerologConfig(l *zerolog.Logger) Logger {
-	return NewZerologLogger(l)
-}
 
 // WithActivityContext injects standard NVX context values from request headers.
 // Exported so protocol-specific adapters (WebSocket, gRPC) can reuse it.

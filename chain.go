@@ -1,3 +1,4 @@
+// Package middleware provides HTTP middleware for NVX applications.
 package middleware
 
 import (
@@ -54,10 +55,10 @@ func DefaultChainConfig() ChainConfig {
 		LimiterConfig: ConfigLimiter{
 			RateLimitRequests: 30,
 			RateLimitWindow:   1 * time.Minute,
-			PreRequestOnBeforeLimiter: func(w http.ResponseWriter, r *http.Request) bool {
+			PreRequestOnBeforeLimiter: func(_ http.ResponseWriter, _ *http.Request) bool {
 				return true
 			},
-			PreRequestOnAfterLimiter: func(w http.ResponseWriter, r *http.Request) bool {
+			PreRequestOnAfterLimiter: func(_ http.ResponseWriter, _ *http.Request) bool {
 				return true
 			},
 			Counter:     nil,

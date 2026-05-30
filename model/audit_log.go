@@ -1,3 +1,4 @@
+// Package model provides data structures for the middleware.
 package model
 
 import (

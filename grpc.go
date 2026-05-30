@@ -79,14 +79,31 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 			ErrorMessage:    "",
 		}
 
-		entryReq := entry
-		go func() {
-			defer func() {
-				if rec := recover(); rec != nil {
-					m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async grpc log save (request)")
+		reqCtx := context.WithoutCancel(ctx)
+
+		defer func() {
+			statusCode := 200
+			if err != nil {
+				entry.ErrorMessage = err.Error()
+				if st, ok := status.FromError(err); ok {
+					statusCode = int(st.Code())
+				} else {
+					statusCode = 500
 				}
-			}()
-			_ = m.cfg.LogStore.Save(ctx, entryReq)
+			}
+
+			entry.StatusCode = statusCode
+			entry.LatencyMS = int(time.Since(start).Milliseconds())
+			entry.ResponseBody = resp
+
+			go func(logEntry model.AuditLog) {
+				defer func() {
+					if rec := recover(); rec != nil {
+						m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async grpc log save")
+					}
+				}()
+				_ = m.cfg.LogStore.Save(reqCtx, logEntry)
+			}(entry)
 		}()
 
 		// Panic recovery
@@ -104,29 +121,6 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		}()
 
 		resp, err = handler(ctx, req)
-
-		statusCode := 200
-		if err != nil {
-			entry.ErrorMessage = err.Error()
-			if st, ok := status.FromError(err); ok {
-				statusCode = int(st.Code())
-			} else {
-				statusCode = 500
-			}
-		}
-
-		entry.StatusCode = statusCode
-		entry.LatencyMS = int(time.Since(start).Milliseconds())
-		entry.ResponseBody = resp
-
-		go func() {
-			defer func() {
-				if rec := recover(); rec != nil {
-					m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async grpc log save (response)")
-				}
-			}()
-			_ = m.cfg.LogStore.Save(ctx, entry)
-		}()
 
 		return resp, err
 	}
@@ -193,14 +187,30 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			ErrorMessage:    "",
 		}
 
-		entryReq := entry
-		go func() {
-			defer func() {
-				if rec := recover(); rec != nil {
-					m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async grpc stream log save (request)")
+		reqCtx := context.WithoutCancel(ctx)
+
+		defer func() {
+			statusCode := 200
+			if err != nil {
+				entry.ErrorMessage = err.Error()
+				if st, ok := status.FromError(err); ok {
+					statusCode = int(st.Code())
+				} else {
+					statusCode = 500
 				}
-			}()
-			_ = m.cfg.LogStore.Save(ctx, entryReq)
+			}
+
+			entry.StatusCode = statusCode
+			entry.LatencyMS = int(time.Since(start).Milliseconds())
+
+			go func(logEntry model.AuditLog) {
+				defer func() {
+					if rec := recover(); rec != nil {
+						m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async grpc stream log save")
+					}
+				}()
+				_ = m.cfg.LogStore.Save(reqCtx, logEntry)
+			}(entry)
 		}()
 
 		defer func() {
@@ -217,28 +227,6 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 		}()
 
 		err = handler(srv, wrapped)
-
-		statusCode := 200
-		if err != nil {
-			entry.ErrorMessage = err.Error()
-			if st, ok := status.FromError(err); ok {
-				statusCode = int(st.Code())
-			} else {
-				statusCode = 500
-			}
-		}
-
-		entry.StatusCode = statusCode
-		entry.LatencyMS = int(time.Since(start).Milliseconds())
-
-		go func() {
-			defer func() {
-				if rec := recover(); rec != nil {
-					m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async grpc stream log save (response)")
-				}
-			}()
-			_ = m.cfg.LogStore.Save(ctx, entry)
-		}()
 
 		return err
 	}

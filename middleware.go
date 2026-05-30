@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -116,7 +117,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			reqBodyBytes = normalizeBodyRaw(raw)
 		}
 
-		// --- PHASE 1: Push Incoming Request ---
+		// --- SETUP AUDIT LOG ENTRY ---
 		entry := model.AuditLog{
 			ID:              IDAuditLog,
 			Method:          r.Method,
@@ -138,54 +139,39 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			ErrorMessage:    "",
 		}
 
-		// Push 1: Copy entry to avoid data race
-		entryReq := entry
-		go func() {
-			defer func() {
-				if rec := recover(); rec != nil {
+		reqCtx := context.WithoutCancel(r.Context())
+
+		defer func() {
+			entry.StatusCode = rw.Status()
+			entry.LatencyMS = int(time.Since(start).Milliseconds())
+			entry.ResponseHeaders = normalizeHeadersJSON(rw.Header())
+
+			if m.cfg.LogResponseBodies {
+				entry.ResponseBody = normalizeBodyRaw(rw.body.Bytes())
+			}
+
+			go func(logEntry model.AuditLog) {
+				defer func() {
+					if rec := recover(); rec != nil {
+						m.cfg.Logger.Error().
+							Str("service", m.cfg.ServiceName).
+							Str("transaction_id", transactionID).
+							Interface("panic", rec).
+							Msg("panic in async log save")
+					}
+				}()
+				if err := m.cfg.LogStore.Save(reqCtx, logEntry); err != nil {
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.ServiceName).
 						Str("transaction_id", transactionID).
-						Interface("panic", rec).
-						Msg("panic in async log save (request phase)")
+						Err(err).
+						Msg("failed to save audit log")
 				}
-			}()
-			_ = m.cfg.LogStore.Save(r.Context(), entryReq)
+			}(entry)
 		}()
 
 		// --- EXECUTE APPLICATION LOGIC ---
 		next.ServeHTTP(rw, r)
-
-		// --- PHASE 2: Push Outgoing Response (Upsert) ---
-		// Note: If next.ServeHTTP panics, this code is skipped, which is intentional
-		// so the broker knows the response never completed.
-
-		entry.StatusCode = rw.Status()
-		entry.LatencyMS = int(time.Since(start).Milliseconds())
-		entry.ResponseHeaders = normalizeHeadersJSON(rw.Header())
-
-		if m.cfg.LogResponseBodies {
-			entry.ResponseBody = normalizeBodyRaw(rw.body.Bytes())
-		}
-
-		go func() {
-			defer func() {
-				if rec := recover(); rec != nil {
-					m.cfg.Logger.Error().
-						Str("service", m.cfg.ServiceName).
-						Str("transaction_id", transactionID).
-						Interface("panic", rec).
-						Msg("panic in async log save (response phase)")
-				}
-			}()
-			if err := m.cfg.LogStore.Save(r.Context(), entry); err != nil {
-				m.cfg.Logger.Error().
-					Str("service", m.cfg.ServiceName).
-					Str("transaction_id", transactionID).
-					Err(err).
-					Msg("failed to save audit log (response phase)")
-			}
-		}()
 	})
 }
 
@@ -442,7 +428,7 @@ func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string)
 
 // validateSignatureHeaders computes the expected HMAC signature and compares it
 // against the NVX-Signature header using constant-time comparison.
-func (_ *Manager) validateSignatureHeaders(r *http.Request, key string, values []string) (bool, string) {
+func (m *Manager) validateSignatureHeaders(r *http.Request, key string, values []string) (bool, string) {
 	signatureServer := cryptoutil.Signature(key, values...)
 	clientSignature := r.Header.Get(constants.HeaderSignature)
 
@@ -699,7 +685,7 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 
 			canonical := make([]string, 0, len(m.cfg.RequiredSignaturePublicHeaders)+3)
 			canonical = append(canonical, strings.ToUpper(req.Method))
-			canonical = append(canonical, req.Uri)
+			canonical = append(canonical, req.URI)
 			for _, name := range m.cfg.RequiredSignaturePublicHeaders {
 				canonical = append(canonical, r.Header.Get(name))
 			}
