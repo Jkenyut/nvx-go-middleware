@@ -7,6 +7,7 @@ import (
 
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/diode"
 )
 
 // Manager holds the middleware configuration and provides middleware methods.
@@ -29,7 +30,13 @@ func NewWithError(cfg Config) (*Manager, error) {
 // applyDefaults fills in all missing Config fields with safe defaults.
 func applyDefaults(cfg Config) Config {
 	if cfg.Logger == nil {
-		l := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
+		w := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+		wr := diode.NewWriter(w, 1000, 10*time.Millisecond, func(_ int) {})
+		l := zerolog.New(wr).
+			With().
+			Timestamp().
+			Caller().
+			Logger()
 		cfg.Logger = NewZerologLogger(&l)
 	}
 
