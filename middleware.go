@@ -155,7 +155,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				ErrorMessage:    "",
 			}
 
-			if err := m.cfg.LogStore.Save(r.Context(), entry); err != nil {
+			if err := m.cfg.LogStore.Save(r.Context(), &entry); err != nil {
 				m.cfg.Logger.Error().
 					Str("service", m.cfg.ServiceName).
 					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
@@ -392,7 +392,7 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 
 // validateSignatureInternalHeaders assembles the internal signature canonical string
 // from the configured signature headers and delegates to validateSignatureHeaders.
-func (m *Manager) validateSignatureInternalHeaders(r *http.Request) (bool, string) {
+func (m *Manager) validateSignatureInternalHeaders(r *http.Request) (valid bool, signature string) {
 	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureInternalHeaders))
 	for _, name := range m.cfg.RequiredSignatureInternalHeaders {
 		authHeaders = append(authHeaders, r.Header.Get(name))
@@ -402,10 +402,9 @@ func (m *Manager) validateSignatureInternalHeaders(r *http.Request) (bool, strin
 
 // validateSignaturePublicHeaders assembles the public signature canonical string
 // (method + URI + configured headers + body token) and delegates to validateSignatureHeaders.
-func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string) {
+func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (valid bool, signature string) {
 	parts := make([]string, 0, len(m.cfg.RequiredSignaturePublicHeaders)+3)
-	parts = append(parts, strings.ToUpper(r.Method))
-	parts = append(parts, r.RequestURI)
+	parts = append(parts, strings.ToUpper(r.Method), r.RequestURI)
 	for _, name := range m.cfg.RequiredSignaturePublicHeaders {
 		parts = append(parts, r.Header.Get(name))
 	}
@@ -426,7 +425,7 @@ func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (bool, string)
 
 // validateSignatureHeaders computes the expected HMAC signature and compares it
 // against the NVX-Signature header using constant-time comparison.
-func (m *Manager) validateSignatureHeaders(r *http.Request, key string, values []string) (bool, string) {
+func (m *Manager) validateSignatureHeaders(r *http.Request, key string, values []string) (valid bool, signature string) {
 	signatureServer := cryptoutil.Signature(key, values...)
 	clientSignature := r.Header.Get(constants.HeaderSignature)
 
@@ -678,7 +677,7 @@ func (m *Manager) EnsurePreSignHeaders(next http.Handler) http.Handler {
 // PreSignHandler creates a POST endpoint that generates a presigned signature
 // for a described request. The caller supplies method, URI, and body hash;
 // the handler returns the HMAC signature the caller should include as NVX-Signature.
-func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
+func (m *Manager) PreSignHandler(cfg *ChainConfig) http.Handler {
 	return m.MethodOnly("POST", m.PreSignChain(cfg)(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -700,8 +699,7 @@ func (m *Manager) PreSignHandler(cfg ChainConfig) http.Handler {
 			}
 
 			canonical := make([]string, 0, len(m.cfg.RequiredSignaturePublicHeaders)+3)
-			canonical = append(canonical, strings.ToUpper(req.Method))
-			canonical = append(canonical, req.URI)
+			canonical = append(canonical, strings.ToUpper(req.Method), req.URI)
 			for _, name := range m.cfg.RequiredSignaturePublicHeaders {
 				canonical = append(canonical, r.Header.Get(name))
 			}

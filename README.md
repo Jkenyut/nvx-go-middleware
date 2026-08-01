@@ -135,7 +135,7 @@ Inject your own database logger natively. The `Save` method is called synchronou
 ```go
 type DatabaseStore struct { db *sql.DB }
 
-func (d *DatabaseStore) Save(ctx context.Context, entry model.AuditLog) error {
+func (d *DatabaseStore) Save(ctx context.Context, entry *model.AuditLog) error {
 	_, err := d.db.ExecContext(ctx, "INSERT INTO audit_logs ...")
 	return err
 }

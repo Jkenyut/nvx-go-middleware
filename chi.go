@@ -68,7 +68,7 @@ func (m *Manager) WrapWithChiWriter(w http.ResponseWriter, r *http.Request) chim
 // ChiThrottleBacklog wraps Chi's ThrottleBacklog middleware.
 // It returns a middleware that limits concurrent requests and maintains a backlog of requests
 // waiting for a slot, with a timeout for how long they can wait in the queue.
-func (m *Manager) ChiThrottleBacklog(limit int, backlog int, backlogTimeout time.Duration) func(http.Handler) http.Handler {
+func (m *Manager) ChiThrottleBacklog(limit, backlog int, backlogTimeout time.Duration) func(http.Handler) http.Handler {
 	return chimiddleware.ThrottleBacklog(limit, backlog, backlogTimeout)
 }
 
@@ -193,7 +193,7 @@ func keyByHeader(r *http.Request, header string) (string, error) {
 	return headerName, nil
 }
 
-func buildRateKeyPublic(r *http.Request, zone string, signature string) string {
+func buildRateKeyPublic(r *http.Request, zone, signature string) string {
 	ip, _ := keyByHeader(r, constants.HeaderIP)
 	endpoint, _ := httprate.KeyByEndpoint(r)
 	userAgent, _ := keyByHeader(r, constants.HeaderUserAgent)
@@ -201,14 +201,14 @@ func buildRateKeyPublic(r *http.Request, zone string, signature string) string {
 	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:ip:%s:endpoint:%s:useragent:%s:appid:%s", zone, ip, endpoint, userAgent, appID))
 }
 
-func buildRateKeyPublicAPIKey(r *http.Request, zone string, signature string) string {
+func buildRateKeyPublicAPIKey(r *http.Request, zone, signature string) string {
 	endpoint, _ := httprate.KeyByEndpoint(r)
 	apiKey, _ := keyByHeader(r, constants.HeaderAPIKey)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
 	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:endpoint:%s:apikey:%s:appid:%s", zone, endpoint, apiKey, appID))
 }
 
-func buildRateKeyPublicAuth(r *http.Request, zone string, signature string) string {
+func buildRateKeyPublicAuth(r *http.Request, zone, signature string) string {
 	endpoint, _ := httprate.KeyByEndpoint(r)
 	tokenKey, _ := keyByHeader(r, constants.HeaderToken)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)

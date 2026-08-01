@@ -10,7 +10,7 @@ import (
 // Implement this to store logs in a database, message queue, or any backend.
 type LogStore interface {
 	// Save persists an audit log entry. ctx carries request-scoped values.
-	Save(ctx context.Context, entry model.AuditLog) error
+	Save(ctx context.Context, entry *model.AuditLog) error
 }
 
 // ConsoleStore is the default LogStore implementation that writes structured
@@ -20,7 +20,7 @@ type ConsoleStore struct {
 }
 
 // Save writes the audit log entry to the configured logger.
-func (c *ConsoleStore) Save(_ context.Context, entry model.AuditLog) error {
+func (c *ConsoleStore) Save(_ context.Context, entry *model.AuditLog) error {
 	c.logger.Info().
 		Str("method", entry.Method).
 		Str("url", entry.FullURL).

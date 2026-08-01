@@ -18,17 +18,17 @@ type Manager struct {
 
 // NewWithError creates a new Middleware Manager, returning an error instead of panicking
 // if the configuration is invalid. Prefer this over New for production use.
-func NewWithError(cfg Config) (*Manager, error) {
+func NewWithError(cfg *Config) (*Manager, error) {
 	// Validate required fields BEFORE applying defaults that might mask missing values.
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	cfg = applyDefaults(cfg)
-	return &Manager{cfg: cfg}, nil
+	applyDefaults(cfg)
+	return &Manager{cfg: *cfg}, nil
 }
 
 // applyDefaults fills in all missing Config fields with safe defaults.
-func applyDefaults(cfg Config) Config {
+func applyDefaults(cfg *Config) {
 	if cfg.Logger == nil {
 		w := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
 		wr := diode.NewWriter(w, 1000, 10*time.Millisecond, func(_ int) {})
@@ -108,8 +108,6 @@ func applyDefaults(cfg Config) Config {
 	if cfg.SignatureTimestampExpired == 0 {
 		cfg.SignatureTimestampExpired = constants.TimestampExpired
 	}
-
-	return cfg
 }
 
 // Config returns a copy of the manager's configuration.

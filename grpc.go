@@ -96,10 +96,10 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 			entry.LatencyMS = time.Since(start).Milliseconds()
 			entry.ResponseBody = resp
 
-			if err := m.cfg.LogStore.Save(reqCtx, entry); err != nil {
+			if saveErr := m.cfg.LogStore.Save(reqCtx, &entry); saveErr != nil {
 				m.cfg.Logger.Error().
 					Str("transaction_id", transactionID).
-					Err(err).
+					Err(saveErr).
 					Msg("failed to save grpc audit log")
 			}
 		}()
@@ -201,10 +201,10 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			entry.StatusCode = statusCode
 			entry.LatencyMS = time.Since(start).Milliseconds()
 
-			if err := m.cfg.LogStore.Save(reqCtx, entry); err != nil {
+			if saveErr := m.cfg.LogStore.Save(reqCtx, &entry); saveErr != nil {
 				m.cfg.Logger.Error().
 					Str("transaction_id", transactionID).
-					Err(err).
+					Err(saveErr).
 					Msg("failed to save grpc stream audit log")
 			}
 		}()

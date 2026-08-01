@@ -85,6 +85,7 @@ func (m *Manager) WebSocketChain(
 
 					if ww == nil || !ww.hijacked {
 						http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+						return
 					}
 				}
 			}()
@@ -126,7 +127,7 @@ func (m *Manager) WebSocketChain(
 				entry.LatencyMS = time.Since(start).Milliseconds()
 				entry.ResponseHeaders = normalizeHeadersJSON(ww.Header())
 
-				if err := m.cfg.LogStore.Save(reqCtx, entry); err != nil {
+				if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {
 					m.cfg.Logger.Error().
 						Str("transaction_id", transactionID).
 						Err(err).

@@ -70,7 +70,7 @@ func DefaultChainConfig() ChainConfig {
 // buildInnerChain applies the innermost core middleware.
 // Because it sits inside the Rate Limiter and Auth Validator, the Logger will ONLY
 // record requests that successfully passed DDoS protection and authentication.
-func (m *Manager) buildInnerChain(cfg ChainConfig, next http.Handler) http.Handler {
+func (m *Manager) buildInnerChain(cfg *ChainConfig, next http.Handler) http.Handler {
 	handler := next
 
 	handler = m.MaxBodySize()(handler)
@@ -92,7 +92,7 @@ func (m *Manager) buildInnerChain(cfg ChainConfig, next http.Handler) http.Handl
 
 // buildOuterChain applies the outermost core middleware.
 // This executes BEFORE validation, logging, and application logic.
-func (m *Manager) buildOuterChain(cfg ChainConfig, handler http.Handler) http.Handler {
+func (m *Manager) buildOuterChain(cfg *ChainConfig, handler http.Handler) http.Handler {
 	// TrustProxy MUST run before RateLimit and Validation to resolve Real IP accurately.
 	handler = m.TrustProxy(handler)
 
@@ -111,7 +111,7 @@ func (m *Manager) buildOuterChain(cfg ChainConfig, handler http.Handler) http.Ha
 
 // PublicChain creates a middleware chain for public routes that do not require user authentication.
 // Execution Order: TrustProxy -> EnsurePublic -> RateLimit -> Logger -> App
-func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
+func (m *Manager) PublicChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
 		if cfg.UseChiRateLimitPublic {
@@ -124,7 +124,7 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 }
 
 // PublicAuthChain creates a middleware chain for public routes that require authentication.
-func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handler {
+func (m *Manager) PublicAuthChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
 		if cfg.UseChiRateLimitAuth {
@@ -137,7 +137,7 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 }
 
 // PublicAPIKeyChain creates a middleware chain for public routes using API Key authentication.
-func (m *Manager) PublicAPIKeyChain(cfg ChainConfig) func(http.Handler) http.Handler {
+func (m *Manager) PublicAPIKeyChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
 		if cfg.UseChiRateLimitPublic {
@@ -150,7 +150,7 @@ func (m *Manager) PublicAPIKeyChain(cfg ChainConfig) func(http.Handler) http.Han
 }
 
 // InternalChain creates a middleware chain for internal service-to-service routes.
-func (m *Manager) InternalChain(cfg ChainConfig) func(http.Handler) http.Handler {
+func (m *Manager) InternalChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
 		handler = m.EnsureInternal(handler)
@@ -160,7 +160,7 @@ func (m *Manager) InternalChain(cfg ChainConfig) func(http.Handler) http.Handler
 }
 
 // AdminChain creates a middleware chain for admin routes.
-func (m *Manager) AdminChain(cfg ChainConfig, adminCheck func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+func (m *Manager) AdminChain(cfg *ChainConfig, adminCheck func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return m.InternalChain(cfg)(
 			adminCheck(next),
@@ -194,7 +194,7 @@ func Heartbeat(path string) func(http.Handler) http.Handler {
 }
 
 // PreSignChain creates a middleware chain specifically for pre-signed requests.
-func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler {
+func (m *Manager) PreSignChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
 		if cfg.UseChiRateLimitPublic {
@@ -207,7 +207,7 @@ func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler 
 }
 
 // WebhookChain creates a middleware chain specialized for handling webhooks.
-func (m *Manager) WebhookChain(cfg ChainConfig) func(http.Handler) http.Handler {
+func (m *Manager) WebhookChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
 		return m.buildOuterChain(cfg, handler)

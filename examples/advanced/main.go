@@ -12,7 +12,7 @@ import (
 
 func main() {
 	// Create middleware manager
-	mgr, err := mw.NewWithError(mw.Config{
+	mgr, err := mw.NewWithError(&mw.Config{
 		PublicKeySignature:   "your-rsa-public-key-here",
 		PrivateKeySignature:  "your-rsa-private-key-here",
 		AllowedOrigins:       []string{"https://example.com"},
@@ -41,11 +41,11 @@ func main() {
 	// PUBLIC ROUTES
 	// ========================================
 
-	mux.Handle("/api/v1/register", mgr.PublicChain(chainCfg)(
+	mux.Handle("/api/v1/register", mgr.PublicChain(&chainCfg)(
 		mgr.MethodOnly("POST", http.HandlerFunc(registerHandler)),
 	))
 
-	mux.Handle("/api/v1/login", mgr.PublicChain(chainCfg)(
+	mux.Handle("/api/v1/login", mgr.PublicChain(&chainCfg)(
 		mgr.MethodOnly("POST", http.HandlerFunc(loginHandler)),
 	))
 
@@ -53,19 +53,19 @@ func main() {
 	// AUTHENTICATED ROUTES
 	// ========================================
 
-	mux.Handle("/api/v1/profile", mgr.PublicAuthChain(chainCfg)(
+	mux.Handle("/api/v1/profile", mgr.PublicAuthChain(&chainCfg)(
 		mgr.MethodOnly("GET", http.HandlerFunc(profileHandler)),
 	))
 
-	mux.Handle("/api/v1/profile/update", mgr.PublicAuthChain(chainCfg)(
+	mux.Handle("/api/v1/profile/update", mgr.PublicAuthChain(&chainCfg)(
 		mgr.MethodOnly("PUT", http.HandlerFunc(updateProfileHandler)),
 	))
 
-	mux.Handle("/api/v1/posts", mgr.PublicAuthChain(chainCfg)(
+	mux.Handle("/api/v1/posts", mgr.PublicAuthChain(&chainCfg)(
 		mgr.MethodOnly("POST", http.HandlerFunc(createPostHandler)),
 	))
 
-	mux.Handle("/api/v1/posts/list", mgr.PublicAuthChain(chainCfg)(
+	mux.Handle("/api/v1/posts/list", mgr.PublicAuthChain(&chainCfg)(
 		mgr.MethodOnly("GET", http.HandlerFunc(listPostsHandler)),
 	))
 
@@ -73,7 +73,7 @@ func main() {
 	// WEBHOOK ROUTES
 	// ========================================
 
-	mux.Handle("/webhooks/payment", mgr.WebhookChain(chainCfg)(
+	mux.Handle("/webhooks/payment", mgr.WebhookChain(&chainCfg)(
 		mgr.MethodOnly("POST", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("Webhook received"))
@@ -104,11 +104,11 @@ func main() {
 		})
 	}
 
-	mux.Handle("/api/v1/admin/users", mgr.AdminChain(chainCfg, adminCheck)(
+	mux.Handle("/api/v1/admin/users", mgr.AdminChain(&chainCfg, adminCheck)(
 		mgr.MethodOnly("GET", http.HandlerFunc(listUsersHandler)),
 	))
 
-	mux.Handle("/api/v1/admin/stats", mgr.AdminChain(chainCfg, adminCheck)(
+	mux.Handle("/api/v1/admin/stats", mgr.AdminChain(&chainCfg, adminCheck)(
 		mgr.MethodOnly("GET", http.HandlerFunc(statsHandler)),
 	))
 

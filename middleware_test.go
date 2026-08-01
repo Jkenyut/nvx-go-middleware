@@ -21,10 +21,10 @@ type MockLogStore struct {
 	Logs []model.AuditLog
 }
 
-func (m *MockLogStore) Save(_ context.Context, entry model.AuditLog) error {
+func (m *MockLogStore) Save(_ context.Context, entry *model.AuditLog) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Logs = append(m.Logs, entry)
+	m.Logs = append(m.Logs, *entry)
 	return nil
 }
 

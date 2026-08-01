@@ -12,7 +12,7 @@ import (
 
 func main() {
 	// Create middleware manager with configuration
-	mgr, err := mw.NewWithError(mw.Config{
+	mgr, err := mw.NewWithError(&mw.Config{
 		PublicKeySignature:        "your-rsa-public-key-here",
 		PrivateKeySignature:       "your-rsa-private-key-here",
 		AllowedOrigins:            []string{"https://example.com", "http://localhost:3000"},
@@ -44,14 +44,14 @@ func main() {
 	// GLOBAL ROUTES (device validation only)
 	// ========================================
 
-	mux.Handle("/api/register", mgr.PublicChain(chainCfg)(
+	mux.Handle("/api/register", mgr.PublicChain(&chainCfg)(
 		mgr.MethodOnly("POST", http.HandlerFunc(registerHandler)),
 	))
 
 	// ========================================
 	// PUBLIC ROUTES (device validation only)
 	// ========================================
-	mux.Handle("/api/login", mgr.PublicChain(chainCfg)(
+	mux.Handle("/api/login", mgr.PublicChain(&chainCfg)(
 		mgr.MethodOnly("POST", http.HandlerFunc(loginHandler)),
 	))
 
@@ -59,11 +59,11 @@ func main() {
 	// AUTHENTICATED ROUTES
 	// ========================================
 
-	mux.Handle("/api/profile", mgr.PublicAuthChain(chainCfg)(
+	mux.Handle("/api/profile", mgr.PublicAuthChain(&chainCfg)(
 		mgr.MethodOnly("GET", http.HandlerFunc(profileHandler)),
 	))
 
-	mux.Handle("/api/posts", mgr.PublicAuthChain(chainCfg)(
+	mux.Handle("/api/posts", mgr.PublicAuthChain(&chainCfg)(
 		mgr.MethodOnly("POST", http.HandlerFunc(createPostHandler)),
 	))
 
@@ -80,7 +80,7 @@ func main() {
 	// ========================================
 	// PRESIGN ROUTES (device validation only)
 	// ========================================
-	mux.Handle("/api/presign", mgr.PreSignHandler(chainCfg))
+	mux.Handle("/api/presign", mgr.PreSignHandler(&chainCfg))
 
 	mux.Handle("/ping", mw.Heartbeat("/ping")(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})))
 

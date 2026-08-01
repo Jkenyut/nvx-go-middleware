@@ -143,7 +143,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 					entry.ResponseBody = normalizeBodyRaw(rw.Body())
 				}
 
-				if err := m.cfg.LogStore.Save(reqCtx, entry); err != nil {
+				if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {
 					m.cfg.Logger.Error().
 						Str("transaction_id", transactionID).
 						Err(err).
