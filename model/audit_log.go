@@ -1,3 +1,4 @@
+// Package model provides data structures for the middleware.
 package model
 
 import (
@@ -9,7 +10,7 @@ import (
 // It contains detailed information about the request, response, and execution context.
 type AuditLog struct {
 	// ID is the unique identifier for the log entry.
-	ID int64 `json:"id"`
+	ID string `json:"id"`
 	// Method is the HTTP method (GET, POST, etc.).
 	Method string `json:"method"`
 	// Full URL is the complete URL requested.
@@ -17,7 +18,7 @@ type AuditLog struct {
 	// Status Code is the HTTP response status code.
 	StatusCode int `json:"status_code"`
 	// Latency MS is the time taken to process the request in milliseconds.
-	LatencyMS int `json:"latency_ms"`
+	LatencyMS int64 `json:"latency_ms"`
 	// Client IP is the IP address of the client.
 	ClientIP string `json:"client_ip"`
 	// Request ID is the unique request identifier.
@@ -36,4 +37,11 @@ type AuditLog struct {
 	CreatedBy int64 `json:"created_by"`
 	// Created At is the timestamp when the log entry was created.
 	CreatedAt time.Time `json:"created_at"`
+	Protocol  string    `json:"protocol"`
+	// ServiceName identifies the microservice emitting this log.
+	ServiceName string `json:"service_name"`
+	// UserAgent is the client's user agent string.
+	UserAgent string `json:"user_agent"`
+	// ErrorMessage captures explicit error messages or panics (if any).
+	ErrorMessage string `json:"error_message,omitempty"`
 }

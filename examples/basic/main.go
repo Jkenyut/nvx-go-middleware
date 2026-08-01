@@ -1,17 +1,18 @@
+// main
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 	"time"
 
 	mw "github.com/Jkenyut/nvx-go-middleware"
+	"github.com/bytedance/sonic"
 )
 
 func main() {
 	// Create middleware manager with configuration
-	mgr := mw.New(mw.Config{
+	mgr, err := mw.NewWithError(mw.Config{
 		PublicKeySignature:        "your-rsa-public-key-here",
 		PrivateKeySignature:       "your-rsa-private-key-here",
 		AllowedOrigins:            []string{"https://example.com", "http://localhost:3000"},
@@ -25,6 +26,9 @@ func main() {
 		AllowedContentTypes:       []string{"application/json", "text/plain", "multipart/form-data", "form-data"},
 		SignatureTimestampExpired: 6000000,
 	})
+	if err != nil {
+		log.Fatalf("Failed to initialize middleware manager: %v", err)
+	}
 
 	// Create chain config
 	chainCfg := mw.DefaultChainConfig()
@@ -67,10 +71,10 @@ func main() {
 	// HEALTH CHECK (bypass all middleware)
 	// ========================================
 
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	})
 
 	// ========================================
@@ -78,7 +82,7 @@ func main() {
 	// ========================================
 	mux.Handle("/api/presign", mgr.PreSignHandler(chainCfg))
 
-	mux.HandleFunc("/ping", mw.Heartbeat("/ping"))
+	mux.Handle("/ping", mw.Heartbeat("/ping")(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})))
 
 	// Start server
 	log.Println("Server starting on :8081")
@@ -87,13 +91,10 @@ func main() {
 	}
 }
 
-// ========================================
-// HANDLERS
-// ========================================
-
-func registerHandler(w http.ResponseWriter, r *http.Request) {
+// registerHandler
+func registerHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = sonic.ConfigDefault.NewEncoder(w).Encode(map[string]interface{}{
 		"meta": map[string]interface{}{
 			"success": true,
 			"message": "Registration successful",
@@ -106,9 +107,9 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func loginHandler(w http.ResponseWriter, r *http.Request) {
+func loginHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = sonic.ConfigDefault.NewEncoder(w).Encode(map[string]interface{}{
 		"meta": map[string]interface{}{
 			"success": true,
 			"message": "Login successful",
@@ -123,7 +124,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 func profileHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = sonic.ConfigDefault.NewEncoder(w).Encode(map[string]interface{}{
 		"meta": map[string]interface{}{
 			"success": true,
 			"message": "Profile retrieved",
@@ -137,9 +138,9 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func createPostHandler(w http.ResponseWriter, r *http.Request) {
+func createPostHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = sonic.ConfigDefault.NewEncoder(w).Encode(map[string]interface{}{
 		"meta": map[string]interface{}{
 			"success": true,
 			"message": "Post created",

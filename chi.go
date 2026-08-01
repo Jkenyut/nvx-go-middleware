@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -9,15 +8,10 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/response"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
+	"github.com/bytedance/sonic"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
 )
-
-// ChiRealIP wraps Chi's RealIP middleware.
-// It sets a http.Handler that puts the X-Real-IP and X-Forwarded-For headers into the context.
-func (m *Manager) ChiRealIP(next http.Handler) http.Handler {
-	return chimiddleware.RealIP(next)
-}
 
 // ChiCompress wraps Chi's Compress middleware.
 // It returns a middleware that compresses the response body based on the client's Accept-Encoding header.
@@ -103,13 +97,12 @@ func RateLimit(
 	cfg ConfigLimiter,
 	signatureSecret string,
 ) func(http.Handler) http.Handler {
-
 	opts := []httprate.Option{
 		httprate.WithKeyFuncs(keyByHeaderAuthType),
-		httprate.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, err error) {
+		httprate.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, _ error) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPreconditionRequired)
-			json.NewEncoder(w).Encode(response.PreconditionRequired(r.Context(), "precondition required"))
+			_ = sonic.ConfigDefault.NewEncoder(w).Encode(response.PreconditionRequired(r.Context(), "precondition required"))
 		}),
 		httprate.WithResponseHeaders(httprate.ResponseHeaders{
 			Limit:      "NVX-RateLimit-Limit",
@@ -121,7 +114,7 @@ func RateLimit(
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
-			json.NewEncoder(w).Encode(response.TooManyRequests(r.Context(), "too many requests"))
+			_ = sonic.ConfigDefault.NewEncoder(w).Encode(response.TooManyRequests(r.Context(), "too many requests"))
 		}),
 	}
 
@@ -201,7 +194,7 @@ func keyByHeader(r *http.Request, header string) (string, error) {
 }
 
 func buildRateKeyPublic(r *http.Request, zone string, signature string) string {
-	ip, _ := httprate.KeyByIP(r)
+	ip, _ := keyByHeader(r, constants.HeaderIP)
 	endpoint, _ := httprate.KeyByEndpoint(r)
 	userAgent, _ := keyByHeader(r, constants.HeaderUserAgent)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
@@ -235,6 +228,9 @@ func rateKeyInjector(signature string) func(http.Handler) http.Handler {
 				r.Header.Set(constants.HeaderRateKey, key)
 			case constants.AuthTypePublicAuth:
 				key := buildRateKeyPublicAuth(r, constants.AuthTypePublicAuth, signature)
+				r.Header.Set(constants.HeaderRateKey, key)
+			default:
+				key := buildRateKeyPublic(r, constants.AuthTypePublic, signature)
 				r.Header.Set(constants.HeaderRateKey, key)
 			}
 			next.ServeHTTP(w, r)

@@ -1,40 +1,39 @@
 package middleware
 
 import (
+	"context"
+
 	"github.com/Jkenyut/nvx-go-middleware/model"
-	"github.com/rs/zerolog"
 )
 
-// LogStore defines the interface for storing audit log entries.
-// Implementations can store logs to various backends like databases, files, or external services.
+// LogStore defines the interface for persisting audit log entries.
+// Implement this to store logs in a database, message queue, or any backend.
 type LogStore interface {
-	// Save persists an audit log entry.
-	Save(entry model.AuditLog) error
+	// Save persists an audit log entry. ctx carries request-scoped values.
+	Save(ctx context.Context, entry model.AuditLog) error
 }
 
-// ConsoleStore is a default implementation of LogStore that writes log entries to the standard output
-// using structured logging.
+// ConsoleStore is the default LogStore implementation that writes structured
+// log entries to stdout via the configured Logger.
 type ConsoleStore struct {
-	logger *zerolog.Logger
+	logger Logger
 }
 
 // Save writes the audit log entry to the configured logger.
-func (c *ConsoleStore) Save(entry model.AuditLog) error {
-	// Log structured data using zerolog
+func (c *ConsoleStore) Save(_ context.Context, entry model.AuditLog) error {
 	c.logger.Info().
 		Str("method", entry.Method).
 		Str("url", entry.FullURL).
-		Int("status", entry.StatusCode).
-		Int("latency_ms", entry.LatencyMS).
+		Interface("status", entry.StatusCode).
+		Interface("latency_ms", entry.LatencyMS).
 		Str("client_ip", entry.ClientIP).
 		Str("transaction_id", entry.TransactionID).
-		Int64("created_by", entry.CreatedBy).
-		Time("created_at", entry.CreatedAt).
+		Interface("created_by", entry.CreatedBy).
+		Interface("created_at", entry.CreatedAt).
 		Interface("request_headers", entry.RequestHeaders).
 		Interface("response_headers", entry.ResponseHeaders).
 		Interface("request_body", entry.RequestBody).
 		Interface("response_body", entry.ResponseBody).
-		Msg("HTTP Request")
-
+		Msg(entry.Protocol)
 	return nil
 }

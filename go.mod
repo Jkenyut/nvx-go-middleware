@@ -4,14 +4,15 @@ go 1.26.4
 
 require (
 	github.com/Jkenyut/nvx-go-helper v1.0.19
+	github.com/bytedance/sonic v1.15.2
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/go-chi/httprate v0.16.0
 	github.com/rs/zerolog v1.35.1
+	google.golang.org/grpc v1.83.0
 )
 
 require (
 	github.com/bytedance/gopkg v0.1.4 // indirect
-	github.com/bytedance/sonic v1.15.2 // indirect
 	github.com/bytedance/sonic/loader v0.5.2 // indirect
 	github.com/cloudwego/base64x v0.1.7 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.15 // indirect
@@ -27,6 +28,9 @@ require (
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	golang.org/x/arch v0.29.0 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260729162451-8efbd57d26e0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )

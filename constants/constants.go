@@ -1,3 +1,4 @@
+// Package constants provides common constants used throughout the NVX middleware.
 package constants
 
 // Header constants
@@ -26,16 +27,16 @@ const (
 // Error messages
 // Error messages for common middleware failures.
 const (
-	ErrMsgMissingHeaders = "Missing required headers"
+	ErrMsgMissingHeaders = "missing required headers"
 
-	ErrMsgInvalidToken     = "Invalid or missing authentication token"
-	ErrMsgInvalidSignature = "Invalid request signature"
-	ErrMsgInvalidPlatform  = "Invalid platform"
-	ErrMsgMethodNotAllowed = "Method not allowed"
-	ErrMsgPayloadTooLarge  = "Request payload too large"
+	ErrMsgInvalidToken     = "invalid or missing authentication token"
+	ErrMsgInvalidSignature = "invalid request signature"
+	ErrMsgInvalidPlatform  = "invalid platform"
+	ErrMsgMethodNotAllowed = "method not allowed"
+	ErrMsgPayloadTooLarge  = "request payload too large"
 
-	ErrMsgInvalidTimestamp       = "Invalid timestamp format"
-	ErrMsgUnsupportedContentType = "Unsupported content type"
+	ErrMsgInvalidTimestamp       = "invalid timestamp format"
+	ErrMsgUnsupportedContentType = "unsupported content type"
 	ErrMsgInvalidRequest         = "Invalid request"
 	ErrMsgSignatureInvalid       = "Signature invalid"
 )
@@ -111,7 +112,6 @@ var (
 	}
 )
 
-// Valid platforms
 // CheckPlatform defines the list of valid client platforms.
 var CheckPlatform = []string{
 	"android",
@@ -121,7 +121,6 @@ var CheckPlatform = []string{
 	"internal",
 }
 
-// Default security headers
 // SecurityHeaders defines the default security headers applied to responses.
 var SecurityHeaders = map[string]string{
 	"X-Content-Type-Options":    "nosniff",

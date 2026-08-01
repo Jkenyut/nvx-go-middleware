@@ -1,44 +1,19 @@
 # NVX Go Middleware
 
-A comprehensive HTTP middleware library for Go that combines custom authentication, validation, and logging with Chi middleware utilities. Perfect for building secure, production-ready APIs with `net/http`.
+A high-performance, modular, and secure HTTP middleware library for Go. Designed to be **Production-Ready** and **DDoS-Resistant** from day one. Perfect for building secure APIs with `net/http`, integrating seamlessly with Chi, gRPC, and WebSockets.
 
 ## 🚀 Features
 
-- ✅ **Panic Recovery** - Graceful panic handling with stack traces
-- ✅ **Audit Logging** - Complete request/response logging with customizable storage
-- ✅ **RSA Signature Validation** - Request signature verification for security
-- ✅ **JWT Authentication** - Token-based authentication support
-- ✅ **Header Validation** - Enforce required headers (NVX-* custom headers)
-- ✅ **Device Validation** - Validate device info (User-Agent, Device-ID, Platform, MAC)
-- ✅ **Rate Limiting** - Throttle requests per route (via Chi)
-- ✅ **Compression** - Automatic gzip compression (via Chi)
-- ✅ **Request Timeout** - Configurable request timeouts
-- ✅ **Body Size Limiting** - Prevent DoS attacks
-- ✅ **CORS Support** - Configurable CORS headers
-- ✅ **Real IP Extraction** - Handle proxied requests correctly
-- ✅ **Security Headers** - Automatic security header injection
-- ✅ **Context Injection** - Custom context values for handlers
-
-## 📁 Project Structure
-
-```
-nvx-go-middleware/
-├── go.mod                      # Go module definition
-├── manager.go                  # Main middleware manager entry point
-├── middleware.go               # Core middleware implementations
-├── chain.go                    # Middleware chaining & Chi integration
-├── chi.go                      # Chi middleware wrappers
-├── response_writer.go          # Response body capturing for audit logs
-├── store.go                    # LogStore interface & implementations
-├── config.go                   # Configuration struct & validation
-├── constants/
-│   └── constants.go            # Headers, error messages, etc.
-├── model/
-│   └── audit_log.go            # AuditLog struct definition
-└── examples/                   # Usage examples
-    ├── basic/                  # Simple public/auth routes
-    └── advanced/               # Admin routes & custom config
-```
+- ✅ **High-Performance JSON** - Powered by `bytedance/sonic` for ultra-fast request/response parsing.
+- ✅ **Smart Execution Chain** - DDoS & Bad Auth requests are blocked *before* hitting the logger or application, saving CPU & DB I/O.
+- ✅ **Secure IP Resolution (`TrustProxy`)** - Anti-spoofing mechanism for `X-Forwarded-For`, totally immune to arbitrary header injection.
+- ✅ **OOM Guard (`MaxBytesReader`)** - Safely caps request memory allocations before processing.
+- ✅ **Rate Limiting** - Dynamic per-route throttling based on verified IP or Auth Tokens.
+- ✅ **Panic Recovery** - Graceful recovery that logs the stack trace without leaking it to the client.
+- ✅ **Audit Logging** - Asynchronous database-agnostic request/response logging.
+- ✅ **Multi-Protocol Support** - Native wrappers for **HTTP**, **gRPC** (Unary & Stream), and **WebSockets**.
+- ✅ **Multi-Auth Pipelines** - Pre-built chains for Public, Auth, API Key, Internal, and Webhook endpoints.
+- ✅ **CORS & Security Headers** - Secure defaults for browser security.
 
 ## 📦 Installation
 
@@ -52,6 +27,7 @@ go get github.com/Jkenyut/nvx-go-middleware
 package main
 
 import (
+    "log"
     "net/http"
     "time"
     
@@ -59,289 +35,133 @@ import (
 )
 
 func main() {
-    // Create middleware manager
-    mgr := mw.New(mw.Config{
+    // 1. Create middleware manager safely
+    mgr, err := mw.NewWithError(mw.Config{
         PublicKeySignature:  "your-rsa-public-key",
         PrivateKeySignature: "your-rsa-private-key",
         AllowedOrigins:      []string{"https://example.com"},
+        TrustedProxies:      []string{"10.0.0.0/8"}, // Vital for accurate Rate Limits!
         RequestTimeout:      60 * time.Second,
-        RequestBodyLimit:    3 * 1024 * 1024, // 3MB
-        Env:                 "development",
+        Env:                 "production",
     })
+    if err != nil {
+        log.Fatalf("Failed to init middleware: %v", err)
+    }
 
-    // Create chain config
+    // 2. Load default chain behavior
     chainCfg := mw.DefaultChainConfig()
+    chainCfg.UseChiRateLimitPublic = true // Enable Anti-DDoS
 
     mux := http.NewServeMux()
 
-    // Public route (device validation)
-    mux.Handle("/register", mgr.PublicChain(chainCfg)(
+    // 3. Public Route (Rate Limited, Validated, IP Verified)
+    mux.Handle("/api/v1/register", mgr.PublicChain(chainCfg)(
         mgr.MethodOnly("POST", http.HandlerFunc(registerHandler)),
     ))
 
-    // Authenticated route (JWT + signature validation)
-    mux.Handle("/profile", mgr.AuthChain(chainCfg)(
+    // 4. Authenticated Route (JWT + Signature)
+    mux.Handle("/api/v1/profile", mgr.PublicAuthChain(chainCfg)(
         mgr.MethodOnly("GET", http.HandlerFunc(profileHandler)),
     ))
 
+    log.Println("Server running on :8080")
     http.ListenAndServe(":8080", mux)
 }
-```
 
-## 📖 Usage Guide
-
-### 1. Configuration
-
-```go
-cfg := mw.Config{
-    // Required
-    PublicKeySignature:  "your-rsa-public-key",
-    PrivateKeySignature: "your-rsa-private-key",
-    AllowedOrigins:      []string{"https://example.com"},
-    
-    // Optional (with defaults)
-    LogStore:         &CustomLogStore{}, // Default: ConsoleStore
-    Logger:           customLogger,       // Default: zerolog console
-    Env:              "production",       // Default: "development"
-    RequestTimeout:   30 * time.Second,   // Default: 60s
-    RequestBodyLimit: 5 * 1024 * 1024,    // Default: 3MB
-    TrustedProxies:   []string{"10.0.0.0/8"},
-    
-    // Custom context injector (optional)
-    ContextInjector: func(r *http.Request) *http.Request {
-        // Inject custom values into context
-        return r
-    },
+func registerHandler(w http.ResponseWriter, r *http.Request) {
+    w.Write([]byte(`{"message": "Registered"}`))
 }
-
-mgr := mw.New(cfg)
-```
-
-### 2. Middleware Chains
-
-#### Global Chain
-Basic middleware for all requests:
-```go
-chainCfg := mw.DefaultChainConfig()
-handler := mgr.GlobalChain(chainCfg)(yourHandler)
-```
-
-#### Public Chain
-For public endpoints with device validation:
-```go
-handler := mgr.PublicChain(chainCfg)(yourHandler)
-```
-
-Required headers:
-- `NVX-Request-ID`
-- `NVX-Merchant-Key`
-- `NVX-User-Agent`
-- `NVX-Device-ID`
-- `NVX-Platform` (android, ios, web, desktop)
-- `NVX-Mac-Address`
-- `NVX-Datetime`
-- `NVX-Token`
-- `NVX-Message`
-- `NVX-Signature`
-
-#### Auth Chain
-For authenticated endpoints with JWT validation:
-```go
-handler := mgr.AuthChain(chainCfg)(yourHandler)
-```
-
-Additional required headers:
-- `NVX-Token` (JWT)
-- `NVX-Signature` (calculated with token, ip, request id, merchant key, and datetime)
-
-#### Admin Chain
-For admin-only endpoints:
-```go
-adminCheck := func(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        if r.Header.Get("NVX-User-Type") != "admin" {
-            w.WriteHeader(http.StatusForbidden)
-            return
-        }
-        next.ServeHTTP(w, r)
-    })
+func profileHandler(w http.ResponseWriter, r *http.Request) {
+    w.Write([]byte(`{"message": "Profile"}`))
 }
-
-handler := mgr.AdminChain(chainCfg, adminCheck)(yourHandler)
 ```
 
-### 3. Custom Chain Configuration
+## 🛡️ Smart Architecture (Execution Order)
+
+NVX Go Middleware uses a mathematically structured chain to protect your application:
+
+1. **Outer Layer (Network)**: `CORS` and `Panic Recovery`.
+2. **IP Resolution (`TrustProxy`)**: Extracts the real IP *only* if the request comes from your `TrustedProxies`.
+3. **Validation (`EnsureAuth`)**: Drops invalid signatures/keys with `401 Unauthorized`.
+4. **Anti-DDoS (`RateLimit`)**: Drops excessive requests with `429 Too Many Requests`.
+5. **Inner Layer (`Logger`)**: Logs the request. *(Because it sits inside the rate limiter, DDoS floods will NEVER pollute your database logs!)*
+6. **App Layer**: Your business logic.
+
+## 🔗 Pre-Built Middleware Chains
+
+Depending on your endpoint's purpose, use one of our optimized chains:
+
+- `mgr.PublicChain()`: Unauthenticated users (Device validation & IP Rate limits).
+- `mgr.PublicAuthChain()`: Authenticated users (Requires JWT/Tokens).
+- `mgr.PublicAPIKeyChain()`: Server-to-Server external (Requires API Key).
+- `mgr.InternalChain()`: Internal microservices (Bypasses rate limits, requires strict internal keys).
+- `mgr.WebhookChain()`: Stripped down chain optimized for massive payload ingestion.
+- `mgr.WebSocketChain()`: Handles Protocol Upgrades safely.
+
+## 🛠 Advanced Configuration
 
 ```go
 chainCfg := mw.ChainConfig{
-    UseChiRequestID:    true,  // Auto-generate request IDs
-    UseChiRealIP:       true,  // Extract real IP from proxies
-    UseChiCompress:     true,  // Gzip compression
-    UseChiTimeout:      false, // Use custom timeout instead
-    UseChiThrottle:     true,  // Rate limiting
-    UseChiStripSlashes: true,  // Normalize URLs
-    CompressionLevel:   9,     // 1-9, default: 5
-    ThrottleLimit:      50,    // Concurrent requests, default: 100
+    UseChiCompress:        true,  // Gzip compression
+    UseChiTimeout:         true,  // Context cancellation on timeout
+    UseChiThrottle:        true,  // Concurrent request limits
+    UseChiStripSlashes:    true,  // Normalize URLs
+    UseChiRateLimitPublic: true,  // Prevent abuse on public endpoints
+    CompressionLevel:      5,
+    ThrottleLimit:         100,
+    LimiterConfig: mw.ConfigLimiter{
+        RateLimitRequests: 30,
+        RateLimitWindow:   1 * time.Minute,
+    },
 }
 ```
+*(Note: `ChiRealIP` was intentionally removed from this library to prevent X-Forwarded-For spoofing attacks. The library uses the superior `TrustProxy` algorithm automatically).*
 
-### 4. Individual Middleware
+## 🔌 gRPC & WebSockets Integration
 
-You can also use middleware individually:
+This middleware isn't just for REST! 
 
+**gRPC Interceptors:**
 ```go
-handler := mw.ApplyMiddleware(
-    yourHandler,
-    mgr.EnsureAuth,           // JWT validation
-    mgr.ChiThrottle(100),     // Rate limiting
-    mgr.MaxBodySize(5*1024*1024), // Body size limit
-    mgr.Logger,               // Audit logging
-    mgr.Recoverer,            // Panic recovery
+server := grpc.NewServer(
+    grpc.ChainUnaryInterceptor(
+        mgr.UnaryInterceptorPanicRecover(),
+        mgr.UnaryInterceptorLogger(),
+    ),
+    grpc.ChainStreamInterceptor(
+        mgr.StreamInterceptorPanicRecover(),
+        mgr.StreamInterceptorLogger(),
+    ),
 )
 ```
 
-### 5. Custom Log Storage
+**WebSockets:**
+```go
+authCheck := func(r *http.Request) bool {
+    return r.Header.Get("Authorization") != ""
+}
+mux.Handle("/ws", mgr.WebSocketChain(authCheck)(wsHandler))
+```
 
-Implement the `LogStore` interface to save logs to your database:
+## 📊 Custom Audit Storage
+
+Inject your own database logger natively:
 
 ```go
-type DatabaseStore struct {
-    db *sql.DB
-}
+type DatabaseStore struct { db *sql.DB }
 
-func (d *DatabaseStore) Save(entry model.AuditLog) error {
-    _, err := d.db.Exec(`
-        INSERT INTO audit_logs (method, url, status_code, latency_ms, ...)
-        VALUES ($1, $2, $3, $4, ...)
-    `, entry.Method, entry.FullURL, entry.StatusCode, entry.LatencyMS, ...)
+func (d *DatabaseStore) Save(ctx context.Context, entry model.AuditLog) error {
+    // This executes asynchronously in a goroutine
+    _, err := d.db.ExecContext(ctx, "INSERT INTO audit_logs ...")
     return err
 }
 
-// Use it:
-mgr := mw.New(mw.Config{
-    LogStore: &DatabaseStore{db: db},
-    // ... other config
+mgr, _ := mw.NewWithError(mw.Config{
+    LogStore: &DatabaseStore{db: myDB},
+    // ...
 })
 ```
 
-### 6. Signature Validation
-
-The middleware validates request signatures using RSA:
-
-**For Auth Requests:**
-```go
-signature = RSA_Sign(PrivateKey, [Token, IP, RequestID, MerchantKey, Datetime])
-```
-
-**For Public Requests:**
-```go
-messageSignature = RSA_Sign(PublicKey, [UserAgent, DeviceID, Platform, MacAddress])
-signature = RSA_Sign(PublicKey, [Token, IP, RequestID, MerchantKey, Datetime, Message, messageSignature])
-```
-
-Include the signature in the `NVX-Signature` header.
-
-## 🔧 Helper Functions
-
-```go
-// Method restriction
-handler := mw.MethodOnly("POST", yourHandler)
-
-// Apply multiple middleware
-handler := mw.ApplyMiddleware(
-    yourHandler,
-    middleware1,
-    middleware2,
-)
-
-// Health check endpoint
-mux.HandleFunc("/ping", mw.Heartbeat("/ping"))
-
-// Get Chi request ID
-requestID := mw.GetChiRequestID(r)
-```
-
-## 📝 Examples
-
-See the `examples/` directory for complete examples:
-
-- **basic/** - Simple API with public and auth routes
-- **advanced/** - Production-ready API with admin routes and custom middleware
-
-### Running Examples
-
-```bash
-cd examples/basic
-go run main.go
-
-# Test with curl:
-curl -X POST http://localhost:8080/api/register \
-  -H "NVX-Request-ID: req-123" \
-  -H "NVX-Merchant-Key: merchant-1" \
-  -H "NVX-IP: 192.168.1.1" \
-  -H "NVX-User-Agent: MyApp/1.0" \
-  -H "NVX-Device-ID: device-123" \
-  -H "NVX-Platform: android" \
-  -H "NVX-Mac-Address: 00:11:22:33:44:55" \
-  -H "NVX-Signature: your-signature" \
-  -d '{"email":"test@example.com"}'
-```
-
-## 🛡️ Security Features
-
-1. **Request Signature Validation** - Prevent tampering
-2. **JWT Token Validation** - Secure authentication
-3. **IP Whitelisting** - Trusted proxy support
-4. **Rate Limiting** - Prevent abuse
-5. **Body Size Limits** - Prevent DoS
-6. **Security Headers** - XSS, clickjacking protection
-7. **CORS Control** - Origin validation
-
-## 🎨 Architecture
-
-## 📊 Audit Log Structure
-
-```go
-type AuditLog struct {
-    Method          string    // HTTP method
-    FullURL         string    // Complete URL
-    StatusCode      int       // Response status
-    LatencyMS       int       // Request duration
-    MerchantKey     string    // Client merchant key
-    ClientIP        string    // Client IP address
-    RequestID       string    // Request ID
-    TransactionID   string    // Transaction ID
-    RequestHeaders  string    // JSON of request headers
-    ResponseHeaders string    // JSON of response headers
-    RequestBody     string    // Request body (if JSON)
-    ResponseBody    string    // Response body (if JSON)
-    CreatedBy       int64     // User ID
-    CreatedAt       time.Time // Timestamp
-}
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
 ## 📄 License
 
-MIT License - see LICENSE file for details.
-
-## 🔗 Dependencies
-
-- [github.com/go-chi/chi/v5](https://github.com/go-chi/chi) - Router and middleware utilities
-- [github.com/rs/zerolog](https://github.com/rs/zerolog) - Structured logging
-- Your internal helpers:
-  - `github.com/Jkenyut/nvx-go-helper/activity` - Context utilities
-  - `github.com/Jkenyut/nvx-go-helper/cryptoutil` - Crypto utilities
-  - `github.com/Jkenyut/nvx-go-helper/format` - Formatting utilities
-  - `github.com/Jkenyut/nvx-go-helper/response` - Response helpers
-
-## 📞 Support
-
-For issues, questions, or contributions, please open an issue on GitHub.
-
----
-
-Made with ❤️ by NVX Team
+Apache 2.0 License - see LICENSE file for details.

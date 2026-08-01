@@ -62,6 +62,14 @@ func (r *responseRecorder) BytesWritten() int {
 	return r.WrapResponseWriter.BytesWritten()
 }
 
+// Body returns the bytes buffered in the response recorder.
+func (r *responseRecorder) Body() []byte {
+	if r.body != nil {
+		return r.body.Bytes()
+	}
+	return nil
+}
+
 // Free returns the buffer to the sync.Pool to prevent memory leaks.
 // It should be called after the response body is no longer needed.
 func (r *responseRecorder) Free() {
