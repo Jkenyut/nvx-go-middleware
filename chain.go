@@ -114,11 +114,11 @@ func (m *Manager) buildOuterChain(cfg ChainConfig, handler http.Handler) http.Ha
 func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
-		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
-		handler = m.EnsurePublic(handler)
 		if cfg.UseChiRateLimitPublic {
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
+		handler = m.EnsurePublic(handler)
+		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
 		return m.buildOuterChain(cfg, handler)
 	}
 }
@@ -127,11 +127,11 @@ func (m *Manager) PublicChain(cfg ChainConfig) func(http.Handler) http.Handler {
 func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
-		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAuth)
-		handler = m.EnsurePublicAuth(handler)
 		if cfg.UseChiRateLimitAuth {
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PrivateKeySignature)(handler)
 		}
+		handler = m.EnsurePublicAuth(handler)
+		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAuth)
 		return m.buildOuterChain(cfg, handler)
 	}
 }
@@ -140,11 +140,11 @@ func (m *Manager) PublicAuthChain(cfg ChainConfig) func(http.Handler) http.Handl
 func (m *Manager) PublicAPIKeyChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
-		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAPIKey)
-		handler = m.EnsurePublicAPIKey(handler)
 		if cfg.UseChiRateLimitPublic {
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
+		handler = m.EnsurePublicAPIKey(handler)
+		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAPIKey)
 		return m.buildOuterChain(cfg, handler)
 	}
 }
@@ -153,8 +153,8 @@ func (m *Manager) PublicAPIKeyChain(cfg ChainConfig) func(http.Handler) http.Han
 func (m *Manager) InternalChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
-		handler = m.SetHeaderAuthType(handler, constants.AuthTypeInternal)
 		handler = m.EnsureInternal(handler)
+		handler = m.SetHeaderAuthType(handler, constants.AuthTypeInternal)
 		return m.buildOuterChain(cfg, handler)
 	}
 }
@@ -197,11 +197,11 @@ func Heartbeat(path string) func(http.Handler) http.Handler {
 func (m *Manager) PreSignChain(cfg ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
-		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
-		handler = m.EnsurePreSignHeaders(handler)
 		if cfg.UseChiRateLimitPublic {
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
+		handler = m.EnsurePreSignHeaders(handler)
+		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
 		return m.buildOuterChain(cfg, handler)
 	}
 }
