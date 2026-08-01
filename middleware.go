@@ -190,29 +190,19 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			ResponseBody:    responseBody,
 		}
 
-		// Save log asynchronously with proper error handling
-		go func() {
-			defer func() {
-				if rec := recover(); rec != nil {
-					m.cfg.Logger.Error().
-						Str("Service", m.cfg.ServiceName).
-						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
-						Str("transaction_id", transactionID).
-						Interface("panic", rec).
-						Msg("Panic in async log save")
-				}
-			}()
+		// Save log synchronously. Async handling should be implemented by LogStore.
+		if err := m.cfg.LogStore.Save(entry); err != nil {
+			m.cfg.Logger.Error().
+				Str("Service", m.cfg.ServiceName).
+				Str("request_id", r.Header.Get(constants.HeaderRequestID)).
+				Str("transaction_id", transactionID).
+				Err(err).
+				Msg("Failed to save audit log")
+		}
 
-			// Save log asynchronously with proper error handling
-			if err := m.cfg.LogStore.Save(entry); err != nil {
-				m.cfg.Logger.Error().
-					Str("Service", m.cfg.ServiceName).
-					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
-					Str("transaction_id", transactionID).
-					Err(err).
-					Msg("Failed to save audit log")
-			}
-		}()
+		if rw != nil {
+			rw.Free()
+		}
 	})
 }
 
@@ -631,28 +621,25 @@ func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 			return ip
 		}()
 
-		isTrusted := false
-
-		for _, proxy := range m.cfg.TrustedProxies {
-			if proxy == remoteIP {
-				isTrusted = true
-				break
-			}
-
-			if _, ipNet, err := net.ParseCIDR(proxy); err == nil {
-				if ip := net.ParseIP(remoteIP); ip != nil && ipNet.Contains(ip) {
-					isTrusted = true
-					break
-				}
-			}
-		}
+		isTrusted := m.isTrustedIP(remoteIP)
 
 		var clientIP string
 
 		if isTrusted {
 			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 				parts := strings.Split(xff, ",")
-				clientIP = strings.TrimSpace(parts[0])
+				// Read from right to left to avoid IP spoofing
+				for i := len(parts) - 1; i >= 0; i-- {
+					ipStr := strings.TrimSpace(parts[i])
+					if !m.isTrustedIP(ipStr) {
+						clientIP = ipStr
+						break
+					}
+				}
+				// Fallback to leftmost if all are trusted proxies or couldn't find untrusted
+				if clientIP == "" && len(parts) > 0 {
+					clientIP = strings.TrimSpace(parts[0])
+				}
 			}
 		}
 		if net.ParseIP(clientIP) == nil {
@@ -674,6 +661,21 @@ func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 // isMultipart checks if the content type is multipart/form-data
 func isMultipart(contentType string) bool {
 	return strings.HasPrefix(strings.ToLower(contentType), "multipart/")
+}
+
+// isTrustedIP checks if a given IP string is in the trusted proxies list.
+func (m *Manager) isTrustedIP(ipStr string) bool {
+	for _, proxy := range m.cfg.TrustedProxies {
+		if proxy == ipStr {
+			return true
+		}
+		if _, ipNet, err := net.ParseCIDR(proxy); err == nil {
+			if ip := net.ParseIP(ipStr); ip != nil && ipNet.Contains(ip) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // MaxBodySize returns a middleware that limits the maximum size of the request body.

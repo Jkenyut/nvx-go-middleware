@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"net/http"
+	"sync"
 
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -14,12 +15,21 @@ type responseRecorder struct {
 	maxBodySize int
 }
 
+var responseBufferPool = sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
+
 // wrapResponseWriter wraps the response writer with a response recorder.
 func wrapResponseWriter(w http.ResponseWriter, r *http.Request, limit int) *responseRecorder {
 	mw := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+	buf := responseBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+
 	return &responseRecorder{
 		WrapResponseWriter: mw,
-		body:               &bytes.Buffer{},
+		body:               buf,
 		maxBodySize:        limit,
 	}
 }
@@ -50,4 +60,13 @@ func (r *responseRecorder) Status() int {
 // BytesWritten returns the number of bytes written to the body
 func (r *responseRecorder) BytesWritten() int {
 	return r.WrapResponseWriter.BytesWritten()
+}
+
+// Free returns the buffer to the sync.Pool to prevent memory leaks.
+// It should be called after the response body is no longer needed.
+func (r *responseRecorder) Free() {
+	if r.body != nil {
+		responseBufferPool.Put(r.body)
+		r.body = nil
+	}
 }
