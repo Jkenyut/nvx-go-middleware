@@ -50,6 +50,8 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 			r.Header.Set(constants.HeaderTransactionID, transactionID)
 			r = r.WithContext(activity.WithTransactionID(r.Context(), transactionID))
 
+			var rw *responseRecorder
+
 			// ── Panic recovery ────────────────────────────────────────
 			defer func() {
 				if rec := recover(); rec != nil {
@@ -58,7 +60,18 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 						Str("transaction_id", transactionID).
 						Interface("panic", rec).
 						Msg("panic in GraphQL handler")
-					writeJSON(w, http.StatusInternalServerError, map[string]any{
+
+					// Abort if response already started
+					if rw != nil && rw.Status() != 0 {
+						return
+					}
+
+					targetW := w
+					if rw != nil {
+						targetW = rw
+					}
+
+					writeJSON(targetW, http.StatusInternalServerError, map[string]any{
 						"errors": []map[string]string{{"message": "internal server error"}},
 					})
 				}
@@ -92,7 +105,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 			}
 
 			start := time.Now()
-			rw := wrapResponseWriter(w, r, int(m.cfg.ResponseBodyLogLimitSize))
+			rw = wrapResponseWriter(w, r, int(m.cfg.ResponseBodyLogLimitSize))
 
 			IDAuditLog := cryptoutil.V7()
 			entry := model.AuditLog{
@@ -119,7 +132,11 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 			reqCtx := context.WithoutCancel(r.Context())
 
 			defer func() {
-				entry.StatusCode = rw.Status()
+				status := rw.Status()
+				if status == 0 {
+					status = http.StatusInternalServerError
+				}
+				entry.StatusCode = status
 				entry.LatencyMS = time.Since(start).Milliseconds()
 				entry.ResponseHeaders = normalizeHeadersJSON(rw.Header())
 				if m.cfg.LogResponseBodies {
@@ -132,7 +149,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 						Err(err).
 						Msg("failed to save graphql audit log")
 				}
-				
+
 				if rw != nil {
 					rw.Free()
 				}

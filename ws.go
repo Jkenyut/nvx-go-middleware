@@ -72,6 +72,8 @@ func (m *Manager) WebSocketChain(
 				return
 			}
 
+			var ww *wsResponseWriter
+
 			// Panic guard (pre-upgrade)
 			defer func() {
 				if rec := recover(); rec != nil {
@@ -80,11 +82,15 @@ func (m *Manager) WebSocketChain(
 						Str("transaction_id", transactionID).
 						Interface("panic", rec).
 						Msg("panic in WebSocket handler")
+					
+					if ww == nil || !ww.hijacked {
+						http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+					}
 				}
 			}()
 
 			start := time.Now()
-			ww := &wsResponseWriter{ResponseWriter: w}
+			ww = &wsResponseWriter{ResponseWriter: w}
 
 			IDAuditLog := cryptoutil.V7()
 			entry := model.AuditLog{
