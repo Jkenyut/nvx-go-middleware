@@ -82,7 +82,7 @@ func (m *Manager) WebSocketChain(
 						Str("transaction_id", transactionID).
 						Interface("panic", rec).
 						Msg("panic in WebSocket handler")
-					
+
 					if ww == nil || !ww.hijacked {
 						http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 					}
