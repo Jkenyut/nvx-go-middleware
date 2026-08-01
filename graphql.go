@@ -123,17 +123,19 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				entry.LatencyMS = time.Since(start).Milliseconds()
 				entry.ResponseHeaders = normalizeHeadersJSON(rw.Header())
 				if m.cfg.LogResponseBodies {
-					entry.ResponseBody = normalizeBodyRaw(rw.body.Bytes())
+					entry.ResponseBody = normalizeBodyRaw(rw.Body())
 				}
 
-				go func(logEntry model.AuditLog) {
-					defer func() {
-						if rec := recover(); rec != nil {
-							m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async graphql log save")
-						}
-					}()
-					_ = m.cfg.LogStore.Save(reqCtx, logEntry)
-				}(entry)
+				if err := m.cfg.LogStore.Save(reqCtx, entry); err != nil {
+					m.cfg.Logger.Error().
+						Str("transaction_id", transactionID).
+						Err(err).
+						Msg("failed to save graphql audit log")
+				}
+				
+				if rw != nil {
+					rw.Free()
+				}
 			}()
 
 			next.ServeHTTP(rw, r)

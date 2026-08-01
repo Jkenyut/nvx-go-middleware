@@ -96,14 +96,12 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 			entry.LatencyMS = time.Since(start).Milliseconds()
 			entry.ResponseBody = resp
 
-			go func(logEntry model.AuditLog) {
-				defer func() {
-					if rec := recover(); rec != nil {
-						m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async grpc log save")
-					}
-				}()
-				_ = m.cfg.LogStore.Save(reqCtx, logEntry)
-			}(entry)
+			if err := m.cfg.LogStore.Save(reqCtx, entry); err != nil {
+				m.cfg.Logger.Error().
+					Str("transaction_id", transactionID).
+					Err(err).
+					Msg("failed to save grpc audit log")
+			}
 		}()
 
 		// Panic recovery
@@ -203,14 +201,12 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			entry.StatusCode = statusCode
 			entry.LatencyMS = time.Since(start).Milliseconds()
 
-			go func(logEntry model.AuditLog) {
-				defer func() {
-					if rec := recover(); rec != nil {
-						m.cfg.Logger.Error().Str("transaction_id", transactionID).Msg("panic in async grpc stream log save")
-					}
-				}()
-				_ = m.cfg.LogStore.Save(reqCtx, logEntry)
-			}(entry)
+			if err := m.cfg.LogStore.Save(reqCtx, entry); err != nil {
+				m.cfg.Logger.Error().
+					Str("transaction_id", transactionID).
+					Err(err).
+					Msg("failed to save grpc stream audit log")
+			}
 		}()
 
 		defer func() {
