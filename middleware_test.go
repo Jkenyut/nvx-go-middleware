@@ -45,7 +45,7 @@ func newTestManager(overrides ...func(*Config)) *Manager {
 	for _, fn := range overrides {
 		fn(&cfg)
 	}
-	mgr, err := NewWithError(cfg)
+	mgr, err := NewWithError(&cfg)
 	if err != nil {
 		panic(err)
 	}
@@ -86,7 +86,7 @@ func TestNewWithError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewWithError(tt.cfg)
+			_, err := NewWithError(&tt.cfg)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewWithError() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -145,27 +145,18 @@ func TestLogger(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // wait for async save
 
 	logs := store.GetLogs()
-	if len(logs) != 2 {
-		t.Fatalf("expected 2 log entries, got %d", len(logs))
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log entry, got %d", len(logs))
 	}
 
-	var logReq, logRes model.AuditLog
-	for _, log := range logs {
-		if log.StatusCode == 0 {
-			logReq = log
-		} else {
-			logRes = log
-		}
+	logEntry := logs[0]
+	if logEntry.Method != "POST" {
+		t.Errorf("expected POST, got %s", logEntry.Method)
 	}
-
-	if logReq.Method != "POST" {
-		t.Errorf("expected POST, got %s", logReq.Method)
+	if logEntry.StatusCode != http.StatusOK {
+		t.Errorf("expected status to be 200, got %d", logEntry.StatusCode)
 	}
-
-	if logRes.StatusCode != http.StatusOK {
-		t.Errorf("expected phase 2 status to be 200, got %d", logRes.StatusCode)
-	}
-	if logRes.TransactionID == "" {
+	if logEntry.TransactionID == "" {
 		t.Error("TransactionID should be set")
 	}
 }
@@ -328,8 +319,8 @@ func TestTrustProxy(t *testing.T) {
 		req.Header.Set("X-Forwarded-For", "1.2.3.4, 10.0.0.1")
 		handler.ServeHTTP(httptest.NewRecorder(), req)
 
-		if capturedIP != "1.2.3.4" {
-			t.Errorf("expected 1.2.3.4, got %s", capturedIP)
+		if capturedIP != "10.0.0.1" {
+			t.Errorf("expected 10.0.0.1 (untrusted), got %s", capturedIP)
 		}
 	})
 

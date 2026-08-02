@@ -13,6 +13,10 @@ import (
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
 	"github.com/bytedance/sonic"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // graphqlRequestBody is used to extract the GraphQL operation name from the request body.
@@ -36,10 +40,7 @@ type graphqlRequestBody struct {
 //	router.Handle("/graphql", mgr.GraphQLChain(20)(graphqlHandler))
 func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// ── TrustProxy ────────────────────────────────────────────
-			m.TrustProxy(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})).ServeHTTP(w, r)
-
+		coreHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// ── Context injection ─────────────────────────────────────
 			r = WithActivityContext(r)
 
@@ -55,6 +56,13 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 			// ── Panic recovery ────────────────────────────────────────
 			defer func() {
 				if rec := recover(); rec != nil {
+					if m.cfg.EnableTelemetry {
+						span := trace.SpanFromContext(r.Context())
+						if span.SpanContext().IsValid() {
+							span.RecordError(fmt.Errorf("panic: %v", rec))
+							span.SetStatus(codes.Error, "panic recovered")
+						}
+					}
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.ServiceName).
 						Str("transaction_id", transactionID).
@@ -104,6 +112,22 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				}
 			}
 
+			if m.cfg.EnableTelemetry {
+				span := trace.SpanFromContext(r.Context())
+				if span.SpanContext().IsValid() {
+					span.SetName("GraphQL " + operationName)
+					span.SetAttributes(
+						attribute.String("nvx.transaction_id", transactionID),
+						attribute.String("nvx.request_id", r.Header.Get(constants.HeaderRequestID)),
+						attribute.String("nvx.client_ip", r.Header.Get(constants.HeaderIP)),
+						attribute.String("graphql.operation.name", operationName),
+					)
+					if gqlBody.Query != "" {
+						span.SetAttributes(attribute.Int("graphql.query.depth", graphqlQueryDepth(gqlBody.Query)))
+					}
+				}
+			}
+
 			start := time.Now()
 			rw = wrapResponseWriter(w, r, int(m.cfg.ResponseBodyLogLimitSize))
 
@@ -136,6 +160,12 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				if status == 0 {
 					status = http.StatusInternalServerError
 				}
+				if m.cfg.EnableTelemetry {
+					span := trace.SpanFromContext(r.Context())
+					if span.SpanContext().IsValid() && status >= 500 {
+						span.SetStatus(codes.Error, fmt.Sprintf("HTTP %d", status))
+					}
+				}
 				entry.StatusCode = status
 				entry.LatencyMS = time.Since(start).Milliseconds()
 				entry.ResponseHeaders = normalizeHeadersJSON(rw.Header())
@@ -157,6 +187,16 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 
 			next.ServeHTTP(rw, r)
 		})
+
+		var handler http.Handler = coreHandler
+
+		if m.cfg.EnableTelemetry {
+			handler = otelhttp.NewMiddleware(m.cfg.ServiceName)(handler)
+		}
+
+		handler = m.TrustProxy(handler)
+
+		return handler
 	}
 }
 

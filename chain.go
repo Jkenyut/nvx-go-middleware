@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Jkenyut/nvx-go-middleware/constants"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // ChainConfig configures which middleware to use in a middleware chain.
@@ -95,6 +96,10 @@ func (m *Manager) buildInnerChain(cfg *ChainConfig, next http.Handler) http.Hand
 func (m *Manager) buildOuterChain(cfg *ChainConfig, handler http.Handler) http.Handler {
 	// TrustProxy MUST run before RateLimit and Validation to resolve Real IP accurately.
 	handler = m.TrustProxy(handler)
+
+	if m.cfg.EnableTelemetry {
+		handler = otelhttp.NewMiddleware(m.cfg.ServiceName)(handler)
+	}
 
 	if cfg.UseChiTimeout {
 		handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)

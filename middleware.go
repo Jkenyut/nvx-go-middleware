@@ -22,6 +22,9 @@ import (
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/bytedance/sonic"
 )
@@ -45,6 +48,12 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					Str("path", r.URL.Path).
 					Str("remote_addr", r.RemoteAddr).
 					Msgf("panic recovered:\n%s", stack)
+
+				if m.cfg.EnableTelemetry {
+					span := trace.SpanFromContext(r.Context())
+					span.RecordError(fmt.Errorf("panic: %v", rec))
+					span.SetStatus(codes.Error, "panic recovered")
+				}
 
 				// Abort if response already started
 				if ww, ok := w.(chimiddleware.WrapResponseWriter); ok && ww.Status() != 0 {
@@ -90,6 +99,16 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			transactionID = cryptoutil.V7()
 			rw.Header().Set(constants.HeaderTransactionID, transactionID)
 			r.Header.Set(constants.HeaderTransactionID, transactionID)
+		}
+
+		if m.cfg.EnableTelemetry {
+			span := trace.SpanFromContext(r.Context())
+			span.SetAttributes(
+				attribute.String("nvx.transaction_id", transactionID),
+				attribute.String("nvx.request_id", r.Header.Get(constants.HeaderRequestID)),
+				attribute.String("nvx.client_ip", r.Header.Get(constants.HeaderIP)),
+				attribute.String("nvx.user_id", r.Header.Get(constants.HeaderUserID)),
+			)
 		}
 
 		// Context injection

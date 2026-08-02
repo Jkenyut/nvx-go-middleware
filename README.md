@@ -99,33 +99,30 @@ Depending on your endpoint's purpose, use one of our optimized chains:
 
 This middleware isn't just for REST! 
 
-**gRPC Interceptors:**
+**gRPC (Factory Pattern with Auto-Telemetry):**
 ```go
-server := grpc.NewServer(
-	grpc.ChainUnaryInterceptor(
-		mgr.UnaryInterceptorPanicRecover(),
-		mgr.UnaryInterceptorLogger(),
-	),
-	grpc.ChainStreamInterceptor(
-		mgr.StreamInterceptorPanicRecover(),
-		mgr.StreamInterceptorLogger(),
-	),
-)
+// Safely builds a grpc.Server injected with OTel Traces, Metrics, Panic Recovery & Audit Logging
+grpcServer := mgr.NewGRPCServer()
+
+// Register your service
+// pb.RegisterMyServiceServer(grpcServer, &myServiceImpl{})
 ```
 
-**GraphQL (With AST Depth Limiter):**
+**GraphQL (With AST Depth Limiter & Telemetry):**
 ```go
 maxDepth := 10 // Prevent deep recursive queries
-mux.Handle("/graphql", mgr.GraphQLPublicAuthChain(chainCfg, maxDepth)(graphqlHandler))
+// Safely wrapped with OTel Metrics and TrustProxy
+mux.Handle("/graphql", mgr.GraphQLChain(maxDepth)(graphqlHandler))
 ```
 
-**WebSockets:**
+**WebSockets (With Per-Connection Auth & Telemetry):**
 ```go
 // Browsers cannot send headers for WebSockets, validate via Query Token
 authCheck := func(r *http.Request) bool {
 	return r.URL.Query().Get("token") != ""
 }
-mux.Handle("/ws", mgr.WebSocketPublicChain(chainCfg, authCheck)(wsHandler))
+// Safely wrapped with OTel Metrics and TrustProxy
+mux.Handle("/ws", mgr.WebSocketChain(authCheck)(wsHandler))
 ```
 
 ## 📊 Custom Audit Storage

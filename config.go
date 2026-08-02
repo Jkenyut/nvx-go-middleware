@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Jkenyut/nvx-go-helper/activity"
+	"github.com/Jkenyut/nvx-go-middleware/constants"
 )
 
 // Config holds the configuration for the middleware manager.
@@ -83,6 +84,8 @@ type Config struct {
 	ContextInjector func(r *http.Request) *http.Request
 	// ServiceName is the name of the service, used in log fields.
 	ServiceName string
+	// EnableTelemetry enables OpenTelemetry tracing for the middleware.
+	EnableTelemetry bool
 }
 
 // Validate checks that required Config fields are present.
@@ -108,11 +111,11 @@ var (
 func WithActivityContext(r *http.Request) *http.Request {
 	h := r.Header
 	ctx := r.Context()
-	ctx = activity.WithTransactionID(ctx, h.Get("NVX-Transaction-ID"))
-	ctx = activity.WithAPIKey(ctx, h.Get("NVX-API-Key"))
-	ctx = activity.WithUserID(ctx, h.Get("NVX-User-ID"))
-	ctx = activity.WithUserIP(ctx, h.Get("NVX-IP"))
-	ctx = activity.WithUserType(ctx, h.Get("NVX-User-Type"))
-	ctx = activity.WithRequestID(ctx, h.Get("NVX-Request-ID"))
+	ctx = activity.WithTransactionID(ctx, h.Get(constants.HeaderTransactionID))
+	ctx = activity.WithAPIKey(ctx, h.Get(constants.HeaderAPIKey))
+	ctx = activity.WithUserID(ctx, h.Get(constants.HeaderUserID))
+	ctx = activity.WithUserIP(ctx, h.Get(constants.HeaderIP))
+	ctx = activity.WithUserType(ctx, h.Get(constants.HeaderUserType))
+	ctx = activity.WithRequestID(ctx, h.Get(constants.HeaderRequestID))
 	return r.WithContext(ctx)
 }

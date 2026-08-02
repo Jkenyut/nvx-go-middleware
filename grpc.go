@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"runtime/debug"
 	"time"
 
@@ -11,6 +12,10 @@ import (
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
 	"github.com/bytedance/sonic"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -52,6 +57,20 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		ctx = activity.WithUserID(ctx, get(constants.HeaderUserID))
 		ctx = activity.WithUserIP(ctx, get(constants.HeaderIP))
 		ctx = activity.WithUserType(ctx, get(constants.HeaderUserType))
+
+		if m.cfg.EnableTelemetry {
+			span := trace.SpanFromContext(ctx)
+			if !span.SpanContext().IsValid() {
+				m.cfg.Logger.Error().Msg("🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
+			} else {
+				span.SetAttributes(
+					attribute.String("nvx.transaction_id", transactionID),
+					attribute.String("nvx.request_id", get(constants.HeaderRequestID)),
+					attribute.String("nvx.client_ip", get(constants.HeaderIP)),
+					attribute.String("nvx.user_id", get(constants.HeaderUserID)),
+				)
+			}
+		}
 
 		start := time.Now()
 
@@ -107,6 +126,11 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		// Panic recovery
 		defer func() {
 			if rec := recover(); rec != nil {
+				if m.cfg.EnableTelemetry {
+					span := trace.SpanFromContext(ctx)
+					span.RecordError(fmt.Errorf("panic: %v", rec))
+					span.SetStatus(otelcodes.Error, "panic recovered")
+				}
 				stack := string(debug.Stack())
 				m.cfg.Logger.Error().
 					Str("service", m.cfg.ServiceName).
@@ -157,6 +181,20 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 		ctx = activity.WithUserID(ctx, get(constants.HeaderUserID))
 		ctx = activity.WithUserIP(ctx, get(constants.HeaderIP))
 		ctx = activity.WithUserType(ctx, get(constants.HeaderUserType))
+
+		if m.cfg.EnableTelemetry {
+			span := trace.SpanFromContext(ctx)
+			if !span.SpanContext().IsValid() {
+				m.cfg.Logger.Error().Msg("🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
+			} else {
+				span.SetAttributes(
+					attribute.String("nvx.transaction_id", transactionID),
+					attribute.String("nvx.request_id", get(constants.HeaderRequestID)),
+					attribute.String("nvx.client_ip", get(constants.HeaderIP)),
+					attribute.String("nvx.user_id", get(constants.HeaderUserID)),
+				)
+			}
+		}
 
 		wrapped := &wrappedServerStream{ServerStream: ss, ctx: ctx}
 		start := time.Now()
@@ -211,6 +249,11 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 
 		defer func() {
 			if rec := recover(); rec != nil {
+				if m.cfg.EnableTelemetry {
+					span := trace.SpanFromContext(ctx)
+					span.RecordError(fmt.Errorf("panic: %v", rec))
+					span.SetStatus(otelcodes.Error, "panic recovered")
+				}
 				stack := string(debug.Stack())
 				m.cfg.Logger.Error().
 					Str("service", m.cfg.ServiceName).
@@ -236,3 +279,21 @@ type wrappedServerStream struct {
 }
 
 func (w *wrappedServerStream) Context() context.Context { return w.ctx }
+
+// NewGRPCServer creates a new gRPC server automatically configured with
+// OTel StatsHandler (if telemetry is enabled) and NVX interceptors.
+// This is the recommended way to create a gRPC server to avoid missing configurations.
+func (m *Manager) NewGRPCServer(opts ...grpc.ServerOption) *grpc.Server {
+	var defaultOpts []grpc.ServerOption
+
+	if m.cfg.EnableTelemetry {
+		defaultOpts = append(defaultOpts, grpc.StatsHandler(otelgrpc.NewServerHandler()))
+	}
+
+	defaultOpts = append(defaultOpts,
+		grpc.ChainUnaryInterceptor(m.GRPCUnaryInterceptor()),
+		grpc.ChainStreamInterceptor(m.GRPCStreamInterceptor()),
+	)
+
+	return grpc.NewServer(append(defaultOpts, opts...)...)
+}

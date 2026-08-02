@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,10 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/format"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // wsResponseWriter wraps http.ResponseWriter to detect the WebSocket upgrade
@@ -42,16 +47,12 @@ func (m *Manager) WebSocketChain(
 	authenticator func(r *http.Request) bool,
 ) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		coreHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Must be a WebSocket upgrade request
 			if !isWebSocketUpgrade(r) {
 				http.Error(w, "expected WebSocket upgrade", http.StatusBadRequest)
 				return
 			}
-
-			// Real IP
-			realIPHandler := m.TrustProxy(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
-			realIPHandler.ServeHTTP(w, r)
 
 			// Inject context values
 			r = WithActivityContext(r)
@@ -60,12 +61,31 @@ func (m *Manager) WebSocketChain(
 			transactionID := r.Header.Get(constants.HeaderTransactionID)
 			if transactionID == "" {
 				transactionID = cryptoutil.V7()
+				r.Header.Set(constants.HeaderTransactionID, transactionID)
 			}
-			r.Header.Set(constants.HeaderTransactionID, transactionID)
 			r = r.WithContext(activity.WithTransactionID(r.Context(), transactionID))
+
+			if m.cfg.EnableTelemetry {
+				span := trace.SpanFromContext(r.Context())
+				if span.SpanContext().IsValid() {
+					span.SetName("WebSocket Upgrade")
+					span.SetAttributes(
+						attribute.String("nvx.transaction_id", transactionID),
+						attribute.String("nvx.request_id", r.Header.Get(constants.HeaderRequestID)),
+						attribute.String("nvx.client_ip", r.Header.Get(constants.HeaderIP)),
+						attribute.String("http.target", r.URL.Path),
+					)
+				}
+			}
 
 			// Authenticate
 			if authenticator != nil && !authenticator(r) {
+				if m.cfg.EnableTelemetry {
+					span := trace.SpanFromContext(r.Context())
+					if span.SpanContext().IsValid() {
+						span.SetStatus(codes.Error, constants.ErrMsgInvalidToken)
+					}
+				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": constants.ErrMsgInvalidToken})
@@ -77,6 +97,13 @@ func (m *Manager) WebSocketChain(
 			// Panic guard (pre-upgrade)
 			defer func() {
 				if rec := recover(); rec != nil {
+					if m.cfg.EnableTelemetry {
+						span := trace.SpanFromContext(r.Context())
+						if span.SpanContext().IsValid() {
+							span.RecordError(fmt.Errorf("panic: %v", rec))
+							span.SetStatus(codes.Error, "panic recovered")
+						}
+					}
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.ServiceName).
 						Str("transaction_id", transactionID).
@@ -122,6 +149,12 @@ func (m *Manager) WebSocketChain(
 				if ww.hijacked {
 					statusCode = http.StatusSwitchingProtocols
 				}
+				if m.cfg.EnableTelemetry {
+					span := trace.SpanFromContext(r.Context())
+					if span.SpanContext().IsValid() && statusCode >= 500 {
+						span.SetStatus(codes.Error, fmt.Sprintf("HTTP %d", statusCode))
+					}
+				}
 
 				entry.StatusCode = statusCode
 				entry.LatencyMS = time.Since(start).Milliseconds()
@@ -137,6 +170,16 @@ func (m *Manager) WebSocketChain(
 
 			next.ServeHTTP(ww, r)
 		})
+
+		var handler http.Handler = coreHandler
+
+		if m.cfg.EnableTelemetry {
+			handler = otelhttp.NewMiddleware(m.cfg.ServiceName)(handler)
+		}
+
+		handler = m.TrustProxy(handler)
+
+		return handler
 	}
 }
 
