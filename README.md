@@ -45,6 +45,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to init middleware: %v", err)
 	}
+	defer mgr.Close() // Gracefully close background loggers to prevent log loss on shutdown
 
 	// 2. Load default chain behavior
 	chainCfg := mw.DefaultChainConfig()

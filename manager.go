@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -13,7 +14,8 @@ import (
 // Manager holds the middleware configuration and provides middleware methods.
 // It is the central entry point for creating and managing middleware chains.
 type Manager struct {
-	cfg Config
+	cfg       Config
+	logCloser io.Closer
 }
 
 // NewWithError creates a new Middleware Manager, returning an error instead of panicking
@@ -23,21 +25,64 @@ func NewWithError(cfg *Config) (*Manager, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	applyDefaults(cfg)
-	return &Manager{cfg: *cfg}, nil
+	closer := applyDefaults(cfg)
+	return &Manager{cfg: *cfg, logCloser: closer}, nil
 }
 
 // applyDefaults fills in all missing Config fields with safe defaults.
-func applyDefaults(cfg *Config) {
+// It returns an io.Closer if it created any resources that need to be closed.
+func applyDefaults(cfg *Config) io.Closer {
+	var logCloser io.Closer
+
 	if cfg.Logger == nil {
-		w := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
-		wr := diode.NewWriter(w, 1000, 10*time.Millisecond, func(_ int) {})
-		l := zerolog.New(wr).
+		env := cfg.Env // defaults to "development" if empty
+
+		var writer io.Writer
+		isProd := env == "production" || env == "prod"
+
+		if isProd {
+			// JSON output for log aggregation systems
+			writer = os.Stdout
+		} else {
+			// Pretty, colored output for local development and staging
+			writer = zerolog.ConsoleWriter{
+				Out:     os.Stderr,
+				NoColor: false,
+			}
+		}
+
+		// Use RFC3339 seconds internally, but display in human format via ConsoleWriter
+		zerolog.TimeFieldFormat = time.RFC3339
+
+		// Respect LOG_LEVEL environment variable if set
+		if levelStr := os.Getenv("LOG_LEVEL"); levelStr != "" {
+			if level, err := zerolog.ParseLevel(levelStr); err == nil {
+				zerolog.SetGlobalLevel(level)
+			}
+		} else {
+			// Default level based on environment
+			if isProd {
+				zerolog.SetGlobalLevel(zerolog.InfoLevel)
+			} else {
+				zerolog.SetGlobalLevel(zerolog.DebugLevel)
+			}
+		}
+
+		wr := diode.NewWriter(writer, 1000, 10*time.Millisecond, func(_ int) {})
+		logCloser = wr
+		logContext := zerolog.New(wr).
 			With().
 			Timestamp().
-			Caller().
-			Logger()
-		cfg.Logger = NewZerologLogger(&l)
+			Str("service", cfg.ServiceName)
+
+		// Caller is expensive. Only enable it in non-production environments.
+		if !isProd {
+			logContext = logContext.Caller()
+		}
+
+		log := logContext.Logger()
+		zerolog.DefaultContextLogger = &log
+		cfg.Logger = NewZerologLogger(&log)
 	}
 
 	if cfg.LogStore == nil {
@@ -108,11 +153,22 @@ func applyDefaults(cfg *Config) {
 	if cfg.SignatureTimestampExpired == 0 {
 		cfg.SignatureTimestampExpired = constants.TimestampExpired
 	}
+
+	return logCloser
 }
 
 // Config returns a copy of the manager's configuration.
 func (m *Manager) Config() Config {
 	return m.cfg
+}
+
+// Close cleans up any resources created by the Manager (e.g. background logger).
+// Call this during graceful shutdown to prevent log loss.
+func (m *Manager) Close() error {
+	if m.logCloser != nil {
+		return m.logCloser.Close()
+	}
+	return nil
 }
 
 func (m *Manager) envProd() bool {
