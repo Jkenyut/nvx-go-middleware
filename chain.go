@@ -133,7 +133,7 @@ func (m *Manager) PublicAuthChain(cfg *ChainConfig) func(http.Handler) http.Hand
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
 		if cfg.UseChiRateLimitAuth {
-			handler = RateLimit(cfg.LimiterConfig, m.cfg.PrivateKeySignature)(handler)
+			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
 		handler = m.EnsurePublicAuth(handler)
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAuth)
@@ -145,7 +145,7 @@ func (m *Manager) PublicAuthChain(cfg *ChainConfig) func(http.Handler) http.Hand
 func (m *Manager) PublicAPIKeyChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
-		if cfg.UseChiRateLimitPublic {
+		if cfg.UseChiRateLimitAuth {
 			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
 		}
 		handler = m.EnsurePublicAPIKey(handler)
