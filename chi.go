@@ -3,6 +3,7 @@ package middleware
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
@@ -193,26 +194,42 @@ func keyByHeader(r *http.Request, header string) (string, error) {
 	return headerName, nil
 }
 
+func detectProtocol(r *http.Request) string {
+	if r.Header.Get("Upgrade") == "websocket" {
+		return "websocket"
+	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+		return "grpc"
+	}
+	if strings.Contains(r.URL.Path, "graphql") {
+		return "graphql"
+	}
+	return "rest"
+}
+
 func buildRateKeyPublic(r *http.Request, zone, signature string) string {
 	ip, _ := keyByHeader(r, constants.HeaderIP)
 	endpoint, _ := httprate.KeyByEndpoint(r)
 	userAgent, _ := keyByHeader(r, constants.HeaderUserAgent)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
-	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:ip:%s:endpoint:%s:useragent:%s:appid:%s", zone, ip, endpoint, userAgent, appID))
+	protocol := detectProtocol(r)
+	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:protocol:%s:method:%s:ip:%s:endpoint:%s:useragent:%s:appid:%s", zone, protocol, r.Method, ip, endpoint, userAgent, appID))
 }
 
 func buildRateKeyPublicAPIKey(r *http.Request, zone, signature string) string {
 	endpoint, _ := httprate.KeyByEndpoint(r)
 	apiKey, _ := keyByHeader(r, constants.HeaderAPIKey)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
-	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:endpoint:%s:apikey:%s:appid:%s", zone, endpoint, apiKey, appID))
+	protocol := detectProtocol(r)
+	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:apikey:%s:appid:%s", zone, protocol, r.Method, endpoint, apiKey, appID))
 }
 
 func buildRateKeyPublicAuth(r *http.Request, zone, signature string) string {
 	endpoint, _ := httprate.KeyByEndpoint(r)
 	tokenKey, _ := keyByHeader(r, constants.HeaderToken)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
-	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:endpoint:%s:token:%s:appid:%s", zone, endpoint, tokenKey, appID))
+	protocol := detectProtocol(r)
+	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:token:%s:appid:%s", zone, protocol, r.Method, endpoint, tokenKey, appID))
 }
 
 // RateKeyInjector injects a rate key into the request header based on the authentication type.
