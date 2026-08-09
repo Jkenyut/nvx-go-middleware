@@ -90,7 +90,7 @@ func applyDefaults(cfg *Config) io.Closer {
 	}
 
 	if cfg.Limits.RequestTimeout == 0 {
-		cfg.Limits.RequestTimeout = 60 * time.Second
+		cfg.Limits.RequestTimeout = 60
 	}
 	if cfg.Limits.RequestBodyLimitSize == 0 {
 		cfg.Limits.RequestBodyLimitSize = constants.RequestBodyLimitSize
