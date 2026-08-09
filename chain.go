@@ -16,7 +16,7 @@ import (
 // ChainFeatures configures which middleware features are enabled.
 type ChainFeatures struct {
 	UseChiCompress        bool `yaml:"useChiCompress" default:"true"`
-	UseChiTimeout         bool `yaml:"useChiTimeout" default:"true"`
+	UseChiTimeout         bool `yaml:"useChiTimeout" default:"false"`
 	UseChiThrottle        bool `yaml:"useChiThrottle" default:"false"`
 	UseChiRateLimitAuth   bool `yaml:"useChiRateLimitAuth" default:"false"`
 	UseChiRateLimitPublic bool `yaml:"useChiRateLimitPublic" default:"false"`
@@ -31,7 +31,7 @@ type ChainCompression struct {
 // ChainThrottle configures concurrent request throttling.
 type ChainThrottle struct {
 	ThrottleLimit   int           `yaml:"throttleLimit" default:"100"`
-	ThrottleTimeout time.Duration `yaml:"throttleTimeout" default:"30s"`
+	ThrottleTimeout time.Duration `yaml:"throttleTimeout" default:"30"` // seconds
 	ThrottleBacklog int           `yaml:"throttleBacklog" default:"100"`
 }
 
@@ -48,11 +48,11 @@ func DefaultChainConfig() ChainConfig {
 	return ChainConfig{
 		Features: ChainFeatures{
 			UseChiCompress:        true,
-			UseChiTimeout:         true,
+			UseChiTimeout:         false,
 			UseChiThrottle:        false,
-			UseChiStripSlashes:    true,
 			UseChiRateLimitAuth:   false,
 			UseChiRateLimitPublic: false,
+			UseChiStripSlashes:    true,
 		},
 		Compression: ChainCompression{
 			CompressionLevel: 5,

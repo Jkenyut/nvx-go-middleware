@@ -78,7 +78,7 @@ type ConfigLimiter struct {
 	// RateLimitRequests is the number of requests allowed per window.
 	RateLimitRequests int `yaml:"rateLimitRequests" default:"100"`
 	// RateLimitWindow is the duration of the rate limit window.
-	RateLimitWindow time.Duration `yaml:"rateLimitWindow" default:"1m"`
+	RateLimitWindow time.Duration `yaml:"rateLimitWindow" default:"1"` // minutes
 	// Counter is the backend storage for the rate limiter limits (e.g., memory, redis).
 	Counter httprate.LimitCounter `yaml:"-"`
 	// PreRequestOnBeforeLimiter is a hook executed before the rate limiter check.
