@@ -56,7 +56,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 			// ── Panic recovery ────────────────────────────────────────
 			defer func() {
 				if rec := recover(); rec != nil {
-					if m.cfg.EnableTelemetry {
+					if m.cfg.Core.EnableTelemetry {
 						span := trace.SpanFromContext(r.Context())
 						if span.SpanContext().IsValid() {
 							span.RecordError(fmt.Errorf("panic: %v", rec))
@@ -64,7 +64,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 						}
 					}
 					m.cfg.Logger.Error().
-						Str("service", m.cfg.ServiceName).
+						Str("service", m.cfg.Core.ServiceName).
 						Str("transaction_id", transactionID).
 						Interface("panic", rec).
 						Msg("panic in GraphQL handler")
@@ -88,15 +88,15 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 			// ── Operation name extraction ─────────────────────────────
 			var gqlBody graphqlRequestBody
 			if r.Method == http.MethodPost {
-				raw, err := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
+				raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
 				if err == nil && len(raw) > 0 {
 					_ = sonic.Unmarshal(raw, &gqlBody)
 				}
 			}
 
-			operationName := gqlBody.OperationName
-			if operationName == "" {
-				operationName = "anonymous"
+			operationName := ResolveGraphQLOperation(r)
+			if operationName == "anonymous" && gqlBody.OperationName != "" {
+				operationName = gqlBody.OperationName
 			}
 			r.Header.Set("X-GraphQL-Operation", operationName)
 
@@ -112,7 +112,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				}
 			}
 
-			if m.cfg.EnableTelemetry {
+			if m.cfg.Core.EnableTelemetry {
 				span := trace.SpanFromContext(r.Context())
 				if span.SpanContext().IsValid() {
 					span.SetName("GraphQL " + operationName)
@@ -129,7 +129,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 			}
 
 			start := time.Now()
-			rw = wrapResponseWriter(w, r, int(m.cfg.ResponseBodyLogLimitSize))
+			rw = wrapResponseWriter(w, r, int(m.cfg.Logging.ResponseBodyLogLimitSize))
 
 			IDAuditLog := cryptoutil.V7()
 			entry := model.AuditLog{
@@ -148,7 +148,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				RequestBody:     gqlBody,
 				ResponseBody:    nil,
 				Protocol:        "GraphQL",
-				ServiceName:     m.cfg.ServiceName,
+				ServiceName:     m.cfg.Core.ServiceName,
 				UserAgent:       r.UserAgent(),
 				ErrorMessage:    "",
 			}
@@ -160,7 +160,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				if status == 0 {
 					status = http.StatusInternalServerError
 				}
-				if m.cfg.EnableTelemetry {
+				if m.cfg.Core.EnableTelemetry {
 					span := trace.SpanFromContext(r.Context())
 					if span.SpanContext().IsValid() && status >= 500 {
 						span.SetStatus(codes.Error, fmt.Sprintf("HTTP %d", status))
@@ -169,7 +169,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				entry.StatusCode = status
 				entry.LatencyMS = time.Since(start).Milliseconds()
 				entry.ResponseHeaders = normalizeHeadersJSON(rw.Header())
-				if m.cfg.LogResponseBodies {
+				if m.cfg.Logging.LogResponseBodies {
 					entry.ResponseBody = normalizeBodyRaw(rw.Body())
 				}
 
@@ -190,8 +190,8 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 
 		var handler http.Handler = coreHandler
 
-		if m.cfg.EnableTelemetry {
-			handler = otelhttp.NewMiddleware(m.cfg.ServiceName)(handler)
+		if m.cfg.Core.EnableTelemetry {
+			handler = otelhttp.NewMiddleware(m.cfg.Core.ServiceName)(handler)
 		}
 
 		handler = m.TrustProxy(handler)
@@ -234,7 +234,7 @@ func isGraphQLIntrospection(query string) bool {
 func (m *Manager) GraphQLBlockIntrospection(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
-			raw, err := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
+			raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
 			if err == nil && len(raw) > 0 {
 				var body graphqlRequestBody
 				if sonic.Unmarshal(raw, &body) == nil && isGraphQLIntrospection(body.Query) {
@@ -247,4 +247,28 @@ func (m *Manager) GraphQLBlockIntrospection(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// ResolveGraphQLOperation attempts to resolve the GraphQL operation name from
+// the request header, query parameters, or body.
+func ResolveGraphQLOperation(r *http.Request) string {
+	if op := r.Header.Get("X-GraphQL-Operation"); op != "" {
+		return op
+	}
+	if r.Method == http.MethodGet {
+		if op := r.URL.Query().Get("operationName"); op != "" {
+			return op
+		}
+	}
+	if r.Method == http.MethodPost {
+		// Limit reading to 32KB to avoid excessive overhead when parsing operation name
+		raw, err := ReadAndRestoreBody(r, 32*1024)
+		if err == nil && len(raw) > 0 {
+			var body graphqlRequestBody
+			if sonic.Unmarshal(raw, &body) == nil && body.OperationName != "" {
+				return body.OperationName
+			}
+		}
+	}
+	return "anonymous"
 }

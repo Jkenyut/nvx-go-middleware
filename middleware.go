@@ -41,7 +41,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 			if rec := recover(); rec != nil {
 				stack := string(debug.Stack())
 				m.cfg.Logger.Error().
-					Str("service", m.cfg.ServiceName).
+					Str("service", m.cfg.Core.ServiceName).
 					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Str("error", fmt.Sprintf("%v", rec)).
 					Str("method", r.Method).
@@ -49,7 +49,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					Str("remote_addr", r.RemoteAddr).
 					Msgf("panic recovered:\n%s", stack)
 
-				if m.cfg.EnableTelemetry {
+				if m.cfg.Core.EnableTelemetry {
 					span := trace.SpanFromContext(r.Context())
 					span.RecordError(fmt.Errorf("panic: %v", rec))
 					span.SetStatus(codes.Error, "panic recovered")
@@ -58,14 +58,14 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 				// Abort if response already started
 				if ww, ok := w.(chimiddleware.WrapResponseWriter); ok && ww.Status() != 0 {
 					m.cfg.Logger.Error().
-						Str("service", m.cfg.ServiceName).
+						Str("service", m.cfg.Core.ServiceName).
 						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 						Msg("response already written, cannot recover")
 					return
 				}
 				if rw, ok := w.(*responseRecorder); ok && rw.Status() != 0 {
 					m.cfg.Logger.Error().
-						Str("service", m.cfg.ServiceName).
+						Str("service", m.cfg.Core.ServiceName).
 						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 						Msg("response already written, cannot recover")
 					return
@@ -88,7 +88,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		if existingRw, ok := w.(*responseRecorder); ok {
 			rw = existingRw
 		} else {
-			rw = wrapResponseWriter(w, r, int(m.cfg.ResponseBodyLogLimitSize))
+			rw = wrapResponseWriter(w, r, int(m.cfg.Logging.ResponseBodyLogLimitSize))
 		}
 
 		IDAuditLog := cryptoutil.V7()
@@ -101,7 +101,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			r.Header.Set(constants.HeaderTransactionID, transactionID)
 		}
 
-		if m.cfg.EnableTelemetry {
+		if m.cfg.Core.EnableTelemetry {
 			span := trace.SpanFromContext(r.Context())
 			span.SetAttributes(
 				attribute.String("nvx.transaction_id", transactionID),
@@ -122,11 +122,11 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		requestHeadersBytes := normalizeHeadersJSON(r.Header)
 
 		var reqBodyBytes any
-		if m.cfg.LogRequestBodies {
-			raw, err := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
+		if m.cfg.Logging.LogRequestBodies {
+			raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
 			if err != nil {
 				m.cfg.Logger.Error().
-					Str("service", m.cfg.ServiceName).
+					Str("service", m.cfg.Core.ServiceName).
 					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Str("transaction_id", transactionID).
 					Err(err).
@@ -143,7 +143,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		// Ensure cleanup and logging ALWAYS happens, even on panics.
 		defer func() {
 			var resBodyBytes any
-			if m.cfg.LogResponseBodies {
+			if m.cfg.Logging.LogResponseBodies {
 				resBodyBytes = normalizeBodyRaw(rw.Body())
 			}
 
@@ -169,14 +169,14 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				RequestBody:     reqBodyBytes,
 				ResponseBody:    resBodyBytes,
 				Protocol:        "HTTP " + r.Proto,
-				ServiceName:     m.cfg.ServiceName,
+				ServiceName:     m.cfg.Core.ServiceName,
 				UserAgent:       r.UserAgent(),
 				ErrorMessage:    "",
 			}
 
 			if err := m.cfg.LogStore.Save(r.Context(), &entry); err != nil {
 				m.cfg.Logger.Error().
-					Str("service", m.cfg.ServiceName).
+					Str("service", m.cfg.Core.ServiceName).
 					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Str("transaction_id", transactionID).
 					Err(err).
@@ -226,7 +226,7 @@ func normalizeHeadersJSON(h http.Header) []byte {
 // (e.g., X-Content-Type-Options, X-Frame-Options, HSTS).
 func (m *Manager) SecureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for key, value := range m.cfg.SecurityHeaders {
+		for key, value := range m.cfg.Security.SecurityHeaders {
 			w.Header().Set(key, value)
 		}
 		next.ServeHTTP(w, r)
@@ -237,13 +237,13 @@ func (m *Manager) SecureHeaders(next http.Handler) http.Handler {
 // Useful for removing Server, X-Powered-By, and similar fingerprinting headers.
 func (m *Manager) RemoveHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if len(m.cfg.HeadersToRemove) == 0 {
+		if len(m.cfg.Security.HeadersToRemove) == 0 {
 			next.ServeHTTP(w, r)
 			return
 		}
 		rw := &headerCleanerResponseWriter{
 			ResponseWriter:  w,
-			headersToRemove: m.cfg.HeadersToRemove,
+			headersToRemove: m.cfg.Security.HeadersToRemove,
 		}
 		next.ServeHTTP(rw, r)
 	})
@@ -270,7 +270,7 @@ func (w *headerCleanerResponseWriter) WriteHeader(statusCode int) {
 // communication are present and that the request signature is valid.
 func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !m.validateHeaders(w, r, m.cfg.RequiredInternalHeaders) {
+		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredInternalHeaders) {
 			return
 		}
 
@@ -298,10 +298,10 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 // It checks header presence, timestamp validity, and request signature.
 func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !m.validateHeaders(w, r, m.cfg.RequiredPublicAuthHeaders) {
+		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicAuthHeaders) {
 			return
 		}
-		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.SignatureTimestampExpired); err != nil {
+		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
 			writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
@@ -321,10 +321,10 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 // It checks header presence, timestamp validity, and request signature.
 func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !m.validateHeaders(w, r, m.cfg.RequiredPublicHeaders) {
+		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicHeaders) {
 			return
 		}
-		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.SignatureTimestampExpired); err != nil {
+		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
 			writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
@@ -344,10 +344,10 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 // It checks header presence, timestamp validity, and request signature.
 func (m *Manager) EnsurePublicAPIKey(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !m.validateHeaders(w, r, m.cfg.RequiredPublicAPIKeyHeaders) {
+		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicAPIKeyHeaders) {
 			return
 		}
-		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.SignatureTimestampExpired); err != nil {
+		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
 			writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
@@ -412,26 +412,26 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 // validateSignatureInternalHeaders assembles the internal signature canonical string
 // from the configured signature headers and delegates to validateSignatureHeaders.
 func (m *Manager) validateSignatureInternalHeaders(r *http.Request) (valid bool, signature string) {
-	authHeaders := make([]string, 0, len(m.cfg.RequiredSignatureInternalHeaders))
-	for _, name := range m.cfg.RequiredSignatureInternalHeaders {
+	authHeaders := make([]string, 0, len(m.cfg.Headers.RequiredSignatureInternalHeaders))
+	for _, name := range m.cfg.Headers.RequiredSignatureInternalHeaders {
 		authHeaders = append(authHeaders, r.Header.Get(name))
 	}
-	return m.validateSignatureHeaders(r, m.cfg.PrivateKeySignature, authHeaders)
+	return m.validateSignatureHeaders(r, m.cfg.Security.PrivateKeySignature, authHeaders)
 }
 
 // validateSignaturePublicHeaders assembles the public signature canonical string
 // (method + URI + configured headers + body token) and delegates to validateSignatureHeaders.
 func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (valid bool, signature string) {
-	parts := make([]string, 0, len(m.cfg.RequiredSignaturePublicHeaders)+3)
+	parts := make([]string, 0, len(m.cfg.Headers.RequiredSignaturePublicHeaders)+3)
 	parts = append(parts, strings.ToUpper(r.Method), r.RequestURI)
-	for _, name := range m.cfg.RequiredSignaturePublicHeaders {
+	for _, name := range m.cfg.Headers.RequiredSignaturePublicHeaders {
 		parts = append(parts, r.Header.Get(name))
 	}
 
-	bodyBytes, err := ReadAndRestoreBody(r, m.cfg.RequestBodyNonFileLimitSize)
+	bodyBytes, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
 	if err != nil {
 		m.cfg.Logger.Error().
-			Str("service", m.cfg.ServiceName).
+			Str("service", m.cfg.Core.ServiceName).
 			Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 			Err(err).
 			Msg("failed to read request body for signature validation")
@@ -439,7 +439,7 @@ func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (valid bool, s
 	}
 	parts = append(parts, ResolveBodyToken(r.Header.Get("Content-Type"), bodyBytes))
 
-	return m.validateSignatureHeaders(r, m.cfg.PublicKeySignature, parts)
+	return m.validateSignatureHeaders(r, m.cfg.Security.PublicKeySignature, parts)
 }
 
 // validateSignatureHeaders computes the expected HMAC signature and compares it
@@ -505,7 +505,7 @@ func isMultipart(contentType string) bool {
 
 // isTrustedIP checks if a given IP string is in the trusted proxies list.
 func (m *Manager) isTrustedIP(ipStr string) bool {
-	for _, proxy := range m.cfg.TrustedProxies {
+	for _, proxy := range m.cfg.Security.TrustedProxies {
 		if proxy == ipStr {
 			return true
 		}
@@ -536,7 +536,7 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 
 			// Validate Content-Type
 			isAllowed := false
-			for _, allowed := range m.cfg.AllowedContentTypes {
+			for _, allowed := range m.cfg.Security.AllowedContentTypes {
 				if strings.Contains(contentType, allowed) {
 					isAllowed = true
 					break
@@ -549,21 +549,21 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 
 			// File upload: apply overall limit only
 			if isMultipart(contentType) {
-				if r.ContentLength > m.cfg.RequestBodyLimitSize {
+				if r.ContentLength > m.cfg.Limits.RequestBodyLimitSize {
 					writeJSON(w, http.StatusRequestEntityTooLarge, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
 					return
 				}
-				r.Body = http.MaxBytesReader(w, r.Body, m.cfg.RequestBodyLimitSize)
+				r.Body = http.MaxBytesReader(w, r.Body, m.cfg.Limits.RequestBodyLimitSize)
 				next.ServeHTTP(w, r)
 				return
 			}
 
 			// Non-file: apply tighter non-file limit
-			if r.ContentLength > m.cfg.RequestBodyNonFileLimitSize {
+			if r.ContentLength > m.cfg.Limits.RequestBodyNonFileLimitSize {
 				writeJSON(w, http.StatusRequestEntityTooLarge, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, m.cfg.RequestBodyNonFileLimitSize)
+			r.Body = http.MaxBytesReader(w, r.Body, m.cfg.Limits.RequestBodyNonFileLimitSize)
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -686,7 +686,7 @@ func ResolveBodyToken(contentType string, body []byte) string {
 // generation are present.
 func (m *Manager) EnsurePreSignHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !m.validateHeaders(w, r, m.cfg.RequiredSignaturePublicHeaders) {
+		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredSignaturePublicHeaders) {
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -712,20 +712,20 @@ func (m *Manager) PreSignHandler(cfg *ChainConfig) http.Handler {
 				return
 			}
 
-			if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.SignatureTimestampExpired); err != nil {
+			if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
 				writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 				return
 			}
 
-			canonical := make([]string, 0, len(m.cfg.RequiredSignaturePublicHeaders)+3)
+			canonical := make([]string, 0, len(m.cfg.Headers.RequiredSignaturePublicHeaders)+3)
 			canonical = append(canonical, strings.ToUpper(req.Method), req.URI)
-			for _, name := range m.cfg.RequiredSignaturePublicHeaders {
+			for _, name := range m.cfg.Headers.RequiredSignaturePublicHeaders {
 				canonical = append(canonical, r.Header.Get(name))
 			}
 			canonical = append(canonical, req.Body)
 
 			writeJSON(w, http.StatusOK, response.Success(r.Context(), model.PresignResponse{
-				Signature: cryptoutil.Signature(m.cfg.PublicKeySignature, canonical...),
+				Signature: cryptoutil.Signature(m.cfg.Security.PublicKeySignature, canonical...),
 			}))
 		})))
 }

@@ -37,10 +37,12 @@ func (m *MockLogStore) GetLogs() []model.AuditLog {
 // newTestManager creates a Manager with minimal config suitable for unit tests.
 func newTestManager(overrides ...func(*Config)) *Manager {
 	cfg := Config{
-		PublicKeySignature:  "test-public-key",
-		PrivateKeySignature: "test-private-key",
-		AllowedOrigins:      []string{"*"},
-		LogStore:            &MockLogStore{},
+		Security: ConfigSecurity{
+			PublicKeySignature:  "test-public-key",
+			PrivateKeySignature: "test-private-key",
+			AllowedOrigins:      []string{"*"},
+		},
+		LogStore: &MockLogStore{},
 	}
 	for _, fn := range overrides {
 		fn(&cfg)
@@ -63,22 +65,26 @@ func TestNewWithError(t *testing.T) {
 		{
 			name: "valid config",
 			cfg: Config{
-				PublicKeySignature:  "pub",
-				PrivateKeySignature: "priv",
-				AllowedOrigins:      []string{"*"},
+				Security: ConfigSecurity{
+					PublicKeySignature:  "pub",
+					PrivateKeySignature: "priv",
+					AllowedOrigins:      []string{"*"},
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name:    "missing keys",
-			cfg:     Config{AllowedOrigins: []string{"*"}},
+			cfg:     Config{Security: ConfigSecurity{AllowedOrigins: []string{"*"}}},
 			wantErr: true,
 		},
 		{
 			name: "missing origins",
 			cfg: Config{
-				PublicKeySignature:  "pub",
-				PrivateKeySignature: "priv",
+				Security: ConfigSecurity{
+					PublicKeySignature:  "pub",
+					PrivateKeySignature: "priv",
+				},
 			},
 			wantErr: true,
 		},
@@ -93,7 +99,6 @@ func TestNewWithError(t *testing.T) {
 		})
 	}
 }
-
 
 // ─── Recoverer ───────────────────────────────────────────────────────────────
 
@@ -166,9 +171,9 @@ func TestLogger(t *testing.T) {
 func TestMaxBodySize(t *testing.T) {
 	mgr := newTestManager(func(c *Config) {
 		// Set both limits; non-file (JSON) limit is the tighter constraint for regular requests.
-		c.RequestBodyLimitSize = 1024 * 1024 // 1 MB (file)
-		c.RequestBodyNonFileLimitSize = 100  // 100 bytes (non-file: JSON etc.)
-		c.AllowedContentTypes = []string{"application/json", "multipart/form-data"}
+		c.Limits.RequestBodyLimitSize = 1024 * 1024 // 1 MB (file)
+		c.Limits.RequestBodyNonFileLimitSize = 100  // 100 bytes (non-file: JSON etc.)
+		c.Security.AllowedContentTypes = []string{"application/json", "multipart/form-data"}
 	})
 
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -260,7 +265,7 @@ func TestSecureHeaders(t *testing.T) {
 
 func TestCORS(t *testing.T) {
 	mgr := newTestManager(func(c *Config) {
-		c.AllowedOrigins = []string{"https://example.com"}
+		c.Security.AllowedOrigins = []string{"https://example.com"}
 	})
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 
@@ -306,7 +311,7 @@ func TestCORS(t *testing.T) {
 func TestTrustProxy(t *testing.T) {
 	t.Run("trusted proxy extracts XFF", func(t *testing.T) {
 		mgr := newTestManager(func(c *Config) {
-			c.TrustedProxies = []string{"192.168.1.0/24"}
+			c.Security.TrustedProxies = []string{"192.168.1.0/24"}
 		})
 
 		var capturedIP string
@@ -326,7 +331,7 @@ func TestTrustProxy(t *testing.T) {
 
 	t.Run("untrusted proxy keeps remote IP", func(t *testing.T) {
 		mgr := newTestManager(func(c *Config) {
-			c.TrustedProxies = []string{"10.0.0.1"}
+			c.Security.TrustedProxies = []string{"10.0.0.1"}
 		})
 
 		var capturedIP string
@@ -465,7 +470,7 @@ func TestGraphqlQueryDepth(t *testing.T) {
 
 func TestRemoveHeaders(t *testing.T) {
 	mgr := newTestManager(func(c *Config) {
-		c.HeadersToRemove = []string{"X-Powered-By", "Server"}
+		c.Security.HeadersToRemove = []string{"X-Powered-By", "Server"}
 	})
 
 	handler := mgr.RemoveHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -498,9 +503,8 @@ func BenchmarkLogger(b *testing.B) {
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set(constants.HeaderRequestID, "req-bench")
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		handler.ServeHTTP(httptest.NewRecorder(), req)
 	}
 }
@@ -510,18 +514,17 @@ func BenchmarkRecoverer(b *testing.B) {
 	handler := mgr.Recoverer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 	req := httptest.NewRequest("GET", "/test", nil)
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		handler.ServeHTTP(httptest.NewRecorder(), req)
 	}
 }
 
 func BenchmarkResolveBodyToken(b *testing.B) {
 	body := bytes.Repeat([]byte("x"), 4096)
-	b.ResetTimer()
+
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		ResolveBodyToken("application/json", body)
 	}
 }

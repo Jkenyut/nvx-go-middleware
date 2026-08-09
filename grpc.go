@@ -58,7 +58,7 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		ctx = activity.WithUserIP(ctx, get(constants.HeaderIP))
 		ctx = activity.WithUserType(ctx, get(constants.HeaderUserType))
 
-		if m.cfg.EnableTelemetry {
+		if m.cfg.Core.EnableTelemetry {
 			span := trace.SpanFromContext(ctx)
 			if !span.SpanContext().IsValid() {
 				m.cfg.Logger.Error().Msg("🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
@@ -93,7 +93,7 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 			RequestBody:     req,
 			ResponseBody:    nil,
 			Protocol:        "gRPC Unary",
-			ServiceName:     m.cfg.ServiceName,
+			ServiceName:     m.cfg.Core.ServiceName,
 			UserAgent:       get("user-agent"),
 			ErrorMessage:    "",
 		}
@@ -126,14 +126,14 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		// Panic recovery
 		defer func() {
 			if rec := recover(); rec != nil {
-				if m.cfg.EnableTelemetry {
+				if m.cfg.Core.EnableTelemetry {
 					span := trace.SpanFromContext(ctx)
 					span.RecordError(fmt.Errorf("panic: %v", rec))
 					span.SetStatus(otelcodes.Error, "panic recovered")
 				}
 				stack := string(debug.Stack())
 				m.cfg.Logger.Error().
-					Str("service", m.cfg.ServiceName).
+					Str("service", m.cfg.Core.ServiceName).
 					Str("transaction_id", transactionID).
 					Str("method", info.FullMethod).
 					Interface("panic", rec).
@@ -182,7 +182,7 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 		ctx = activity.WithUserIP(ctx, get(constants.HeaderIP))
 		ctx = activity.WithUserType(ctx, get(constants.HeaderUserType))
 
-		if m.cfg.EnableTelemetry {
+		if m.cfg.Core.EnableTelemetry {
 			span := trace.SpanFromContext(ctx)
 			if !span.SpanContext().IsValid() {
 				m.cfg.Logger.Error().Msg("🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
@@ -218,7 +218,7 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			RequestBody:     nil,
 			ResponseBody:    nil,
 			Protocol:        "gRPC Stream",
-			ServiceName:     m.cfg.ServiceName,
+			ServiceName:     m.cfg.Core.ServiceName,
 			UserAgent:       get("user-agent"),
 			ErrorMessage:    "",
 		}
@@ -249,14 +249,14 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 
 		defer func() {
 			if rec := recover(); rec != nil {
-				if m.cfg.EnableTelemetry {
+				if m.cfg.Core.EnableTelemetry {
 					span := trace.SpanFromContext(ctx)
 					span.RecordError(fmt.Errorf("panic: %v", rec))
 					span.SetStatus(otelcodes.Error, "panic recovered")
 				}
 				stack := string(debug.Stack())
 				m.cfg.Logger.Error().
-					Str("service", m.cfg.ServiceName).
+					Str("service", m.cfg.Core.ServiceName).
 					Str("transaction_id", transactionID).
 					Str("method", info.FullMethod).
 					Interface("panic", rec).
@@ -286,7 +286,7 @@ func (w *wrappedServerStream) Context() context.Context { return w.ctx }
 func (m *Manager) NewGRPCServer(opts ...grpc.ServerOption) *grpc.Server {
 	var defaultOpts []grpc.ServerOption
 
-	if m.cfg.EnableTelemetry {
+	if m.cfg.Core.EnableTelemetry {
 		defaultOpts = append(defaultOpts, grpc.StatsHandler(otelgrpc.NewServerHandler()))
 	}
 

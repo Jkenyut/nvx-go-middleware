@@ -11,12 +11,16 @@ import (
 func main() {
 	// 1. Initialize Middleware Manager
 	mgr, err := mw.NewWithError(&mw.Config{
-		PublicKeySignature:  "your-rsa-public-key-here",
-		PrivateKeySignature: "your-rsa-private-key-here",
-		AllowedOrigins:      []string{"*"},
-		Env:                 "development",
-		EnableTelemetry:     true, // Enable OpenTelemetry
-		ServiceName:         "my-grpc-service",
+		Security: mw.ConfigSecurity{
+			PublicKeySignature:  "your-rsa-public-key-here",
+			PrivateKeySignature: "your-rsa-private-key-here",
+			AllowedOrigins:      []string{"*"},
+		},
+		Core: mw.ConfigCore{
+			Env:             "development",
+			EnableTelemetry: true, // Enable OpenTelemetry
+			ServiceName:     "my-grpc-service",
+		},
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize middleware manager: %v", err)

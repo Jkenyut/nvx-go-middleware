@@ -35,7 +35,7 @@ func applyDefaults(cfg *Config) io.Closer {
 	var logCloser io.Closer
 
 	if cfg.Logger == nil {
-		env := cfg.Env // defaults to "development" if empty
+		env := cfg.Core.Env // defaults to "development" if empty
 
 		var writer io.Writer
 		isProd := env == "production" || env == "prod"
@@ -73,7 +73,7 @@ func applyDefaults(cfg *Config) io.Closer {
 		logContext := zerolog.New(wr).
 			With().
 			Timestamp().
-			Str("service", cfg.ServiceName)
+			Str("service", cfg.Core.ServiceName)
 
 		// Caller is expensive. Only enable it in non-production environments.
 		if !isProd {
@@ -89,69 +89,69 @@ func applyDefaults(cfg *Config) io.Closer {
 		cfg.LogStore = &ConsoleStore{logger: cfg.Logger}
 	}
 
-	if cfg.RequestTimeout == 0 {
-		cfg.RequestTimeout = 60 * time.Second
+	if cfg.Limits.RequestTimeout == 0 {
+		cfg.Limits.RequestTimeout = 60 * time.Second
 	}
-	if cfg.RequestBodyLimitSize == 0 {
-		cfg.RequestBodyLimitSize = constants.RequestBodyLimitSize
+	if cfg.Limits.RequestBodyLimitSize == 0 {
+		cfg.Limits.RequestBodyLimitSize = constants.RequestBodyLimitSize
 	}
-	if cfg.RequestBodyNonFileLimitSize == 0 {
-		cfg.RequestBodyNonFileLimitSize = constants.RequestBodyNonFileLimitSize
+	if cfg.Limits.RequestBodyNonFileLimitSize == 0 {
+		cfg.Limits.RequestBodyNonFileLimitSize = constants.RequestBodyNonFileLimitSize
 	}
-	if cfg.ResponseBodyLogLimitSize == 0 {
-		cfg.ResponseBodyLogLimitSize = constants.ResponseBodyLogLimitSize
+	if cfg.Logging.ResponseBodyLogLimitSize == 0 {
+		cfg.Logging.ResponseBodyLogLimitSize = constants.ResponseBodyLogLimitSize
 	}
-	if cfg.ServiceName == "" {
-		cfg.ServiceName = "unknown-service"
+	if cfg.Core.ServiceName == "" {
+		cfg.Core.ServiceName = "unknown-service"
 	}
-	if cfg.Env == "" {
-		cfg.Env = "development"
+	if cfg.Core.Env == "" {
+		cfg.Core.Env = "development"
 	}
 
-	if len(cfg.RequiredPublicAuthHeaders) == 0 {
-		cfg.RequiredPublicAuthHeaders = constants.RequiredPublicAuthHeaders
+	if len(cfg.Headers.RequiredPublicAuthHeaders) == 0 {
+		cfg.Headers.RequiredPublicAuthHeaders = constants.RequiredPublicAuthHeaders
 	}
-	if len(cfg.RequiredPublicHeaders) == 0 {
-		cfg.RequiredPublicHeaders = constants.RequiredPublicHeaders
+	if len(cfg.Headers.RequiredPublicHeaders) == 0 {
+		cfg.Headers.RequiredPublicHeaders = constants.RequiredPublicHeaders
 	}
-	if len(cfg.RequiredInternalHeaders) == 0 {
-		cfg.RequiredInternalHeaders = constants.RequiredInternalHeaders
+	if len(cfg.Headers.RequiredInternalHeaders) == 0 {
+		cfg.Headers.RequiredInternalHeaders = constants.RequiredInternalHeaders
 	}
-	if len(cfg.RequiredPublicAPIKeyHeaders) == 0 {
-		cfg.RequiredPublicAPIKeyHeaders = constants.RequiredPublicAPIKeyHeaders
+	if len(cfg.Headers.RequiredPublicAPIKeyHeaders) == 0 {
+		cfg.Headers.RequiredPublicAPIKeyHeaders = constants.RequiredPublicAPIKeyHeaders
 	}
-	if len(cfg.RequiredSignaturePublicHeaders) == 0 {
-		cfg.RequiredSignaturePublicHeaders = constants.RequiredSignaturePublicHeaders
+	if len(cfg.Headers.RequiredSignaturePublicHeaders) == 0 {
+		cfg.Headers.RequiredSignaturePublicHeaders = constants.RequiredSignaturePublicHeaders
 	}
-	if len(cfg.RequiredSignatureInternalHeaders) == 0 {
-		cfg.RequiredSignatureInternalHeaders = constants.RequiredSignatureInternalHeaders
+	if len(cfg.Headers.RequiredSignatureInternalHeaders) == 0 {
+		cfg.Headers.RequiredSignatureInternalHeaders = constants.RequiredSignatureInternalHeaders
 	}
-	if cfg.SecurityHeaders == nil {
-		cfg.SecurityHeaders = constants.SecurityHeaders
+	if cfg.Security.SecurityHeaders == nil {
+		cfg.Security.SecurityHeaders = constants.SecurityHeaders
 	}
-	if len(cfg.TrustedProxies) == 0 {
-		cfg.TrustedProxies = []string{}
+	if len(cfg.Security.TrustedProxies) == 0 {
+		cfg.Security.TrustedProxies = []string{}
 	}
-	if len(cfg.AllowedOrigins) == 0 {
-		cfg.AllowedOrigins = []string{"*"}
+	if len(cfg.Security.AllowedOrigins) == 0 {
+		cfg.Security.AllowedOrigins = []string{"*"}
 	}
-	if len(cfg.AllowedContentTypes) == 0 {
-		cfg.AllowedContentTypes = []string{"application/json", "multipart/form-data"}
+	if len(cfg.Security.AllowedContentTypes) == 0 {
+		cfg.Security.AllowedContentTypes = []string{"application/json", "multipart/form-data"}
 	}
-	if len(cfg.AllowedHeaders) == 0 {
-		cfg.AllowedHeaders = uniqueStrings(
+	if len(cfg.Security.AllowedHeaders) == 0 {
+		cfg.Security.AllowedHeaders = uniqueStrings(
 			[]string{"Accept", "Authorization", "Content-Type"},
-			cfg.RequiredPublicAuthHeaders,
-			cfg.RequiredPublicHeaders,
-			cfg.RequiredInternalHeaders,
-			cfg.RequiredPublicAPIKeyHeaders,
+			cfg.Headers.RequiredPublicAuthHeaders,
+			cfg.Headers.RequiredPublicHeaders,
+			cfg.Headers.RequiredInternalHeaders,
+			cfg.Headers.RequiredPublicAPIKeyHeaders,
 		)
 	}
-	if len(cfg.HeadersToRemove) == 0 {
-		cfg.HeadersToRemove = []string{}
+	if len(cfg.Security.HeadersToRemove) == 0 {
+		cfg.Security.HeadersToRemove = []string{}
 	}
-	if cfg.SignatureTimestampExpired == 0 {
-		cfg.SignatureTimestampExpired = constants.TimestampExpired
+	if cfg.Security.SignatureTimestampExpired == 0 {
+		cfg.Security.SignatureTimestampExpired = constants.TimestampExpired
 	}
 
 	return logCloser
@@ -172,7 +172,7 @@ func (m *Manager) Close() error {
 }
 
 func (m *Manager) envProd() bool {
-	return m.cfg.Env == "prod" || m.cfg.Env == "production"
+	return m.cfg.Core.Env == "prod" || m.cfg.Core.Env == "production"
 }
 
 func uniqueStrings(items ...[]string) []string {

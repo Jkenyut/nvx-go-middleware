@@ -13,18 +13,26 @@ import (
 func main() {
 	// Create middleware manager with configuration
 	mgr, err := mw.NewWithError(&mw.Config{
-		PublicKeySignature:        "your-rsa-public-key-here",
-		PrivateKeySignature:       "your-rsa-private-key-here",
-		AllowedOrigins:            []string{"https://example.com", "http://localhost:3000"},
-		TrustedProxies:            []string{"10.0.0.0/8", "172.16.0.0/12"},
-		RequestTimeout:            60 * time.Second,
-		RequestBodyLimitSize:      3 * 1024 * 1024, // 3MB
-		Env:                       "development",
-		HeadersToRemove:           []string{},
-		LogRequestBodies:          true,
-		LogResponseBodies:         true,
-		AllowedContentTypes:       []string{"application/json", "text/plain", "multipart/form-data", "form-data"},
-		SignatureTimestampExpired: 6000000,
+		Security: mw.ConfigSecurity{
+			PublicKeySignature:        "your-rsa-public-key-here",
+			PrivateKeySignature:       "your-rsa-private-key-here",
+			AllowedOrigins:            []string{"https://example.com", "http://localhost:3000"},
+			TrustedProxies:            []string{"10.0.0.0/8", "172.16.0.0/12"},
+			HeadersToRemove:           []string{},
+			AllowedContentTypes:       []string{"application/json", "text/plain", "multipart/form-data", "form-data"},
+			SignatureTimestampExpired: 6000000,
+		},
+		Limits: mw.ConfigLimits{
+			RequestTimeout:       60 * time.Second,
+			RequestBodyLimitSize: 3 * 1024 * 1024, // 3MB
+		},
+		Core: mw.ConfigCore{
+			Env: "development",
+		},
+		Logging: mw.ConfigLogging{
+			LogRequestBodies:  true,
+			LogResponseBodies: true,
+		},
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize middleware manager: %v", err)
@@ -32,10 +40,10 @@ func main() {
 
 	// Create chain config
 	chainCfg := mw.DefaultChainConfig()
-	chainCfg.LimiterConfig.RateLimitRequests = 5
-	chainCfg.LimiterConfig.RateLimitWindow = 10 * time.Second
-	chainCfg.UseChiRateLimitAuth = true
-	chainCfg.UseChiRateLimitPublic = true
+	chainCfg.Limiter.RateLimitRequests = 5
+	chainCfg.Limiter.RateLimitWindow = 10 * time.Second
+	chainCfg.Features.UseChiRateLimitAuth = true
+	chainCfg.Features.UseChiRateLimitPublic = true
 
 	// Create HTTP mux
 	mux := http.NewServeMux()

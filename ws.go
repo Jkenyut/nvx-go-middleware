@@ -65,7 +65,7 @@ func (m *Manager) WebSocketChain(
 			}
 			r = r.WithContext(activity.WithTransactionID(r.Context(), transactionID))
 
-			if m.cfg.EnableTelemetry {
+			if m.cfg.Core.EnableTelemetry {
 				span := trace.SpanFromContext(r.Context())
 				if span.SpanContext().IsValid() {
 					span.SetName("WebSocket Upgrade")
@@ -80,7 +80,7 @@ func (m *Manager) WebSocketChain(
 
 			// Authenticate
 			if authenticator != nil && !authenticator(r) {
-				if m.cfg.EnableTelemetry {
+				if m.cfg.Core.EnableTelemetry {
 					span := trace.SpanFromContext(r.Context())
 					if span.SpanContext().IsValid() {
 						span.SetStatus(codes.Error, constants.ErrMsgInvalidToken)
@@ -97,7 +97,7 @@ func (m *Manager) WebSocketChain(
 			// Panic guard (pre-upgrade)
 			defer func() {
 				if rec := recover(); rec != nil {
-					if m.cfg.EnableTelemetry {
+					if m.cfg.Core.EnableTelemetry {
 						span := trace.SpanFromContext(r.Context())
 						if span.SpanContext().IsValid() {
 							span.RecordError(fmt.Errorf("panic: %v", rec))
@@ -105,7 +105,7 @@ func (m *Manager) WebSocketChain(
 						}
 					}
 					m.cfg.Logger.Error().
-						Str("service", m.cfg.ServiceName).
+						Str("service", m.cfg.Core.ServiceName).
 						Str("transaction_id", transactionID).
 						Interface("panic", rec).
 						Msg("panic in WebSocket handler")
@@ -137,7 +137,7 @@ func (m *Manager) WebSocketChain(
 				RequestBody:     nil, // WebSockets upgrade requests have no body
 				ResponseBody:    nil,
 				Protocol:        "WebSocket",
-				ServiceName:     m.cfg.ServiceName,
+				ServiceName:     m.cfg.Core.ServiceName,
 				UserAgent:       r.UserAgent(),
 				ErrorMessage:    "",
 			}
@@ -149,7 +149,7 @@ func (m *Manager) WebSocketChain(
 				if ww.hijacked {
 					statusCode = http.StatusSwitchingProtocols
 				}
-				if m.cfg.EnableTelemetry {
+				if m.cfg.Core.EnableTelemetry {
 					span := trace.SpanFromContext(r.Context())
 					if span.SpanContext().IsValid() && statusCode >= 500 {
 						span.SetStatus(codes.Error, fmt.Sprintf("HTTP %d", statusCode))
@@ -173,8 +173,8 @@ func (m *Manager) WebSocketChain(
 
 		var handler http.Handler = coreHandler
 
-		if m.cfg.EnableTelemetry {
-			handler = otelhttp.NewMiddleware(m.cfg.ServiceName)(handler)
+		if m.cfg.Core.EnableTelemetry {
+			handler = otelhttp.NewMiddleware(m.cfg.Core.ServiceName)(handler)
 		}
 
 		handler = m.TrustProxy(handler)

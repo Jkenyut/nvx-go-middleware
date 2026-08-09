@@ -6,55 +6,64 @@ import (
 	"time"
 
 	"github.com/Jkenyut/nvx-go-middleware/constants"
+	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-// ChainConfig configures which middleware to use in a middleware chain.
+// ChainFeatures configures which middleware to use in a middleware chain.
 // It allows toggling specific Chi middleware and configuring parameters like compression, throttling, and rate limiting.
+// ChainFeatures configures which middleware features are enabled.
+type ChainFeatures struct {
+	UseChiCompress        bool `yaml:"useChiCompress" default:"true"`
+	UseChiTimeout         bool `yaml:"useChiTimeout" default:"true"`
+	UseChiThrottle        bool `yaml:"useChiThrottle" default:"false"`
+	UseChiRateLimitAuth   bool `yaml:"useChiRateLimitAuth" default:"false"`
+	UseChiRateLimitPublic bool `yaml:"useChiRateLimitPublic" default:"false"`
+	UseChiStripSlashes    bool `yaml:"useChiStripSlashes" default:"true"`
+}
+
+// ChainCompression configures response compression.
+type ChainCompression struct {
+	CompressionLevel int `yaml:"compressionLevel" default:"5"`
+}
+
+// ChainThrottle configures concurrent request throttling.
+type ChainThrottle struct {
+	ThrottleLimit   int           `yaml:"throttleLimit" default:"100"`
+	ThrottleTimeout time.Duration `yaml:"throttleTimeout" default:"30s"`
+	ThrottleBacklog int           `yaml:"throttleBacklog" default:"100"`
+}
+
+// ChainConfig holds the configuration for the middleware chain.
 type ChainConfig struct {
-	// UseChiCompress enables the Chi Compress middleware for response compression.
-	UseChiCompress bool
-	// UseChiTimeout enables the Chi Timeout middleware to set a request processing timeout.
-	UseChiTimeout bool
-	// UseChiThrottle enables the Chi Throttle middleware to limit concurrent requests.
-	UseChiThrottle bool
-	// UseChiRateLimitAuth enables rate limiting for authenticated routes.
-	UseChiRateLimitAuth bool
-	// UseChiRateLimitPublic enables rate limiting for public routes.
-	UseChiRateLimitPublic bool
-	// UseChiStripSlashes enables the Chi StripSlashes middleware to handle trailing slashes.
-	UseChiStripSlashes bool
-
-	// CompressionLevel sets the compression level (1-9) if UseChiCompress is true.
-	CompressionLevel int
-
-	// ThrottleLimit sets the maximum number of concurrent requests if UseChiThrottle is true.
-	ThrottleLimit int
-
-	// ThrottleTimeout sets the max duration to wait for a slot if UseChiThrottle is true.
-	ThrottleTimeout time.Duration
-
-	// ThrottleBacklog sets the maximum size of the backlog queue for throttled requests.
-	ThrottleBacklog int
-	// LimiterConfig holds the configuration for the custom rate limiter.
-	LimiterConfig ConfigLimiter
+	Features    ChainFeatures    `yaml:"features"`
+	Compression ChainCompression `yaml:"compression"`
+	Throttle    ChainThrottle    `yaml:"throttle"`
+	Limiter     ConfigLimiter    `yaml:"limiter"`
 }
 
 // DefaultChainConfig returns a ChainConfig with recommended default values.
 func DefaultChainConfig() ChainConfig {
 	return ChainConfig{
-		UseChiCompress:        true,
-		UseChiTimeout:         true,
-		UseChiThrottle:        false,
-		UseChiStripSlashes:    true,
-		CompressionLevel:      5,
-		ThrottleLimit:         100,
-		ThrottleTimeout:       1 * time.Minute,
-		ThrottleBacklog:       50,
-		UseChiRateLimitAuth:   false,
-		UseChiRateLimitPublic: false,
-		LimiterConfig: ConfigLimiter{
-			RateLimitRequests: 30,
+		Features: ChainFeatures{
+			UseChiCompress:        true,
+			UseChiTimeout:         true,
+			UseChiThrottle:        false,
+			UseChiStripSlashes:    true,
+			UseChiRateLimitAuth:   false,
+			UseChiRateLimitPublic: false,
+		},
+		Compression: ChainCompression{
+			CompressionLevel: 5,
+		},
+		Throttle: ChainThrottle{
+			ThrottleLimit:   100,
+			ThrottleTimeout: 30 * time.Second,
+			ThrottleBacklog: 100,
+		},
+		Limiter: ConfigLimiter{
+			RateLimitRequests: 100,
 			RateLimitWindow:   1 * time.Minute,
 			PreRequestOnBeforeLimiter: func(_ http.ResponseWriter, _ *http.Request) bool {
 				return true
@@ -75,14 +84,14 @@ func (m *Manager) buildInnerChain(cfg *ChainConfig, next http.Handler) http.Hand
 	handler := next
 
 	handler = m.MaxBodySize()(handler)
-	if cfg.UseChiStripSlashes {
+	if cfg.Features.UseChiStripSlashes {
 		handler = m.ChiStripSlashes(handler)
 	}
 	handler = m.RemoveHeaders(handler)
 	handler = m.SecureHeaders(handler)
 
-	if cfg.UseChiCompress {
-		handler = m.ChiCompress(cfg.CompressionLevel)(handler)
+	if cfg.Features.UseChiCompress {
+		handler = m.ChiCompress(cfg.Compression.CompressionLevel)(handler)
 	}
 
 	// Logger only records requests that survived Outer layers (DDoS, Bad Auth)
@@ -97,21 +106,63 @@ func (m *Manager) buildOuterChain(cfg *ChainConfig, handler http.Handler) http.H
 	// TrustProxy MUST run before RateLimit and Validation to resolve Real IP accurately.
 	handler = m.TrustProxy(handler)
 
-	if m.cfg.EnableTelemetry {
-		handler = otelhttp.NewMiddleware(m.cfg.ServiceName)(handler)
+	if m.cfg.Core.EnableTelemetry {
+		handler = otelhttp.NewMiddleware(m.cfg.Core.ServiceName)(handler)
 	}
 
-	if cfg.UseChiTimeout {
-		handler = m.ChiTimeout(m.cfg.RequestTimeout)(handler)
+	if cfg.Features.UseChiTimeout {
+		handler = m.ChiTimeout(m.cfg.Limits.RequestTimeout)(handler)
 	}
-	if cfg.UseChiThrottle {
-		handler = m.ChiThrottleBacklog(cfg.ThrottleLimit, cfg.ThrottleBacklog, cfg.ThrottleTimeout)(handler)
+	if cfg.Features.UseChiThrottle {
+		handler = m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, cfg.Throttle.ThrottleTimeout)(handler)
 	}
 
 	handler = m.Recoverer(handler)
-	handler = m.CORS(handler, m.cfg.AllowedOrigins, m.cfg.AllowedHeaders)
+	handler = m.CORS(handler, m.cfg.Security.AllowedOrigins, m.cfg.Security.AllowedHeaders)
 
 	return handler
+}
+
+// BaseChain handles basic REST configuration
+func (m *Manager) BaseChain(cfg *ChainConfig, setupRoute func(r chi.Router)) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		r := chi.NewRouter()
+
+		if m.cfg.Core.EnableTelemetry {
+			r.Use(otelhttp.NewMiddleware(m.cfg.Core.ServiceName))
+		}
+
+		if cfg.Features.UseChiStripSlashes {
+			r.Use(chimiddleware.StripSlashes)
+		}
+
+		r.Use(m.TrustProxy)
+
+		r.Use(m.Recoverer)
+
+		if cfg.Features.UseChiTimeout {
+			r.Use(chimiddleware.Timeout(m.cfg.Limits.RequestTimeout))
+		}
+
+		if cfg.Features.UseChiCompress {
+			r.Use(chimiddleware.Compress(cfg.Compression.CompressionLevel))
+		}
+
+		if cfg.Features.UseChiThrottle {
+			r.Use(m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, cfg.Throttle.ThrottleTimeout))
+		}
+
+		// Security headers & structured logging
+		r.Use(m.SecureHeaders)
+		r.Use(m.Logger)
+
+		if setupRoute != nil {
+			setupRoute(r)
+		}
+
+		r.Mount("/", next)
+		return r
+	}
 }
 
 // PublicChain creates a middleware chain for public routes that do not require user authentication.
@@ -119,8 +170,8 @@ func (m *Manager) buildOuterChain(cfg *ChainConfig, handler http.Handler) http.H
 func (m *Manager) PublicChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
-		if cfg.UseChiRateLimitPublic {
-			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
+		if cfg.Features.UseChiRateLimitPublic {
+			handler = RateLimit(cfg.Limiter, m.cfg.Security.PublicKeySignature)(handler)
 		}
 		handler = m.EnsurePublic(handler)
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
@@ -128,12 +179,30 @@ func (m *Manager) PublicChain(cfg *ChainConfig) func(http.Handler) http.Handler 
 	}
 }
 
+// PublicRateLimitChain returns a middleware chain configured for public (unauthenticated) endpoints.
+func (m *Manager) PublicRateLimitChain(cfg *ChainConfig) func(http.Handler) http.Handler {
+	return m.BaseChain(cfg, func(r chi.Router) {
+		if cfg.Features.UseChiRateLimitPublic {
+			r.Use(RateLimit(cfg.Limiter, m.cfg.Security.PublicKeySignature))
+		}
+	})
+}
+
+// ProtectedRateLimitChain returns a middleware chain configured for authenticated endpoints.
+func (m *Manager) ProtectedRateLimitChain(cfg *ChainConfig) func(http.Handler) http.Handler {
+	return m.BaseChain(cfg, func(r chi.Router) {
+		if cfg.Features.UseChiRateLimitAuth {
+			r.Use(RateLimit(cfg.Limiter, m.cfg.Security.PublicKeySignature))
+		}
+	})
+}
+
 // PublicAuthChain creates a middleware chain for public routes that require authentication.
 func (m *Manager) PublicAuthChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
-		if cfg.UseChiRateLimitAuth {
-			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
+		if cfg.Features.UseChiRateLimitAuth {
+			handler = RateLimit(cfg.Limiter, m.cfg.Security.PublicKeySignature)(handler)
 		}
 		handler = m.EnsurePublicAuth(handler)
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAuth)
@@ -145,8 +214,8 @@ func (m *Manager) PublicAuthChain(cfg *ChainConfig) func(http.Handler) http.Hand
 func (m *Manager) PublicAPIKeyChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
-		if cfg.UseChiRateLimitAuth {
-			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
+		if cfg.Features.UseChiRateLimitAuth {
+			handler = RateLimit(cfg.Limiter, m.cfg.Security.PublicKeySignature)(handler)
 		}
 		handler = m.EnsurePublicAPIKey(handler)
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublicAPIKey)
@@ -202,8 +271,8 @@ func Heartbeat(path string) func(http.Handler) http.Handler {
 func (m *Manager) PreSignChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := m.buildInnerChain(cfg, next)
-		if cfg.UseChiRateLimitPublic {
-			handler = RateLimit(cfg.LimiterConfig, m.cfg.PublicKeySignature)(handler)
+		if cfg.Features.UseChiRateLimitPublic {
+			handler = RateLimit(cfg.Limiter, m.cfg.Security.PublicKeySignature)(handler)
 		}
 		handler = m.EnsurePreSignHeaders(handler)
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)

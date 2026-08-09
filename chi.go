@@ -76,19 +76,19 @@ func (m *Manager) ChiThrottleBacklog(limit, backlog int, backlogTimeout time.Dur
 // ConfigLimiter holds configuration for the custom rate limiter.
 type ConfigLimiter struct {
 	// RateLimitRequests is the number of requests allowed per window.
-	RateLimitRequests int
+	RateLimitRequests int `yaml:"rateLimitRequests" default:"100"`
 	// RateLimitWindow is the duration of the rate limit window.
-	RateLimitWindow time.Duration
+	RateLimitWindow time.Duration `yaml:"rateLimitWindow" default:"1m"`
 	// Counter is the backend storage for the rate limiter limits (e.g., memory, redis).
-	Counter httprate.LimitCounter
+	Counter httprate.LimitCounter `yaml:"-"`
 	// PreRequestOnBeforeLimiter is a hook executed before the rate limiter check.
 	// Return false to abort the request.
-	PreRequestOnBeforeLimiter func(w http.ResponseWriter, r *http.Request) bool
+	PreRequestOnBeforeLimiter func(w http.ResponseWriter, r *http.Request) bool `yaml:"-"`
 	// PreRequestOnAfterLimiter is a hook executed after the rate limiter check but before the handler.
 	// Return false to abort the request.
-	PreRequestOnAfterLimiter func(w http.ResponseWriter, r *http.Request) bool
+	PreRequestOnAfterLimiter func(w http.ResponseWriter, r *http.Request) bool `yaml:"-"`
 	// LimiterHook is the rate limiter function to use.
-	LimiterHook func(http.Handler) http.Handler
+	LimiterHook func(http.Handler) http.Handler `yaml:"-"`
 }
 
 // RateLimit creates a rate limiting middleware based on the provided configuration.
@@ -213,6 +213,11 @@ func buildRateKeyPublic(r *http.Request, zone, signature string) string {
 	userAgent, _ := keyByHeader(r, constants.HeaderUserAgent)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
 	protocol := detectProtocol(r)
+	if protocol == "graphql" {
+		if op := ResolveGraphQLOperation(r); op != "anonymous" {
+			endpoint = endpoint + ":" + op
+		}
+	}
 	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:protocol:%s:method:%s:ip:%s:endpoint:%s:useragent:%s:appid:%s", zone, protocol, r.Method, ip, endpoint, userAgent, appID))
 }
 
@@ -221,6 +226,11 @@ func buildRateKeyPublicAPIKey(r *http.Request, zone, signature string) string {
 	apiKey, _ := keyByHeader(r, constants.HeaderAPIKey)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
 	protocol := detectProtocol(r)
+	if protocol == "graphql" {
+		if op := ResolveGraphQLOperation(r); op != "anonymous" {
+			endpoint = endpoint + ":" + op
+		}
+	}
 	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:apikey:%s:appid:%s", zone, protocol, r.Method, endpoint, apiKey, appID))
 }
 
@@ -229,6 +239,11 @@ func buildRateKeyPublicAuth(r *http.Request, zone, signature string) string {
 	tokenKey, _ := keyByHeader(r, constants.HeaderToken)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
 	protocol := detectProtocol(r)
+	if protocol == "graphql" {
+		if op := ResolveGraphQLOperation(r); op != "anonymous" {
+			endpoint = endpoint + ":" + op
+		}
+	}
 	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:token:%s:appid:%s", zone, protocol, r.Method, endpoint, tokenKey, appID))
 }
 

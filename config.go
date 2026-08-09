@@ -9,91 +9,73 @@ import (
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 )
 
+// ConfigCore holds the configuration for the middleware manager.
+// It includes core settings, logging configuration, security parameters, and header requirements.
+// ConfigCore holds core settings for the middleware.
+type ConfigCore struct {
+	Env             string `yaml:"env" default:"development"`
+	ServiceName     string `yaml:"serviceName" default:"unknown-service"`
+	EnableTelemetry bool   `yaml:"enableTelemetry" default:"false"`
+}
+
+// ConfigLimits holds timeout and limit configurations.
+type ConfigLimits struct {
+	RequestTimeout              time.Duration `yaml:"requestTimeout" default:"30s"`
+	RequestBodyLimitSize        int64         `yaml:"requestBodyLimitSize" default:"2147483648"`     // 2GB
+	RequestBodyNonFileLimitSize int64         `yaml:"requestBodyNonFileLimitSize" default:"3145728"` // 3MB
+}
+
+// ConfigLogging holds logging configurations.
+type ConfigLogging struct {
+	LogRequestBodies         bool  `yaml:"logRequestBodies" default:"false"`
+	LogResponseBodies        bool  `yaml:"logResponseBodies" default:"false"`
+	ResponseBodyLogLimitSize int64 `yaml:"responseBodyLogLimitSize" default:"5242880"` // 5MB
+}
+
+// ConfigSecurity holds security-related configurations.
+type ConfigSecurity struct {
+	PublicKeySignature        string            `yaml:"publicKeySignature"`
+	PrivateKeySignature       string            `yaml:"privateKeySignature"`
+	TrustedProxies            []string          `yaml:"trustedProxies"`
+	AllowedOrigins            []string          `yaml:"allowedOrigins"`
+	AllowedContentTypes       []string          `yaml:"allowedContentTypes"`
+	AllowedHeaders            []string          `yaml:"allowedHeaders"`
+	HeadersToRemove           []string          `yaml:"headersToRemove"`
+	SecurityHeaders           map[string]string `yaml:"securityHeaders"`
+	SignatureTimestampExpired int64             `yaml:"signatureTimestampExpired" default:"600"`
+}
+
+// ConfigHeaders holds configuration for required headers.
+type ConfigHeaders struct {
+	RequiredPublicAuthHeaders        []string `yaml:"requiredPublicAuthHeaders"`
+	RequiredPublicHeaders            []string `yaml:"requiredPublicHeaders"`
+	RequiredInternalHeaders          []string `yaml:"requiredInternalHeaders"`
+	RequiredPublicAPIKeyHeaders      []string `yaml:"requiredPublicAPIKeyHeaders"`
+	RequiredSignaturePublicHeaders   []string `yaml:"requiredSignaturePublicHeaders"`
+	RequiredSignatureInternalHeaders []string `yaml:"requiredSignatureInternalHeaders"`
+}
+
 // Config holds the configuration for the middleware manager.
 // It includes core settings, logging configuration, security parameters, and header requirements.
 type Config struct {
-	// Core settings
+	Core     ConfigCore     `yaml:"core"`
+	Limits   ConfigLimits   `yaml:"limits"`
+	Logging  ConfigLogging  `yaml:"logging"`
+	Security ConfigSecurity `yaml:"security"`
+	Headers  ConfigHeaders  `yaml:"headers"`
 
-	// LogStore is the storage implementation for audit logs.
-	LogStore LogStore
-	// Logger is used for internal middleware logging. Defaults to a zerolog console logger.
-	// Use NewZerologLogger() to wrap a *zerolog.Logger, or implement the Logger interface directly.
-	Logger Logger
-	// Env specifies the environment ("development", "production", "prod").
-	// Error details are suppressed in production.
-	Env string
-
-	// Timeout & Limits
-
-	// RequestTimeout is the default duration to wait for a request to complete.
-	RequestTimeout time.Duration
-	// RequestBodyLimitSize is the maximum allowed size for request bodies (including file uploads).
-	RequestBodyLimitSize int64
-	// RequestBodyNonFileLimitSize is the maximum allowed size for non-file (JSON/form) request bodies.
-	RequestBodyNonFileLimitSize int64
-
-	// Logging
-
-	// LogRequestBodies enables capturing the request body in audit logs.
-	LogRequestBodies bool
-	// LogResponseBodies enables capturing the response body in audit logs.
-	LogResponseBodies bool
-	// ResponseBodyLogLimitSize caps the response body size (bytes) stored in audit logs.
-	ResponseBodyLogLimitSize int64
-
-	// Security
-
-	// PublicKeySignature is the HMAC key used for verifying public request signatures.
-	PublicKeySignature string
-	// PrivateKeySignature is the HMAC key used for verifying internal request signatures.
-	PrivateKeySignature string
-	// TrustedProxies is a list of trusted proxy IP addresses or CIDR ranges.
-	// The real client IP is extracted from X-Forwarded-For only when the proxy is trusted.
-	TrustedProxies []string
-	// AllowedOrigins is a list of allowed CORS origins. Use ["*"] to allow all.
-	AllowedOrigins []string
-	// AllowedContentTypes is a list of allowed Content-Type values (substring match).
-	AllowedContentTypes []string
-	// AllowedHeaders is a list of allowed CORS request headers.
-	AllowedHeaders []string
-	// HeadersToRemove is a list of response headers to strip before sending to the client.
-	HeadersToRemove []string
-	// SecurityHeaders is a map of security-related response headers to add automatically.
-	SecurityHeaders map[string]string
-	// SignatureTimestampExpired is the allowed clock skew in seconds for signature timestamp validation.
-	SignatureTimestampExpired int64
-
-	// Required Headers — override defaults from constants package if needed.
-
-	// RequiredPublicAuthHeaders are headers required for authenticated public requests.
-	RequiredPublicAuthHeaders []string
-	// RequiredPublicHeaders are headers required for unauthenticated public requests.
-	RequiredPublicHeaders []string
-	// RequiredInternalHeaders are headers required for internal service-to-service requests.
-	RequiredInternalHeaders []string
-	// RequiredPublicAPIKeyHeaders are headers required for API-key authenticated requests.
-	RequiredPublicAPIKeyHeaders []string
-	// RequiredSignaturePublicHeaders are the headers whose values are included in the public signature.
-	RequiredSignaturePublicHeaders []string
-	// RequiredSignatureInternalHeaders are the headers whose values are included in the internal signature.
-	RequiredSignatureInternalHeaders []string
-
-	// Extensions
-
-	// ContextInjector is an optional function to inject additional values into the request context.
-	ContextInjector func(r *http.Request) *http.Request
-	// ServiceName is the name of the service, used in log fields.
-	ServiceName string
-	// EnableTelemetry enables OpenTelemetry tracing for the middleware.
-	EnableTelemetry bool
+	// Interfaces / Unmarshallable
+	LogStore        LogStore                            `yaml:"-"`
+	Logger          Logger                              `yaml:"-"`
+	ContextInjector func(r *http.Request) *http.Request `yaml:"-"`
 }
 
 // Validate checks that required Config fields are present.
 func (c *Config) Validate() error {
-	if c.PublicKeySignature == "" || c.PrivateKeySignature == "" {
+	if c.Security.PublicKeySignature == "" || c.Security.PrivateKeySignature == "" {
 		return ErrMissingKeys
 	}
-	if len(c.AllowedOrigins) == 0 {
+	if len(c.Security.AllowedOrigins) == 0 {
 		return ErrMissingOrigins
 	}
 	return nil

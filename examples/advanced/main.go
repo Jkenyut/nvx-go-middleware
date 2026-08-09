@@ -13,13 +13,19 @@ import (
 func main() {
 	// Create middleware manager
 	mgr, err := mw.NewWithError(&mw.Config{
-		PublicKeySignature:   "your-rsa-public-key-here",
-		PrivateKeySignature:  "your-rsa-private-key-here",
-		AllowedOrigins:       []string{"https://example.com"},
-		TrustedProxies:       []string{"10.0.0.0/8"},
-		RequestTimeout:       30 * time.Second,
-		RequestBodyLimitSize: 5 * 1024 * 1024, // 5MB
-		Env:                  "production",
+		Security: mw.ConfigSecurity{
+			PublicKeySignature:  "your-rsa-public-key-here",
+			PrivateKeySignature: "your-rsa-private-key-here",
+			AllowedOrigins:      []string{"https://example.com"},
+			TrustedProxies:      []string{"10.0.0.0/8"},
+		},
+		Limits: mw.ConfigLimits{
+			RequestTimeout:       30 * time.Second,
+			RequestBodyLimitSize: 5 * 1024 * 1024, // 5MB
+		},
+		Core: mw.ConfigCore{
+			Env: "production",
+		},
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -27,12 +33,18 @@ func main() {
 
 	// Custom chain config for production
 	chainCfg := mw.ChainConfig{
-		UseChiCompress:     true,
-		UseChiTimeout:      false, // Use custom timeout
-		UseChiThrottle:     true,
-		UseChiStripSlashes: true,
-		CompressionLevel:   9, // Max compression
-		ThrottleLimit:      50,
+		Features: mw.ChainFeatures{
+			UseChiCompress:     true,
+			UseChiTimeout:      false, // Use custom timeout
+			UseChiThrottle:     true,
+			UseChiStripSlashes: true,
+		},
+		Compression: mw.ChainCompression{
+			CompressionLevel: 9, // Max compression
+		},
+		Throttle: mw.ChainThrottle{
+			ThrottleLimit: 50,
+		},
 	}
 
 	mux := http.NewServeMux()
@@ -116,7 +128,7 @@ func main() {
 	// DEBUG ROUTES (only in non-production)
 	// ========================================
 
-	if mgr.Config().Env != "production" {
+	if mgr.Config().Core.Env != "production" {
 		mux.Handle("/debug/", mgr.ChiProfiler())
 	}
 
@@ -134,7 +146,7 @@ func main() {
 
 	// Start server
 	log.Println("🚀 Server starting on :8080")
-	log.Println("Environment:", mgr.Config().Env)
+	log.Println("Environment:", mgr.Config().Core.Env)
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Fatal(err)
 	}
