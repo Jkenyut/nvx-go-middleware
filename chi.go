@@ -78,7 +78,7 @@ type ConfigLimiter struct {
 	// RateLimitRequests is the number of requests allowed per window.
 	RateLimitRequests int `yaml:"rateLimitRequests" default:"100"`
 	// RateLimitWindow is the duration of the rate limit window.
-	RateLimitWindow time.Duration `yaml:"rateLimitWindow" default:"1"` // minutes
+	RateLimitWindow int `yaml:"rateLimitWindow" default:"1"` // minutes
 	// Counter is the backend storage for the rate limiter limits (e.g., memory, redis).
 	Counter httprate.LimitCounter `yaml:"-"`
 	// PreRequestOnBeforeLimiter is a hook executed before the rate limiter check.
@@ -123,7 +123,7 @@ func RateLimit(
 		opts = append(opts, httprate.WithLimitCounter(cfg.Counter))
 	}
 
-	limiter := httprate.LimitBy(cfg.RateLimitRequests, cfg.RateLimitWindow, keyByHeaderAuthType, opts...)
+	limiter := httprate.LimitBy(cfg.RateLimitRequests, time.Duration(cfg.RateLimitWindow)*time.Minute, keyByHeaderAuthType, opts...)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

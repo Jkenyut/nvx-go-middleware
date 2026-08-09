@@ -30,9 +30,9 @@ type ChainCompression struct {
 
 // ChainThrottle configures concurrent request throttling.
 type ChainThrottle struct {
-	ThrottleLimit   int           `yaml:"throttleLimit" default:"100"`
-	ThrottleTimeout time.Duration `yaml:"throttleTimeout" default:"30"` // seconds
-	ThrottleBacklog int           `yaml:"throttleBacklog" default:"100"`
+	ThrottleLimit   int `yaml:"throttleLimit" default:"100"`
+	ThrottleTimeout int `yaml:"throttleTimeout" default:"30"` // seconds
+	ThrottleBacklog int `yaml:"throttleBacklog" default:"100"`
 }
 
 // ChainConfig holds the configuration for the middleware chain.
@@ -59,12 +59,12 @@ func DefaultChainConfig() ChainConfig {
 		},
 		Throttle: ChainThrottle{
 			ThrottleLimit:   100,
-			ThrottleTimeout: 30 * time.Second,
+			ThrottleTimeout: 30,
 			ThrottleBacklog: 100,
 		},
 		Limiter: ConfigLimiter{
 			RateLimitRequests: 100,
-			RateLimitWindow:   1 * time.Minute,
+			RateLimitWindow:   1,
 			PreRequestOnBeforeLimiter: func(_ http.ResponseWriter, _ *http.Request) bool {
 				return true
 			},
@@ -114,7 +114,7 @@ func (m *Manager) buildOuterChain(cfg *ChainConfig, handler http.Handler) http.H
 		handler = m.ChiTimeout(m.cfg.Limits.RequestTimeout)(handler)
 	}
 	if cfg.Features.UseChiThrottle {
-		handler = m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, cfg.Throttle.ThrottleTimeout)(handler)
+		handler = m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, time.Duration(cfg.Throttle.ThrottleTimeout)*time.Second)(handler)
 	}
 
 	handler = m.Recoverer(handler)
@@ -149,7 +149,7 @@ func (m *Manager) BaseChain(cfg *ChainConfig, setupRoute func(r chi.Router)) fun
 		}
 
 		if cfg.Features.UseChiThrottle {
-			r.Use(m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, cfg.Throttle.ThrottleTimeout))
+			r.Use(m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, time.Duration(cfg.Throttle.ThrottleTimeout)*time.Second))
 		}
 
 		// Security headers & structured logging

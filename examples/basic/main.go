@@ -41,7 +41,7 @@ func main() {
 	// Create chain config
 	chainCfg := mw.DefaultChainConfig()
 	chainCfg.Limiter.RateLimitRequests = 5
-	chainCfg.Limiter.RateLimitWindow = 10 * time.Second
+	chainCfg.Limiter.RateLimitWindow = 10
 	chainCfg.Features.UseChiRateLimitAuth = true
 	chainCfg.Features.UseChiRateLimitPublic = true
 
