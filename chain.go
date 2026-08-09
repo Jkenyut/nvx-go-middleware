@@ -43,37 +43,37 @@ type ChainConfig struct {
 	Limiter     ConfigLimiter    `yaml:"limiter"`
 }
 
-// DefaultChainConfig returns a ChainConfig with recommended default values.
-func DefaultChainConfig() ChainConfig {
-	return ChainConfig{
-		Features: ChainFeatures{
-			UseChiCompress:        true,
-			UseChiTimeout:         false,
-			UseChiThrottle:        false,
-			UseChiRateLimitAuth:   false,
-			UseChiRateLimitPublic: false,
-			UseChiStripSlashes:    true,
-		},
-		Compression: ChainCompression{
-			CompressionLevel: 5,
-		},
-		Throttle: ChainThrottle{
-			ThrottleLimit:   100,
-			ThrottleTimeout: 30,
-			ThrottleBacklog: 100,
-		},
-		Limiter: ConfigLimiter{
-			RateLimitRequests: 100,
-			RateLimitWindow:   1,
-			PreRequestOnBeforeLimiter: func(_ http.ResponseWriter, _ *http.Request) bool {
-				return true
-			},
-			PreRequestOnAfterLimiter: func(_ http.ResponseWriter, _ *http.Request) bool {
-				return true
-			},
-			Counter:     nil,
-			LimiterHook: nil,
-		},
+// ApplyDefaults applies default values to the ChainConfig if they are not already set.
+// Note: Boolean fields (like Features) are not overridden because Go cannot distinguish
+// between an intentionally set 'false' and an unset boolean.
+func (c *ChainConfig) ApplyDefaults() {
+	if c.Compression.CompressionLevel == 0 {
+		c.Compression.CompressionLevel = 5
+	}
+	if c.Throttle.ThrottleLimit == 0 {
+		c.Throttle.ThrottleLimit = 100
+	}
+	if c.Throttle.ThrottleTimeout == 0 {
+		c.Throttle.ThrottleTimeout = 30
+	}
+	if c.Throttle.ThrottleBacklog == 0 {
+		c.Throttle.ThrottleBacklog = 100
+	}
+	if c.Limiter.RateLimitRequests == 0 {
+		c.Limiter.RateLimitRequests = 100
+	}
+	if c.Limiter.RateLimitWindow == 0 {
+		c.Limiter.RateLimitWindow = 1
+	}
+	if c.Limiter.PreRequestOnBeforeLimiter == nil {
+		c.Limiter.PreRequestOnBeforeLimiter = func(_ http.ResponseWriter, _ *http.Request) bool {
+			return true
+		}
+	}
+	if c.Limiter.PreRequestOnAfterLimiter == nil {
+		c.Limiter.PreRequestOnAfterLimiter = func(_ http.ResponseWriter, _ *http.Request) bool {
+			return true
+		}
 	}
 }
 
