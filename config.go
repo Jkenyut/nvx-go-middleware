@@ -35,23 +35,23 @@ type ConfigLogging struct {
 type ConfigSecurity struct {
 	PublicKeySignature        string            `yaml:"publicKeySignature"`
 	PrivateKeySignature       string            `yaml:"privateKeySignature"`
-	TrustedProxies            []string          `yaml:"trustedProxies" default:"[]"`
-	AllowedOrigins            []string          `yaml:"allowedOrigins" default:"[]"`
-	AllowedContentTypes       []string          `yaml:"allowedContentTypes" default:"[]"`
-	AllowedHeaders            []string          `yaml:"allowedHeaders" default:"[]"`
-	HeadersToRemove           []string          `yaml:"headersToRemove" default:"[]"`
-	SecurityHeaders           map[string]string `yaml:"securityHeaders" default:"{}"`
+	TrustedProxies            []string          `default:"[]"`
+	AllowedOrigins            []string          `default:"[]"`
+	AllowedContentTypes       []string          `default:"[]"`
+	AllowedHeaders            []string          `default:"[]"`
+	HeadersToRemove           []string          `default:"[]"`
+	SecurityHeaders           map[string]string `default:"{}"`
 	SignatureTimestampExpired int64             `yaml:"signatureTimestampExpired" default:"600"`
 }
 
 // ConfigHeaders holds configuration for required headers.
 type ConfigHeaders struct {
-	RequiredPublicAuthHeaders        []string `yaml:"requiredPublicAuthHeaders" default:"[]"`
-	RequiredPublicHeaders            []string `yaml:"requiredPublicHeaders" default:"[]"`
-	RequiredInternalHeaders          []string `yaml:"requiredInternalHeaders" default:"[]"`
-	RequiredPublicAPIKeyHeaders      []string `yaml:"requiredPublicAPIKeyHeaders" default:"[]"`
-	RequiredSignaturePublicHeaders   []string `yaml:"requiredSignaturePublicHeaders" default:"[]"`
-	RequiredSignatureInternalHeaders []string `yaml:"requiredSignatureInternalHeaders" default:"[]"`
+	RequiredPublicAuthHeaders        []string `default:"[]"`
+	RequiredPublicHeaders            []string `default:"[]"`
+	RequiredInternalHeaders          []string `default:"[]"`
+	RequiredPublicAPIKeyHeaders      []string `default:"[]"`
+	RequiredSignaturePublicHeaders   []string `default:"[]"`
+	RequiredSignatureInternalHeaders []string `default:"[]"`
 }
 
 // Config holds the configuration for the middleware manager.
