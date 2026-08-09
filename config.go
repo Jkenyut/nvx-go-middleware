@@ -3,7 +3,6 @@ package middleware
 import (
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/Jkenyut/nvx-go-helper/activity"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
@@ -20,9 +19,9 @@ type ConfigCore struct {
 
 // ConfigLimits holds timeout and limit configurations.
 type ConfigLimits struct {
-	RequestTimeout              time.Duration `yaml:"requestTimeout" default:"30"`                   // seconds
-	RequestBodyLimitSize        int64         `yaml:"requestBodyLimitSize" default:"2147483648"`     // 2GB
-	RequestBodyNonFileLimitSize int64         `yaml:"requestBodyNonFileLimitSize" default:"3145728"` // 3MB
+	RequestTimeout              int   `yaml:"requestTimeout" default:"30"`                   // seconds
+	RequestBodyLimitSize        int64 `yaml:"requestBodyLimitSize" default:"2147483648"`     // 2GB
+	RequestBodyNonFileLimitSize int64 `yaml:"requestBodyNonFileLimitSize" default:"3145728"` // 3MB
 }
 
 // ConfigLogging holds logging configurations.

@@ -111,7 +111,7 @@ func (m *Manager) buildOuterChain(cfg *ChainConfig, handler http.Handler) http.H
 	}
 
 	if cfg.Features.UseChiTimeout {
-		handler = m.ChiTimeout(m.cfg.Limits.RequestTimeout)(handler)
+		handler = m.ChiTimeout(time.Duration(m.cfg.Limits.RequestTimeout) * time.Second)(handler)
 	}
 	if cfg.Features.UseChiThrottle {
 		handler = m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, time.Duration(cfg.Throttle.ThrottleTimeout)*time.Second)(handler)
@@ -141,7 +141,7 @@ func (m *Manager) BaseChain(cfg *ChainConfig, setupRoute func(r chi.Router)) fun
 		r.Use(m.Recoverer)
 
 		if cfg.Features.UseChiTimeout {
-			r.Use(chimiddleware.Timeout(m.cfg.Limits.RequestTimeout))
+			r.Use(chimiddleware.Timeout(time.Duration(m.cfg.Limits.RequestTimeout) * time.Second))
 		}
 
 		if cfg.Features.UseChiCompress {
