@@ -4,7 +4,6 @@ package main
 import (
 	"log"
 	"net/http"
-	"time"
 
 	mw "github.com/Jkenyut/nvx-go-middleware"
 	"github.com/bytedance/sonic"
@@ -23,7 +22,7 @@ func main() {
 			SignatureTimestampExpired: 6000000,
 		},
 		Limits: mw.ConfigLimits{
-			RequestTimeout:       60 * time.Second,
+			RequestTimeout:       60,
 			RequestBodyLimitSize: 3 * 1024 * 1024, // 3MB
 		},
 		Core: mw.ConfigCore{

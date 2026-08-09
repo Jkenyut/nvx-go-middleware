@@ -20,7 +20,7 @@ func main() {
 			TrustedProxies:      []string{"10.0.0.0/8"},
 		},
 		Limits: mw.ConfigLimits{
-			RequestTimeout:       30 * time.Second,
+			RequestTimeout:       30,
 			RequestBodyLimitSize: 5 * 1024 * 1024, // 5MB
 		},
 		Core: mw.ConfigCore{
