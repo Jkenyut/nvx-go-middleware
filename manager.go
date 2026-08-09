@@ -126,9 +126,6 @@ func applyDefaults(cfg *Config) io.Closer {
 	if len(cfg.Headers.RequiredSignatureInternalHeaders) == 0 {
 		cfg.Headers.RequiredSignatureInternalHeaders = constants.RequiredSignatureInternalHeaders
 	}
-	if cfg.Security.SecurityHeaders == nil {
-		cfg.Security.SecurityHeaders = constants.SecurityHeaders
-	}
 	if len(cfg.Security.TrustedProxies) == 0 {
 		cfg.Security.TrustedProxies = []string{}
 	}

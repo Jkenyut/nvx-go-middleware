@@ -88,7 +88,6 @@ func (m *Manager) buildInnerChain(cfg *ChainConfig, next http.Handler) http.Hand
 		handler = m.ChiStripSlashes(handler)
 	}
 	handler = m.RemoveHeaders(handler)
-	handler = m.SecureHeaders(handler)
 
 	if cfg.Features.UseChiCompress {
 		handler = m.ChiCompress(cfg.Compression.CompressionLevel)(handler)
@@ -152,8 +151,7 @@ func (m *Manager) BaseChain(cfg *ChainConfig, setupRoute func(r chi.Router)) fun
 			r.Use(m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, time.Duration(cfg.Throttle.ThrottleTimeout)*time.Second))
 		}
 
-		// Security headers & structured logging
-		r.Use(m.SecureHeaders)
+		// structured logging
 		r.Use(m.Logger)
 
 		if setupRoute != nil {

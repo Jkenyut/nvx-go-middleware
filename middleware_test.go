@@ -239,28 +239,6 @@ func TestMethodOnly(t *testing.T) {
 	}
 }
 
-// ─── SecureHeaders ───────────────────────────────────────────────────────────
-
-func TestSecureHeaders(t *testing.T) {
-	mgr := newTestManager()
-	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
-	handler := mgr.SecureHeaders(ok)
-
-	req := httptest.NewRequest("GET", "/", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	checkHeader := func(key, expected string) {
-		t.Helper()
-		if got := w.Header().Get(key); got != expected {
-			t.Errorf("%s: expected %q got %q", key, expected, got)
-		}
-	}
-	checkHeader("X-Content-Type-Options", "nosniff")
-	checkHeader("X-Frame-Options", "DENY")
-	checkHeader("X-XSS-Protection", "1; mode=block")
-}
-
 // ─── CORS ─────────────────────────────────────────────────────────────────────
 
 func TestCORS(t *testing.T) {

@@ -222,17 +222,6 @@ func normalizeHeadersJSON(h http.Header) []byte {
 	return b
 }
 
-// SecureHeaders adds a configured set of security-related response headers
-// (e.g., X-Content-Type-Options, X-Frame-Options, HSTS).
-func (m *Manager) SecureHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for key, value := range m.cfg.Security.SecurityHeaders {
-			w.Header().Set(key, value)
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // RemoveHeaders strips configured response headers before the response reaches the client.
 // Useful for removing Server, X-Powered-By, and similar fingerprinting headers.
 func (m *Manager) RemoveHeaders(next http.Handler) http.Handler {

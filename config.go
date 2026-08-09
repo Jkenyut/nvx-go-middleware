@@ -33,15 +33,14 @@ type ConfigLogging struct {
 
 // ConfigSecurity holds security-related configurations.
 type ConfigSecurity struct {
-	PublicKeySignature        string            `yaml:"publicKeySignature"`
-	PrivateKeySignature       string            `yaml:"privateKeySignature"`
-	TrustedProxies            []string          `yaml:"trustedProxies" default:"[]"`
-	AllowedOrigins            []string          `yaml:"allowedOrigins" default:"[]"`
-	AllowedContentTypes       []string          `yaml:"allowedContentTypes" default:"[]"`
-	AllowedHeaders            []string          `yaml:"allowedHeaders" default:"[]"`
-	HeadersToRemove           []string          `yaml:"headersToRemove" default:"[]"`
-	SecurityHeaders           map[string]string `yaml:"securityHeaders" default:"{}"`
-	SignatureTimestampExpired int64             `yaml:"signatureTimestampExpired" default:"600"`
+	PublicKeySignature        string   `yaml:"publicKeySignature"`
+	PrivateKeySignature       string   `yaml:"privateKeySignature"`
+	TrustedProxies            []string `yaml:"trustedProxies" default:"[]"`
+	AllowedOrigins            []string `yaml:"allowedOrigins" default:"[]"`
+	AllowedContentTypes       []string `yaml:"allowedContentTypes" default:"[]"`
+	AllowedHeaders            []string `yaml:"allowedHeaders" default:"[]"`
+	HeadersToRemove           []string `yaml:"headersToRemove" default:"[]"`
+	SignatureTimestampExpired int64    `yaml:"signatureTimestampExpired" default:"600"`
 }
 
 // ConfigHeaders holds configuration for required headers.
