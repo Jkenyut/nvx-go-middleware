@@ -99,7 +99,7 @@ func main() {
 	// Custom admin check middleware
 	adminCheck := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userType := r.Header.Get("NVX-User-Type")
+			userType := r.Header.Get("User-Type")
 			if userType != "admin" {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusForbidden)
@@ -188,7 +188,7 @@ func loginHandler(w http.ResponseWriter, _ *http.Request) {
 }
 
 func profileHandler(w http.ResponseWriter, r *http.Request) {
-	userID := r.Header.Get("NVX-User-ID")
+	userID := r.Header.Get("User-ID")
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{

@@ -26,9 +26,10 @@ type ConfigLimits struct {
 
 // ConfigLogging holds logging configurations.
 type ConfigLogging struct {
-	LogRequestBodies         bool  `yaml:"logRequestBodies" default:"false"`
-	LogResponseBodies        bool  `yaml:"logResponseBodies" default:"false"`
-	ResponseBodyLogLimitSize int64 `yaml:"responseBodyLogLimitSize" default:"5242880"` // 5MB
+	LogRequestBodies         bool     `yaml:"logRequestBodies" default:"false"`
+	LogResponseBodies        bool     `yaml:"logResponseBodies" default:"false"`
+	ResponseBodyLogLimitSize int64    `yaml:"responseBodyLogLimitSize" default:"5242880"` // 5MB
+	MaskKeywords             []string `yaml:"maskKeywords" default:"[]"`
 }
 
 // ConfigSecurity holds security-related configurations.
@@ -95,7 +96,7 @@ func WithActivityContext(r *http.Request) *http.Request {
 	ctx = activity.WithAPIKey(ctx, h.Get(constants.HeaderAPIKey))
 	ctx = activity.WithUserID(ctx, h.Get(constants.HeaderUserID))
 	ctx = activity.WithUserIP(ctx, h.Get(constants.HeaderIP))
-	ctx = activity.WithUserType(ctx, h.Get(constants.HeaderUserType))
 	ctx = activity.WithRequestID(ctx, h.Get(constants.HeaderRequestID))
+	ctx = activity.WithUserIPOrigin(ctx, h.Get(constants.HeaderIPOrigin))
 	return r.WithContext(ctx)
 }

@@ -1,5 +1,7 @@
 github.com/Jkenyut/nvx-go-helper v1.0.19 h1:5he0U7NgpVYi/eDa77c2LNpYgPMFefCWZzm9r4ygKZQ=
 github.com/Jkenyut/nvx-go-helper v1.0.19/go.mod h1:5uheAsQlrY2l/IwA1AEGCGP3xG4FASSBMHz6TJvF5s0=
+github.com/Jkenyut/nvx-go-helper v1.0.20-0.20260816124338-b63e0bd3a046 h1:Tc0aVbUgJCE+ySwfWIYmaV3XDIC03fmIuNEqt2Yr1Vo=
+github.com/Jkenyut/nvx-go-helper v1.0.20-0.20260816124338-b63e0bd3a046/go.mod h1:5uheAsQlrY2l/IwA1AEGCGP3xG4FASSBMHz6TJvF5s0=
 github.com/bytedance/gopkg v0.1.4 h1:oZnQwnX82KAIWb7033bEwtxvTqXcYMxDBaQxo5JJHWM=
 github.com/bytedance/gopkg v0.1.4/go.mod h1:v1zWfPm21Fb+OsyXN2VAHdL6TBb2L88anLQgdyje6R4=
 github.com/bytedance/sonic v1.15.2 h1:90H+rcF/FwLXwfB1cudOLq/je83n683Utf4Cbp0xHCo=

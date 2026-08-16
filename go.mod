@@ -3,7 +3,7 @@ module github.com/Jkenyut/nvx-go-middleware
 go 1.26.4
 
 require (
-	github.com/Jkenyut/nvx-go-helper v1.0.19
+	github.com/Jkenyut/nvx-go-helper v1.0.20-0.20260816124338-b63e0bd3a046
 	github.com/bytedance/sonic v1.15.2
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/go-chi/httprate v0.16.0

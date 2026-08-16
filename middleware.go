@@ -43,10 +43,14 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 				m.cfg.Logger.Error().
 					Str("service", m.cfg.Core.ServiceName).
 					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
-					Str("error", fmt.Sprintf("%v", rec)).
+					Str("transaction_id", r.Header.Get(constants.HeaderTransactionID)).
 					Str("method", r.Method).
 					Str("path", r.URL.Path).
-					Str("remote_addr", r.RemoteAddr).
+					Str("ip", r.Header.Get(constants.HeaderIP)).
+					Str("ip_origin", r.Header.Get(constants.HeaderIPOrigin)).
+					Str("user_id", r.Header.Get(constants.HeaderUserID)).
+					Str("user_agent", r.UserAgent()).
+					Interface("panic", rec).
 					Msgf("panic recovered:\n%s", stack)
 
 				if m.cfg.Core.EnableTelemetry {
@@ -60,6 +64,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.Core.ServiceName).
 						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
+						Str("transaction_id", r.Header.Get(constants.HeaderTransactionID)).
 						Msg("response already written, cannot recover")
 					return
 				}
@@ -67,6 +72,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.Core.ServiceName).
 						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
+						Str("transaction_id", r.Header.Get(constants.HeaderTransactionID)).
 						Msg("response already written, cannot recover")
 					return
 				}
@@ -104,10 +110,16 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		if m.cfg.Core.EnableTelemetry {
 			span := trace.SpanFromContext(r.Context())
 			span.SetAttributes(
-				attribute.String("nvx.transaction_id", transactionID),
-				attribute.String("nvx.request_id", r.Header.Get(constants.HeaderRequestID)),
-				attribute.String("nvx.client_ip", r.Header.Get(constants.HeaderIP)),
-				attribute.String("nvx.user_id", r.Header.Get(constants.HeaderUserID)),
+				attribute.String("service", m.cfg.Core.ServiceName),
+				attribute.String("transaction_id", transactionID),
+				attribute.String("request_id", r.Header.Get(constants.HeaderRequestID)),
+				attribute.String("ip", r.Header.Get(constants.HeaderIP)),
+				attribute.String("ip_origin", r.Header.Get(constants.HeaderIPOrigin)),
+				attribute.String("user_id", r.Header.Get(constants.HeaderUserID)),
+				attribute.String("user_agent", r.UserAgent()),
+				attribute.String("path", r.URL.Path),
+				attribute.String("protocol", "HTTP "+r.Proto),
+				attribute.String("header_auth_type", r.Header.Get(constants.HeaderAuthType)),
 			)
 		}
 
@@ -119,7 +131,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		}
 
 		start := time.Now()
-		requestHeadersBytes := normalizeHeadersJSON(r.Header)
+		requestHeadersBytes := normalizeHeadersJSON(r.Header, m.cfg.Logging.MaskKeywords)
 
 		var reqBodyBytes any
 		if m.cfg.Logging.LogRequestBodies {
@@ -129,6 +141,12 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 					Str("service", m.cfg.Core.ServiceName).
 					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Str("transaction_id", transactionID).
+					Str("method", r.Method).
+					Str("path", r.URL.Path).
+					Str("ip", r.Header.Get(constants.HeaderIP)).
+					Str("ip_origin", r.Header.Get(constants.HeaderIPOrigin)).
+					Str("user_id", r.Header.Get(constants.HeaderUserID)).
+					Str("user_agent", r.UserAgent()).
 					Err(err).
 					Msg("failed to read request body")
 				writeJSON(rw, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType))
@@ -137,14 +155,15 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				}
 				return
 			}
-			reqBodyBytes = normalizeBodyRaw(raw)
+
+			reqBodyBytes = normalizeBodyRaw(raw, m.cfg.Logging.MaskKeywords)
 		}
 
 		// Ensure cleanup and logging ALWAYS happens, even on panics.
 		defer func() {
 			var resBodyBytes any
 			if m.cfg.Logging.LogResponseBodies {
-				resBodyBytes = normalizeBodyRaw(rw.Body())
+				resBodyBytes = normalizeBodyRaw(rw.Body(), m.cfg.Logging.MaskKeywords)
 			}
 
 			// Capture status after returning from next.ServeHTTP or panicking
@@ -159,13 +178,14 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				FullURL:         FullURL(r),
 				StatusCode:      status,
 				LatencyMS:       time.Since(start).Milliseconds(),
-				ClientIP:        r.Header.Get(constants.HeaderIP),
+				IP:              r.Header.Get(constants.HeaderIP),
+				IPOrigin:        r.Header.Get(constants.HeaderIPOrigin),
 				RequestID:       r.Header.Get(constants.HeaderRequestID),
 				CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
 				CreatedAt:       format.NowUTC(),
 				TransactionID:   transactionID,
 				RequestHeaders:  requestHeadersBytes,
-				ResponseHeaders: normalizeHeadersJSON(rw.Header()),
+				ResponseHeaders: normalizeHeadersJSON(rw.Header(), m.cfg.Logging.MaskKeywords),
 				RequestBody:     reqBodyBytes,
 				ResponseBody:    resBodyBytes,
 				Protocol:        "HTTP " + r.Proto,
@@ -179,6 +199,14 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 					Str("service", m.cfg.Core.ServiceName).
 					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Str("transaction_id", transactionID).
+					Str("method", r.Method).
+					Str("path", r.URL.Path).
+					Str("ip", r.Header.Get(constants.HeaderIP)).
+					Str("ip_origin", r.Header.Get(constants.HeaderIPOrigin)).
+					Str("user_id", r.Header.Get(constants.HeaderUserID)).
+					Str("user_agent", r.UserAgent()).
+					Str("protocol", "HTTP "+r.Proto).
+					Str("header_auth_type", r.Header.Get(constants.HeaderAuthType)).
 					Err(err).
 					Msg("failed to save audit log")
 			}
@@ -194,22 +222,28 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 
 // normalizeBodyRaw returns a JSON-parsed value for valid JSON input,
 // a plain string for non-JSON input, or nil for empty input.
-func normalizeBodyRaw(raw []byte) any {
+func normalizeBodyRaw(raw []byte, keywordList []string) any {
 	if len(raw) == 0 {
 		return nil
 	}
-	if sonic.ConfigDefault.Valid(raw) {
+
+	str := string(raw)
+
+	// MaskSensitiveDataHelper mask keywords
+	str = format.MaskAfterKeywords(str, keywordList, "*")
+
+	if sonic.ConfigDefault.Valid([]byte(str)) {
 		var v any
-		if err := sonic.ConfigDefault.Unmarshal(raw, &v); err == nil {
+		if err := sonic.ConfigDefault.Unmarshal([]byte(str), &v); err == nil {
 			return v
 		}
 	}
-	return string(raw)
+	return string(str)
 }
 
 // normalizeHeadersJSON serializes HTTP headers to a JSON object.
 // Single-value headers are stored as strings; multi-value headers as arrays.
-func normalizeHeadersJSON(h http.Header) []byte {
+func normalizeHeadersJSON(h http.Header, keywordList []string) []byte {
 	out := make(map[string]any, len(h))
 	for k, v := range h {
 		if len(v) == 1 {
@@ -219,7 +253,8 @@ func normalizeHeadersJSON(h http.Header) []byte {
 		}
 	}
 	b, _ := sonic.ConfigDefault.Marshal(out)
-	return b
+	str := format.MaskAfterKeywords(string(b), keywordList, "*")
+	return []byte(str)
 }
 
 // RemoveHeaders strips configured response headers before the response reaches the client.
@@ -353,7 +388,7 @@ func (m *Manager) EnsurePublicAPIKey(next http.Handler) http.Handler {
 }
 
 // validateHeaders checks that all required headers are non-empty.
-// Additionally validates the NVX-Timestamp and NVX-Platform headers.
+// Additionally validates the Timestamp and Platform headers.
 // Returns false and writes an error response if any validation fails.
 func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, headers []string) bool {
 	var missing []string
@@ -432,7 +467,7 @@ func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (valid bool, s
 }
 
 // validateSignatureHeaders computes the expected HMAC signature and compares it
-// against the NVX-Signature header using constant-time comparison.
+// against the Signature header using constant-time comparison.
 func (m *Manager) validateSignatureHeaders(r *http.Request, key string, values []string) (valid bool, signature string) {
 	signatureServer := cryptoutil.Signature(key, values...)
 	clientSignature := r.Header.Get(constants.HeaderSignature)
@@ -445,7 +480,7 @@ func (m *Manager) validateSignatureHeaders(r *http.Request, key string, values [
 
 // TrustProxy extracts the real client IP from X-Forwarded-For when the
 // direct connection comes from a configured trusted proxy (IP or CIDR).
-// It updates r.RemoteAddr and sets the NVX-IP header so downstream handlers
+// It updates r.RemoteAddr and sets the IP header so downstream handlers
 // see the real client address.
 func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -478,7 +513,11 @@ func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 			clientIP = remoteIP
 		}
 
+		// clientIP is real user IP (extracted from X-Forwarded-For)
+		// remoteIP is IP from proxy/LB that directly connects to our server
 		r.Header.Set(constants.HeaderIP, clientIP)
+		r.Header.Set(constants.HeaderIPOrigin, remoteIP)
+
 		if clientIP != remoteIP {
 			r.RemoteAddr = net.JoinHostPort(clientIP, "0")
 		}
@@ -684,7 +723,7 @@ func (m *Manager) EnsurePreSignHeaders(next http.Handler) http.Handler {
 
 // PreSignHandler creates a POST endpoint that generates a presigned signature
 // for a described request. The caller supplies method, URI, and body hash;
-// the handler returns the HMAC signature the caller should include as NVX-Signature.
+// the handler returns the HMAC signature the caller should include as Signature.
 func (m *Manager) PreSignHandler(cfg *ChainConfig) http.Handler {
 	return m.MethodOnly("POST", m.PreSignChain(cfg)(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

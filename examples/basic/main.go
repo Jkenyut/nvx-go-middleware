@@ -139,7 +139,7 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 			"code":    200,
 		},
 		"data": map[string]interface{}{
-			"user_id": r.Header.Get("NVX-User-ID"),
+			"user_id": r.Header.Get("User-ID"),
 			"name":    "John Doe",
 			"email":   "john@example.com",
 		},

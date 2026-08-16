@@ -70,9 +70,15 @@ func (m *Manager) WebSocketChain(
 				if span.SpanContext().IsValid() {
 					span.SetName("WebSocket Upgrade")
 					span.SetAttributes(
-						attribute.String("nvx.transaction_id", transactionID),
-						attribute.String("nvx.request_id", r.Header.Get(constants.HeaderRequestID)),
-						attribute.String("nvx.client_ip", r.Header.Get(constants.HeaderIP)),
+						attribute.String("transaction_id", transactionID),
+						attribute.String("request_id", r.Header.Get(constants.HeaderRequestID)),
+						attribute.String("ip", r.Header.Get(constants.HeaderIP)),
+						attribute.String("ip_origin", r.Header.Get(constants.HeaderIPOrigin)),
+						attribute.String("user_id", r.Header.Get(constants.HeaderUserID)),
+						attribute.String("user_agent", r.UserAgent()),
+						attribute.String("service", m.cfg.Core.ServiceName),
+						attribute.String("protocol", "WebSocket"),
+
 						attribute.String("http.target", r.URL.Path),
 					)
 				}
@@ -107,6 +113,12 @@ func (m *Manager) WebSocketChain(
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.Core.ServiceName).
 						Str("transaction_id", transactionID).
+						Str("ip", r.Header.Get(constants.HeaderIP)).
+						Str("ip_origin", r.Header.Get(constants.HeaderIPOrigin)).
+						Str("user_id", r.Header.Get(constants.HeaderUserID)).
+						Str("user_agent", r.UserAgent()).
+						Str("protocol", "WebSocket").
+						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 						Interface("panic", rec).
 						Msg("panic in WebSocket handler")
 
@@ -127,12 +139,13 @@ func (m *Manager) WebSocketChain(
 				FullURL:         FullURL(r),
 				StatusCode:      0,
 				LatencyMS:       0,
-				ClientIP:        r.Header.Get(constants.HeaderIP),
+				IP:              r.Header.Get(constants.HeaderIP),
+				IPOrigin:        r.Header.Get(constants.HeaderIPOrigin),
 				RequestID:       r.Header.Get(constants.HeaderRequestID),
 				CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
 				CreatedAt:       format.NowUTC(),
 				TransactionID:   transactionID,
-				RequestHeaders:  normalizeHeadersJSON(r.Header),
+				RequestHeaders:  normalizeHeadersJSON(r.Header, m.cfg.Logging.MaskKeywords),
 				ResponseHeaders: nil,
 				RequestBody:     nil, // WebSockets upgrade requests have no body
 				ResponseBody:    nil,
@@ -158,11 +171,18 @@ func (m *Manager) WebSocketChain(
 
 				entry.StatusCode = statusCode
 				entry.LatencyMS = time.Since(start).Milliseconds()
-				entry.ResponseHeaders = normalizeHeadersJSON(ww.Header())
+				entry.ResponseHeaders = normalizeHeadersJSON(ww.Header(), m.cfg.Logging.MaskKeywords)
 
 				if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {
 					m.cfg.Logger.Error().
+						Str("service", m.cfg.Core.ServiceName).
 						Str("transaction_id", transactionID).
+						Str("ip", r.Header.Get(constants.HeaderIP)).
+						Str("ip_origin", r.Header.Get(constants.HeaderIPOrigin)).
+						Str("user_id", r.Header.Get(constants.HeaderUserID)).
+						Str("user_agent", r.UserAgent()).
+						Str("protocol", "WebSocket").
+						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 						Err(err).
 						Msg("failed to save ws audit log")
 				}

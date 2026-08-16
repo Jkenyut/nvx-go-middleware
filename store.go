@@ -22,11 +22,13 @@ type ConsoleStore struct {
 // Save writes the audit log entry to the configured logger.
 func (c *ConsoleStore) Save(_ context.Context, entry *model.AuditLog) error {
 	c.logger.Info().
+		Str("service_name", entry.ServiceName).
 		Str("method", entry.Method).
-		Str("url", entry.FullURL).
+		Str("full_url", entry.FullURL).
 		Interface("status", entry.StatusCode).
 		Interface("latency_ms", entry.LatencyMS).
-		Str("client_ip", entry.ClientIP).
+		Str("client_ip", entry.IP).
+		Str("ip_origin", entry.IPOrigin).
 		Str("transaction_id", entry.TransactionID).
 		Interface("created_by", entry.CreatedBy).
 		Interface("created_at", entry.CreatedAt).
@@ -34,6 +36,10 @@ func (c *ConsoleStore) Save(_ context.Context, entry *model.AuditLog) error {
 		Interface("response_headers", entry.ResponseHeaders).
 		Interface("request_body", entry.RequestBody).
 		Interface("response_body", entry.ResponseBody).
-		Msg(entry.Protocol)
+		Str("protocol", "HTTP "+entry.Protocol).
+		Str("user_agent", entry.UserAgent).
+		Str("error_message", entry.ErrorMessage).
+		Str("request_id", entry.RequestID).
+		Msg("Audit Log")
 	return nil
 }

@@ -66,6 +66,11 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.Core.ServiceName).
 						Str("transaction_id", transactionID).
+						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
+						Str("ip", r.Header.Get(constants.HeaderIP)).
+						Str("ip_origin", r.Header.Get(constants.HeaderIPOrigin)).
+						Str("user_id", r.Header.Get(constants.HeaderUserID)).
+						Str("user_agent", r.UserAgent()).
 						Interface("panic", rec).
 						Msg("panic in GraphQL handler")
 
@@ -117,9 +122,13 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				if span.SpanContext().IsValid() {
 					span.SetName("GraphQL " + operationName)
 					span.SetAttributes(
-						attribute.String("nvx.transaction_id", transactionID),
-						attribute.String("nvx.request_id", r.Header.Get(constants.HeaderRequestID)),
-						attribute.String("nvx.client_ip", r.Header.Get(constants.HeaderIP)),
+						attribute.String("service", m.cfg.Core.ServiceName),
+						attribute.String("transaction_id", transactionID),
+						attribute.String("request_id", r.Header.Get(constants.HeaderRequestID)),
+						attribute.String("ip", r.Header.Get(constants.HeaderIP)),
+						attribute.String("ip_origin", r.Header.Get(constants.HeaderIPOrigin)),
+						attribute.String("user_id", r.Header.Get(constants.HeaderUserID)),
+						attribute.String("user_agent", r.UserAgent()),
 						attribute.String("graphql.operation.name", operationName),
 					)
 					if gqlBody.Query != "" {
@@ -138,12 +147,13 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				FullURL:         FullURL(r),
 				StatusCode:      0,
 				LatencyMS:       0,
-				ClientIP:        r.Header.Get(constants.HeaderIP),
+				IP:              r.Header.Get(constants.HeaderIP),
+				IPOrigin:        r.Header.Get(constants.HeaderIPOrigin),
 				RequestID:       r.Header.Get(constants.HeaderRequestID),
 				CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
 				CreatedAt:       format.NowUTC(),
 				TransactionID:   transactionID,
-				RequestHeaders:  normalizeHeadersJSON(r.Header),
+				RequestHeaders:  normalizeHeadersJSON(r.Header, m.cfg.Logging.MaskKeywords),
 				ResponseHeaders: nil,
 				RequestBody:     gqlBody,
 				ResponseBody:    nil,
@@ -168,9 +178,9 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				}
 				entry.StatusCode = status
 				entry.LatencyMS = time.Since(start).Milliseconds()
-				entry.ResponseHeaders = normalizeHeadersJSON(rw.Header())
+				entry.ResponseHeaders = normalizeHeadersJSON(rw.Header(), m.cfg.Logging.MaskKeywords)
 				if m.cfg.Logging.LogResponseBodies {
-					entry.ResponseBody = normalizeBodyRaw(rw.Body())
+					entry.ResponseBody = normalizeBodyRaw(rw.Body(), m.cfg.Logging.MaskKeywords)
 				}
 
 				if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {

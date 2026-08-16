@@ -4,20 +4,20 @@ package constants
 // Header constants
 // Header constants define the standard headers used across the NVX middleware.
 const (
-	HeaderTransactionID  = "NVX-Transaction-ID"
-	HeaderRequestID      = "NVX-Request-ID"
-	HeaderAPIKey         = "NVX-API-Key"
-	HeaderUserID         = "NVX-User-ID"
-	HeaderIP             = "NVX-IP"
-	HeaderUserType       = "NVX-User-Type"
-	HeaderToken          = "NVX-Token"
-	HeaderTimestamp      = "NVX-Timestamp"
-	HeaderSignature      = "NVX-Signature"
-	HeaderPlatform       = "NVX-Platform"
+	HeaderTransactionID  = "Transaction-ID"
+	HeaderRequestID      = "Request-ID"
+	HeaderAPIKey         = "API-Key"
+	HeaderUserID         = "User-ID"
+	HeaderIP             = "IP"
+	HeaderIPOrigin       = "IP-Origin"
+	HeaderToken          = "Token"
+	HeaderTimestamp      = "Timestamp"
+	HeaderSignature      = "Signature"
+	HeaderPlatform       = "Platform"
 	HeaderUserAgent      = "User-Agent"
-	HeaderAuthType       = "NVX-Auth-Type"
-	HeaderRateKey        = "NVX-Rate-Key"
-	HeaderAppID          = "NVX-App-ID"
+	HeaderAuthType       = "Auth-Type"
+	HeaderRateKey        = "Rate-Key"
+	HeaderAppID          = "App-ID"
 	AuthTypePublic       = "public"
 	AuthTypePublicAuth   = "public-auth"
 	AuthTypePublicAPIKey = "public-api-key"
@@ -51,9 +51,19 @@ const (
 	DefaultCompressionLevel = 5
 	// DefaultThrottleLimit is the default concurrent request limit
 	DefaultThrottleLimit = 100
+	// DefaultThrottleTimeout is the default concurrent request timeout
+	DefaultThrottleTimeout = 30
+	// DefaultThrottleBacklog is the default concurrent request backlog
+	DefaultThrottleBacklog = 100
+	// DefaultRateLimitRequests is the default rate limit requests
+	DefaultRateLimitRequests = 100
+	// DefaultRateLimitWindow is the default rate limit window
+	DefaultRateLimitWindow = 1
+
 	// MaxHeaderSize is the maximum size for header values
 	MaxHeaderSize    = 8192
 	TimestampExpired = 600 // seconds
+	RequestTimeout   = 60  // seconds
 )
 
 // Required headers for different request types
@@ -114,9 +124,9 @@ var (
 
 // CheckPlatform defines the list of valid client platforms.
 var CheckPlatform = []string{
-	"android",
-	"ios",
-	"web",
-	"desktop",
-	"internal",
+	"mobile",  // andriod, ios, windows
+	"web",     // web browser
+	"desktop", // desktop computer
+	"server",  // server to server (S2S), integration partner (B2B), webhook, or internal microservices.
+	"other",   // IoT, Smart TV, Wearable, dll.
 }

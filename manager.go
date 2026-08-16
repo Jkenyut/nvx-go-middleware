@@ -90,7 +90,7 @@ func applyDefaults(cfg *Config) io.Closer {
 	}
 
 	if cfg.Limits.RequestTimeout == 0 {
-		cfg.Limits.RequestTimeout = 60
+		cfg.Limits.RequestTimeout = constants.RequestTimeout
 	}
 	if cfg.Limits.RequestBodyLimitSize == 0 {
 		cfg.Limits.RequestBodyLimitSize = constants.RequestBodyLimitSize
@@ -151,6 +151,40 @@ func applyDefaults(cfg *Config) io.Closer {
 		cfg.Security.SignatureTimestampExpired = constants.TimestampExpired
 	}
 
+	if len(cfg.Logging.MaskKeywords) == 0 {
+		cfg.Logging.MaskKeywords = []string{
+			// Authentication & Base Secrets
+			"password", "password_cbo", "passphrase", "secret", "client_secret", "client_secret_encrypted",
+			"token", "access_token", "refresh_token", "id_token", "jwt",
+			"apikey", "api_key", "x-api-key", "client_id", "authorization",
+
+			// Session & OTP
+			"session_id", "session_token", "auth_code", "verification_code", "otp",
+
+			// PIN & Pass Numbers
+			"pin", "mpin", "transaction_pin", "encrypted_pin_number",
+			"pass_number", "pass_number_cbo", "encrypted_pass_number", "encrypted_pass_number_cbo",
+			"pass_number_of_account", "encrypted_pass_number_of_account",
+
+			// Signatures & Hashes
+			"hash", "checksum", "signature", "signature_hash", "private_key", "tls_key", "certificate_key",
+
+			// Accounts & Cards
+			"account_number_encrypted", "account_number_cbo", "account_number_encrypted_cbo",
+			"card_number", "card_number_cbo", "encrypted_card_number", "encrypted_card_number_cbo",
+			"credit_card_number", "credit_card_number_cbo", "encrypted_credit_card_number", "encrypted_credit_card_number_cbo",
+			"cvv", "cvc", "cvv2", "cvc2",
+
+			// PII & Identification
+			"nik", "ktp", "ssn", "national_id", "id_card_number", "npwp", "tax_id",
+			"mother_maiden_name", "dob", "date_of_birth",
+			"phone", "phone_number", "mobile_number", "email", "email_address",
+
+			// General Encrypted Data
+			"encrypted_data",
+		}
+	}
+
 	return logCloser
 }
 
@@ -186,7 +220,7 @@ func uniqueStrings(items ...[]string) []string {
 	return out
 }
 
-// SetHeaderAuthType sets the NVX-Auth-Type header to identify the authentication context.
+// SetHeaderAuthType sets the Auth-Type header to identify the authentication context.
 func (m *Manager) SetHeaderAuthType(next http.Handler, authType string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Header.Set(constants.HeaderAuthType, authType)

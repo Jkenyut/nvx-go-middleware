@@ -106,11 +106,11 @@ func RateLimit(
 			_ = sonic.ConfigDefault.NewEncoder(w).Encode(response.PreconditionRequired(r.Context(), "precondition required"))
 		}),
 		httprate.WithResponseHeaders(httprate.ResponseHeaders{
-			Limit:      "NVX-RateLimit-Limit",
-			Remaining:  "NVX-RateLimit-Remaining",
-			Increment:  "NVX-RateLimit-Increment",
-			Reset:      "NVX-RateLimit-Reset",
-			RetryAfter: "NVX-Retry-After",
+			Limit:      "RateLimit-Limit",
+			Remaining:  "RateLimit-Remaining",
+			Reset:      "RateLimit-Reset",
+			RetryAfter: "Retry-After",
+			Increment:  "",
 		}),
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

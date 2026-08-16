@@ -19,8 +19,10 @@ type AuditLog struct {
 	StatusCode int `json:"status_code"`
 	// Latency MS is the time taken to process the request in milliseconds.
 	LatencyMS int64 `json:"latency_ms"`
-	// Client IP is the IP address of the client.
-	ClientIP string `json:"client_ip"`
+	// IP is the IP address of the client.
+	IP string `json:"ip"`
+	// IPOrigin is the IP address of the client after removing proxy headers.
+	IPOrigin string `json:"ip_origin"`
 	// Request ID is the unique request identifier.
 	RequestID string `json:"request_id"`
 	// Transaction ID is the unique transaction identifier used for tracing.

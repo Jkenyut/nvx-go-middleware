@@ -48,22 +48,22 @@ type ChainConfig struct {
 // between an intentionally set 'false' and an unset boolean.
 func (c *ChainConfig) ApplyDefaults() {
 	if c.Compression.CompressionLevel == 0 {
-		c.Compression.CompressionLevel = 5
+		c.Compression.CompressionLevel = constants.DefaultCompressionLevel
 	}
 	if c.Throttle.ThrottleLimit == 0 {
-		c.Throttle.ThrottleLimit = 100
+		c.Throttle.ThrottleLimit = constants.DefaultThrottleLimit
 	}
 	if c.Throttle.ThrottleTimeout == 0 {
-		c.Throttle.ThrottleTimeout = 30
+		c.Throttle.ThrottleTimeout = constants.DefaultThrottleTimeout
 	}
 	if c.Throttle.ThrottleBacklog == 0 {
-		c.Throttle.ThrottleBacklog = 100
+		c.Throttle.ThrottleBacklog = constants.DefaultThrottleBacklog
 	}
 	if c.Limiter.RateLimitRequests == 0 {
-		c.Limiter.RateLimitRequests = 100
+		c.Limiter.RateLimitRequests = constants.DefaultRateLimitRequests
 	}
 	if c.Limiter.RateLimitWindow == 0 {
-		c.Limiter.RateLimitWindow = 1
+		c.Limiter.RateLimitWindow = constants.DefaultRateLimitWindow
 	}
 	if c.Limiter.PreRequestOnBeforeLimiter == nil {
 		c.Limiter.PreRequestOnBeforeLimiter = func(_ http.ResponseWriter, _ *http.Request) bool {

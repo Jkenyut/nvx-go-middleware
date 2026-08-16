@@ -56,7 +56,7 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		ctx = activity.WithAPIKey(ctx, get(constants.HeaderAPIKey))
 		ctx = activity.WithUserID(ctx, get(constants.HeaderUserID))
 		ctx = activity.WithUserIP(ctx, get(constants.HeaderIP))
-		ctx = activity.WithUserType(ctx, get(constants.HeaderUserType))
+		ctx = activity.WithUserIPOrigin(ctx, get(constants.HeaderIPOrigin))
 
 		if m.cfg.Core.EnableTelemetry {
 			span := trace.SpanFromContext(ctx)
@@ -64,10 +64,13 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 				m.cfg.Logger.Error().Msg("🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
 			} else {
 				span.SetAttributes(
-					attribute.String("nvx.transaction_id", transactionID),
-					attribute.String("nvx.request_id", get(constants.HeaderRequestID)),
-					attribute.String("nvx.client_ip", get(constants.HeaderIP)),
-					attribute.String("nvx.user_id", get(constants.HeaderUserID)),
+					attribute.String("service", m.cfg.Core.ServiceName),
+					attribute.String("transaction_id", transactionID),
+					attribute.String("request_id", get(constants.HeaderRequestID)),
+					attribute.String("ip", get(constants.HeaderIP)),
+					attribute.String("user_id", get(constants.HeaderUserID)),
+					attribute.String("ip_origin", get(constants.HeaderIPOrigin)),
+					attribute.String("user_agent", get("user-agent")),
 				)
 			}
 		}
@@ -75,7 +78,15 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		start := time.Now()
 
 		IDAuditLog := cryptoutil.V7()
-		reqHeadersBytes, _ := sonic.ConfigDefault.Marshal(md)
+		b, _ := sonic.ConfigDefault.Marshal(md)
+		str := format.MaskAfterKeywords(string(b), m.cfg.Logging.MaskKeywords, "*")
+		reqHeadersBytes := []byte(str)
+		
+		var bodyRequest any
+		if m.cfg.Logging.LogRequestBodies && req != nil {
+			reqBytes, _ := sonic.ConfigDefault.Marshal(req)
+			bodyRequest = normalizeBodyRaw(reqBytes, m.cfg.Logging.MaskKeywords)
+		}
 
 		entry := model.AuditLog{
 			ID:              IDAuditLog,
@@ -83,14 +94,15 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 			FullURL:         info.FullMethod,
 			StatusCode:      0,
 			LatencyMS:       0,
-			ClientIP:        get(constants.HeaderIP),
+			IP:              get(constants.HeaderIP),
+			IPOrigin:        get(constants.HeaderIPOrigin),
 			RequestID:       get(constants.HeaderRequestID),
 			CreatedBy:       format.ToInt64(get(constants.HeaderUserID)),
 			CreatedAt:       format.NowUTC(),
 			TransactionID:   transactionID,
 			RequestHeaders:  reqHeadersBytes,
 			ResponseHeaders: nil,
-			RequestBody:     req,
+			RequestBody:     bodyRequest,
 			ResponseBody:    nil,
 			Protocol:        "gRPC Unary",
 			ServiceName:     m.cfg.Core.ServiceName,
@@ -113,7 +125,12 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 
 			entry.StatusCode = statusCode
 			entry.LatencyMS = time.Since(start).Milliseconds()
-			entry.ResponseBody = resp
+			
+			if m.cfg.Logging.LogResponseBodies && resp != nil {
+				respBytes, _ := sonic.ConfigDefault.Marshal(resp)
+				entry.ResponseBody = normalizeBodyRaw(respBytes, m.cfg.Logging.MaskKeywords)
+			}
+
 
 			if saveErr := m.cfg.LogStore.Save(reqCtx, &entry); saveErr != nil {
 				m.cfg.Logger.Error().
@@ -136,6 +153,11 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 					Str("service", m.cfg.Core.ServiceName).
 					Str("transaction_id", transactionID).
 					Str("method", info.FullMethod).
+					Str("request_id", get(constants.HeaderRequestID)).
+					Str("ip", get(constants.HeaderIP)).
+					Str("ip_origin", get(constants.HeaderIPOrigin)).
+					Str("user_id", get(constants.HeaderUserID)).
+					Str("user_agent", get("user-agent")).
 					Interface("panic", rec).
 					Msgf("gRPC unary panic:\n%s", stack)
 				err = status.Errorf(codes.Internal, "internal server error")
@@ -180,7 +202,7 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 		ctx = activity.WithAPIKey(ctx, get(constants.HeaderAPIKey))
 		ctx = activity.WithUserID(ctx, get(constants.HeaderUserID))
 		ctx = activity.WithUserIP(ctx, get(constants.HeaderIP))
-		ctx = activity.WithUserType(ctx, get(constants.HeaderUserType))
+		ctx = activity.WithUserIPOrigin(ctx, get(constants.HeaderIPOrigin))
 
 		if m.cfg.Core.EnableTelemetry {
 			span := trace.SpanFromContext(ctx)
@@ -188,10 +210,13 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 				m.cfg.Logger.Error().Msg("🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
 			} else {
 				span.SetAttributes(
-					attribute.String("nvx.transaction_id", transactionID),
-					attribute.String("nvx.request_id", get(constants.HeaderRequestID)),
-					attribute.String("nvx.client_ip", get(constants.HeaderIP)),
-					attribute.String("nvx.user_id", get(constants.HeaderUserID)),
+					attribute.String("service", m.cfg.Core.ServiceName),
+					attribute.String("transaction_id", transactionID),
+					attribute.String("request_id", get(constants.HeaderRequestID)),
+					attribute.String("ip", get(constants.HeaderIP)),
+					attribute.String("ip_origin", get(constants.HeaderIPOrigin)),
+					attribute.String("user_id", get(constants.HeaderUserID)),
+					attribute.String("user_agent", get("user-agent")),
 				)
 			}
 		}
@@ -200,7 +225,9 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 		start := time.Now()
 
 		IDAuditLog := cryptoutil.V7()
-		reqHeadersBytes, _ := sonic.ConfigDefault.Marshal(md)
+		b, _ := sonic.ConfigDefault.Marshal(md)
+		str := format.MaskAfterKeywords(string(b), m.cfg.Logging.MaskKeywords, "*")
+		reqHeadersBytes := []byte(str)
 
 		entry := model.AuditLog{
 			ID:              IDAuditLog,
@@ -208,7 +235,8 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			FullURL:         info.FullMethod,
 			StatusCode:      0,
 			LatencyMS:       0,
-			ClientIP:        get(constants.HeaderIP),
+			IP:              get(constants.HeaderIP),
+			IPOrigin:        get(constants.HeaderIPOrigin),
 			RequestID:       get(constants.HeaderRequestID),
 			CreatedBy:       format.ToInt64(get(constants.HeaderUserID)),
 			CreatedAt:       format.NowUTC(),
