@@ -773,6 +773,13 @@ func checkTimestamp(timestampStr string, allowedSkewSec int64) error {
 	return nil
 }
 
+// PingHandler creates a GET endpoint that can be used for service health checks.
+func (m *Manager) PingHandler() http.Handler {
+	return m.MethodOnly("GET", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, response.Success(r.Context(), "pong"))
+	}))
+}
+
 // writeJSON is an internal helper that sets Content-Type, writes the status
 // code, and encodes v as JSON using sonic. Encode errors are silently ignored
 // because the status code has already been committed.

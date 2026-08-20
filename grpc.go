@@ -81,7 +81,7 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		b, _ := sonic.ConfigDefault.Marshal(md)
 		str := format.MaskAfterKeywords(string(b), m.cfg.Logging.MaskKeywords, "*")
 		reqHeadersBytes := []byte(str)
-		
+
 		var bodyRequest any
 		if m.cfg.Logging.LogRequestBodies && req != nil {
 			reqBytes, _ := sonic.ConfigDefault.Marshal(req)
@@ -125,12 +125,11 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 
 			entry.StatusCode = statusCode
 			entry.LatencyMS = time.Since(start).Milliseconds()
-			
+
 			if m.cfg.Logging.LogResponseBodies && resp != nil {
 				respBytes, _ := sonic.ConfigDefault.Marshal(resp)
 				entry.ResponseBody = normalizeBodyRaw(respBytes, m.cfg.Logging.MaskKeywords)
 			}
-
 
 			if saveErr := m.cfg.LogStore.Save(reqCtx, &entry); saveErr != nil {
 				m.cfg.Logger.Error().
