@@ -117,7 +117,6 @@ func (m *Manager) buildOuterChain(cfg *ChainConfig, handler http.Handler) http.H
 	}
 
 	handler = m.Recoverer(handler)
-	handler = m.CORS(handler, m.cfg.Security.AllowedOrigins, m.cfg.Security.AllowedHeaders)
 
 	return handler
 }
@@ -228,15 +227,6 @@ func (m *Manager) InternalChain(cfg *ChainConfig) func(http.Handler) http.Handle
 		handler = m.EnsureInternal(handler)
 		handler = m.SetHeaderAuthType(handler, constants.AuthTypeInternal)
 		return m.buildOuterChain(cfg, handler)
-	}
-}
-
-// AdminChain creates a middleware chain for admin routes.
-func (m *Manager) AdminChain(cfg *ChainConfig, adminCheck func(http.Handler) http.Handler) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return m.InternalChain(cfg)(
-			adminCheck(next),
-		)
 	}
 }
 

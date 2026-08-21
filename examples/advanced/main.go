@@ -93,38 +93,6 @@ func main() {
 	))
 
 	// ========================================
-	// ADMIN ROUTES
-	// ========================================
-
-	// Custom admin check middleware
-	adminCheck := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userType := r.Header.Get("User-Type")
-			if userType != "admin" {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusForbidden)
-				_ = json.NewEncoder(w).Encode(map[string]interface{}{
-					"meta": map[string]interface{}{
-						"success": false,
-						"message": "Admin access required",
-						"code":    403,
-					},
-				})
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-
-	mux.Handle("/api/v1/admin/users", mgr.AdminChain(&chainCfg, adminCheck)(
-		mgr.MethodOnly("GET", http.HandlerFunc(listUsersHandler)),
-	))
-
-	mux.Handle("/api/v1/admin/stats", mgr.AdminChain(&chainCfg, adminCheck)(
-		mgr.MethodOnly("GET", http.HandlerFunc(statsHandler)),
-	))
-
-	// ========================================
 	// DEBUG ROUTES (only in non-production)
 	// ========================================
 

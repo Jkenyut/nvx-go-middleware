@@ -78,16 +78,7 @@ func TestNewWithError(t *testing.T) {
 			cfg:     Config{Security: ConfigSecurity{AllowedOrigins: []string{"*"}}},
 			wantErr: true,
 		},
-		{
-			name: "missing origins",
-			cfg: Config{
-				Security: ConfigSecurity{
-					PublicKeySignature:  "pub",
-					PrivateKeySignature: "priv",
-				},
-			},
-			wantErr: true,
-		},
+
 	}
 
 	for _, tt := range tests {

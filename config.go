@@ -74,17 +74,12 @@ func (c *Config) Validate() error {
 	if c.Security.PublicKeySignature == "" || c.Security.PrivateKeySignature == "" {
 		return ErrMissingKeys
 	}
-	if len(c.Security.AllowedOrigins) == 0 {
-		return ErrMissingOrigins
-	}
 	return nil
 }
 
 var (
 	// ErrMissingKeys is returned when PublicKeySignature or PrivateKeySignature are empty.
 	ErrMissingKeys = fmt.Errorf("PublicKeySignature and PrivateKeySignature are required")
-	// ErrMissingOrigins is returned when AllowedOrigins is empty.
-	ErrMissingOrigins = fmt.Errorf("AllowedOrigins must not be empty")
 )
 
 // WithActivityContext injects standard NVX context values from request headers.
