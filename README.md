@@ -76,7 +76,7 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-## 🎛️ Dynamic Headers (Copot-Pasang)
+## 🎛️ Dynamic Headers (Pluggable)
 
 NVX Go Middleware allows you to fully customize or disable mandatory headers like `X-Request-Id`, `X-Transaction-Id`, etc., and dynamically configure which headers are logged without changing any code.
 
