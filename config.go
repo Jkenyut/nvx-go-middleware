@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/Jkenyut/nvx-go-helper/activity"
-	"github.com/Jkenyut/nvx-go-middleware/constants"
 )
 
 // ConfigCore holds the configuration for the middleware manager.
@@ -30,6 +29,7 @@ type ConfigLogging struct {
 	LogResponseBodies        bool     `yaml:"logResponseBodies" default:"false"`
 	ResponseBodyLogLimitSize int64    `yaml:"responseBodyLogLimitSize" default:"5242880"` // 5MB
 	MaskKeywords             []string `yaml:"maskKeywords" default:"[]"`
+	LogHeaders               []string `yaml:"logHeaders" default:"[\"X-Request-Id\", \"X-Transaction-Id\", \"X-Forwarded-For\", \"X-Ip-Origin\", \"X-User-Id\"]"`
 }
 
 // ConfigSecurity holds security-related configurations.
@@ -44,14 +44,26 @@ type ConfigSecurity struct {
 	SignatureTimestampExpired int64    `yaml:"signatureTimestampExpired" default:"600"`
 }
 
+// HeaderKeys defines the names of headers to be extracted into the context.
+type HeaderKeys struct {
+	RequestID     string `yaml:"requestID" default:"X-Request-Id"`
+	TransactionID string `yaml:"transactionID" default:"X-Transaction-Id"`
+	IP            string `yaml:"ip" default:"X-Forwarded-For"`
+	IPOrigin      string `yaml:"ipOrigin" default:"X-Ip-Origin"`
+	UserID        string `yaml:"userID" default:"X-User-Id"`
+	APIKey        string `yaml:"apiKey" default:"X-Api-Key"`
+	AuthType      string `yaml:"authType" default:"X-Auth-Type"`
+}
+
 // ConfigHeaders holds configuration for required headers.
 type ConfigHeaders struct {
-	RequiredPublicAuthHeaders        []string `yaml:"requiredPublicAuthHeaders" default:"[]"`
-	RequiredPublicHeaders            []string `yaml:"requiredPublicHeaders" default:"[]"`
-	RequiredInternalHeaders          []string `yaml:"requiredInternalHeaders" default:"[]"`
-	RequiredPublicAPIKeyHeaders      []string `yaml:"requiredPublicAPIKeyHeaders" default:"[]"`
-	RequiredSignaturePublicHeaders   []string `yaml:"requiredSignaturePublicHeaders" default:"[]"`
-	RequiredSignatureInternalHeaders []string `yaml:"requiredSignatureInternalHeaders" default:"[]"`
+	RequiredPublicAuthHeaders        []string   `yaml:"requiredPublicAuthHeaders" default:"[]"`
+	RequiredPublicHeaders            []string   `yaml:"requiredPublicHeaders" default:"[]"`
+	RequiredInternalHeaders          []string   `yaml:"requiredInternalHeaders" default:"[]"`
+	RequiredPublicAPIKeyHeaders      []string   `yaml:"requiredPublicAPIKeyHeaders" default:"[]"`
+	RequiredSignaturePublicHeaders   []string   `yaml:"requiredSignaturePublicHeaders" default:"[]"`
+	RequiredSignatureInternalHeaders []string   `yaml:"requiredSignatureInternalHeaders" default:"[]"`
+	Keys                             HeaderKeys `yaml:"keys"`
 }
 
 // Config holds the configuration for the middleware manager.
@@ -84,14 +96,14 @@ var (
 
 // WithActivityContext injects standard NVX context values from request headers.
 // Exported so protocol-specific adapters (WebSocket, gRPC) can reuse it.
-func WithActivityContext(r *http.Request) *http.Request {
+func WithActivityContext(r *http.Request, keys HeaderKeys) *http.Request {
 	h := r.Header
 	ctx := r.Context()
-	ctx = activity.WithTransactionID(ctx, h.Get(constants.HeaderTransactionID))
-	ctx = activity.WithAPIKey(ctx, h.Get(constants.HeaderAPIKey))
-	ctx = activity.WithUserID(ctx, h.Get(constants.HeaderUserID))
-	ctx = activity.WithUserIP(ctx, h.Get(constants.HeaderIP))
-	ctx = activity.WithRequestID(ctx, h.Get(constants.HeaderRequestID))
-	ctx = activity.WithUserIPOrigin(ctx, h.Get(constants.HeaderIPOrigin))
+	ctx = activity.WithTransactionID(ctx, h.Get(keys.TransactionID))
+	ctx = activity.WithAPIKey(ctx, h.Get(keys.APIKey))
+	ctx = activity.WithUserID(ctx, h.Get(keys.UserID))
+	ctx = activity.WithUserIP(ctx, h.Get(keys.IP))
+	ctx = activity.WithRequestID(ctx, h.Get(keys.RequestID))
+	ctx = activity.WithUserIPOrigin(ctx, h.Get(keys.IPOrigin))
 	return r.WithContext(ctx)
 }

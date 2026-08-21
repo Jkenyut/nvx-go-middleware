@@ -144,11 +144,42 @@ func applyDefaults(cfg *Config) io.Closer {
 			cfg.Headers.RequiredPublicAPIKeyHeaders,
 		)
 	}
+	if cfg.Headers.Keys.RequestID == "" {
+		cfg.Headers.Keys.RequestID = constants.HeaderRequestID
+	}
+	if cfg.Headers.Keys.TransactionID == "" {
+		cfg.Headers.Keys.TransactionID = constants.HeaderTransactionID
+	}
+	if cfg.Headers.Keys.IP == "" {
+		cfg.Headers.Keys.IP = constants.HeaderIP
+	}
+	if cfg.Headers.Keys.IPOrigin == "" {
+		cfg.Headers.Keys.IPOrigin = constants.HeaderIPOrigin
+	}
+	if cfg.Headers.Keys.UserID == "" {
+		cfg.Headers.Keys.UserID = constants.HeaderUserID
+	}
+	if cfg.Headers.Keys.APIKey == "" {
+		cfg.Headers.Keys.APIKey = constants.HeaderAPIKey
+	}
+	if cfg.Headers.Keys.AuthType == "" {
+		cfg.Headers.Keys.AuthType = constants.HeaderAuthType
+	}
 	if len(cfg.Security.HeadersToRemove) == 0 {
 		cfg.Security.HeadersToRemove = []string{}
 	}
 	if cfg.Security.SignatureTimestampExpired == 0 {
 		cfg.Security.SignatureTimestampExpired = constants.TimestampExpired
+	}
+
+	if len(cfg.Logging.LogHeaders) == 0 {
+		cfg.Logging.LogHeaders = []string{
+			cfg.Headers.Keys.RequestID,
+			cfg.Headers.Keys.TransactionID,
+			cfg.Headers.Keys.IP,
+			cfg.Headers.Keys.IPOrigin,
+			cfg.Headers.Keys.UserID,
+		}
 	}
 
 	if len(cfg.Logging.MaskKeywords) == 0 {
@@ -223,7 +254,17 @@ func uniqueStrings(items ...[]string) []string {
 // SetHeaderAuthType sets the Auth-Type header to identify the authentication context.
 func (m *Manager) SetHeaderAuthType(next http.Handler, authType string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Header.Set(constants.HeaderAuthType, authType)
+		r.Header.Set(m.cfg.Headers.Keys.AuthType, authType)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// addLogHeaders dynamically adds headers to the log context based on the LogHeaders config.
+func (m *Manager) addLogHeaders(event LogEvent, r *http.Request) LogEvent {
+	for _, h := range m.cfg.Logging.LogHeaders {
+		if val := r.Header.Get(h); val != "" {
+			event = event.Str(h, val)
+		}
+	}
+	return event
 }

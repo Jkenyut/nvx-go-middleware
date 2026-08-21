@@ -10,7 +10,6 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/activity"
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/format"
-	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
 	"github.com/bytedance/sonic"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -42,13 +41,13 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		coreHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// ── Context injection ─────────────────────────────────────
-			r = WithActivityContext(r)
+			r = WithActivityContext(r, m.cfg.Headers.Keys)
 
-			transactionID := r.Header.Get(constants.HeaderTransactionID)
+			transactionID := r.Header.Get(m.cfg.Headers.Keys.TransactionID)
 			if transactionID == "" {
 				transactionID = cryptoutil.V7()
 			}
-			r.Header.Set(constants.HeaderTransactionID, transactionID)
+			r.Header.Set(m.cfg.Headers.Keys.TransactionID, transactionID)
 			r = r.WithContext(activity.WithTransactionID(r.Context(), transactionID))
 
 			var rw *responseRecorder
@@ -66,10 +65,10 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.Core.ServiceName).
 						Str("transaction_id", transactionID).
-						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
-						Str("ip", r.Header.Get(constants.HeaderIP)).
-						Str("ip_origin", r.Header.Get(constants.HeaderIPOrigin)).
-						Str("user_id", r.Header.Get(constants.HeaderUserID)).
+						Str("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)).
+						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
+						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
+						Str("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)).
 						Str("user_agent", r.UserAgent()).
 						Interface("panic", rec).
 						Msg("panic in GraphQL handler")
@@ -124,10 +123,10 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 					span.SetAttributes(
 						attribute.String("service", m.cfg.Core.ServiceName),
 						attribute.String("transaction_id", transactionID),
-						attribute.String("request_id", r.Header.Get(constants.HeaderRequestID)),
-						attribute.String("ip", r.Header.Get(constants.HeaderIP)),
-						attribute.String("ip_origin", r.Header.Get(constants.HeaderIPOrigin)),
-						attribute.String("user_id", r.Header.Get(constants.HeaderUserID)),
+						attribute.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
+						attribute.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
+						attribute.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
+						attribute.String("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)),
 						attribute.String("user_agent", r.UserAgent()),
 						attribute.String("graphql.operation.name", operationName),
 					)
@@ -147,10 +146,10 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				FullURL:         FullURL(r),
 				StatusCode:      0,
 				LatencyMS:       0,
-				IP:              r.Header.Get(constants.HeaderIP),
-				IPOrigin:        r.Header.Get(constants.HeaderIPOrigin),
-				RequestID:       r.Header.Get(constants.HeaderRequestID),
-				CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
+				IP:              r.Header.Get(m.cfg.Headers.Keys.IP),
+				IPOrigin:        r.Header.Get(m.cfg.Headers.Keys.IPOrigin),
+				RequestID:       r.Header.Get(m.cfg.Headers.Keys.RequestID),
+				CreatedBy:       format.ToInt64(r.Header.Get(m.cfg.Headers.Keys.UserID)),
 				CreatedAt:       format.NowUTC(),
 				TransactionID:   transactionID,
 				RequestHeaders:  normalizeHeadersJSON(r.Header, m.cfg.Logging.MaskKeywords),

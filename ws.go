@@ -55,13 +55,13 @@ func (m *Manager) WebSocketChain(
 			}
 
 			// Inject context values
-			r = WithActivityContext(r)
+			r = WithActivityContext(r, m.cfg.Headers.Keys)
 
 			// Generate / propagate transaction ID
-			transactionID := r.Header.Get(constants.HeaderTransactionID)
+			transactionID := r.Header.Get(m.cfg.Headers.Keys.TransactionID)
 			if transactionID == "" {
 				transactionID = cryptoutil.V7()
-				r.Header.Set(constants.HeaderTransactionID, transactionID)
+				r.Header.Set(m.cfg.Headers.Keys.TransactionID, transactionID)
 			}
 			r = r.WithContext(activity.WithTransactionID(r.Context(), transactionID))
 
@@ -71,10 +71,10 @@ func (m *Manager) WebSocketChain(
 					span.SetName("WebSocket Upgrade")
 					span.SetAttributes(
 						attribute.String("transaction_id", transactionID),
-						attribute.String("request_id", r.Header.Get(constants.HeaderRequestID)),
-						attribute.String("ip", r.Header.Get(constants.HeaderIP)),
-						attribute.String("ip_origin", r.Header.Get(constants.HeaderIPOrigin)),
-						attribute.String("user_id", r.Header.Get(constants.HeaderUserID)),
+						attribute.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
+						attribute.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
+						attribute.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
+						attribute.String("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)),
 						attribute.String("user_agent", r.UserAgent()),
 						attribute.String("service", m.cfg.Core.ServiceName),
 						attribute.String("protocol", "WebSocket"),
@@ -113,12 +113,12 @@ func (m *Manager) WebSocketChain(
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.Core.ServiceName).
 						Str("transaction_id", transactionID).
-						Str("ip", r.Header.Get(constants.HeaderIP)).
-						Str("ip_origin", r.Header.Get(constants.HeaderIPOrigin)).
-						Str("user_id", r.Header.Get(constants.HeaderUserID)).
+						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
+						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
+						Str("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)).
 						Str("user_agent", r.UserAgent()).
 						Str("protocol", "WebSocket").
-						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
+						Str("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)).
 						Interface("panic", rec).
 						Msg("panic in WebSocket handler")
 
@@ -139,10 +139,10 @@ func (m *Manager) WebSocketChain(
 				FullURL:         FullURL(r),
 				StatusCode:      0,
 				LatencyMS:       0,
-				IP:              r.Header.Get(constants.HeaderIP),
-				IPOrigin:        r.Header.Get(constants.HeaderIPOrigin),
-				RequestID:       r.Header.Get(constants.HeaderRequestID),
-				CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
+				IP:              r.Header.Get(m.cfg.Headers.Keys.IP),
+				IPOrigin:        r.Header.Get(m.cfg.Headers.Keys.IPOrigin),
+				RequestID:       r.Header.Get(m.cfg.Headers.Keys.RequestID),
+				CreatedBy:       format.ToInt64(r.Header.Get(m.cfg.Headers.Keys.UserID)),
 				CreatedAt:       format.NowUTC(),
 				TransactionID:   transactionID,
 				RequestHeaders:  normalizeHeadersJSON(r.Header, m.cfg.Logging.MaskKeywords),
@@ -177,12 +177,12 @@ func (m *Manager) WebSocketChain(
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.Core.ServiceName).
 						Str("transaction_id", transactionID).
-						Str("ip", r.Header.Get(constants.HeaderIP)).
-						Str("ip_origin", r.Header.Get(constants.HeaderIPOrigin)).
-						Str("user_id", r.Header.Get(constants.HeaderUserID)).
+						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
+						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
+						Str("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)).
 						Str("user_agent", r.UserAgent()).
 						Str("protocol", "WebSocket").
-						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
+						Str("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)).
 						Err(err).
 						Msg("failed to save ws audit log")
 				}

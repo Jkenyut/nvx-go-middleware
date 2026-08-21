@@ -34,24 +34,19 @@ import (
 func (m *Manager) Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		ctx = activity.WithRequestID(ctx, r.Header.Get(constants.HeaderRequestID))
+		ctx = activity.WithRequestID(ctx, r.Header.Get(m.cfg.Headers.Keys.RequestID))
 		r = r.WithContext(ctx)
 
 		defer func() {
 			if rec := recover(); rec != nil {
 				stack := string(debug.Stack())
-				m.cfg.Logger.Error().
+				event := m.cfg.Logger.Error().
 					Str("service", m.cfg.Core.ServiceName).
-					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
-					Str("transaction_id", r.Header.Get(constants.HeaderTransactionID)).
 					Str("method", r.Method).
 					Str("path", r.URL.Path).
-					Str("ip", r.Header.Get(constants.HeaderIP)).
-					Str("ip_origin", r.Header.Get(constants.HeaderIPOrigin)).
-					Str("user_id", r.Header.Get(constants.HeaderUserID)).
 					Str("user_agent", r.UserAgent()).
-					Interface("panic", rec).
-					Msgf("panic recovered:\n%s", stack)
+					Interface("panic", rec)
+				m.addLogHeaders(event, r).Msgf("panic recovered:\n%s", stack)
 
 				if m.cfg.Core.EnableTelemetry {
 					span := trace.SpanFromContext(r.Context())
@@ -61,19 +56,13 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 
 				// Abort if response already started
 				if ww, ok := w.(chimiddleware.WrapResponseWriter); ok && ww.Status() != 0 {
-					m.cfg.Logger.Error().
-						Str("service", m.cfg.Core.ServiceName).
-						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
-						Str("transaction_id", r.Header.Get(constants.HeaderTransactionID)).
-						Msg("response already written, cannot recover")
+					event := m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName)
+					m.addLogHeaders(event, r).Msg("response already written, cannot recover")
 					return
 				}
 				if rw, ok := w.(*responseRecorder); ok && rw.Status() != 0 {
-					m.cfg.Logger.Error().
-						Str("service", m.cfg.Core.ServiceName).
-						Str("request_id", r.Header.Get(constants.HeaderRequestID)).
-						Str("transaction_id", r.Header.Get(constants.HeaderTransactionID)).
-						Msg("response already written, cannot recover")
+					event := m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName)
+					m.addLogHeaders(event, r).Msg("response already written, cannot recover")
 					return
 				}
 
@@ -100,11 +89,11 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		IDAuditLog := cryptoutil.V7()
 
 		// Generate or propagate Transaction ID
-		transactionID := r.Header.Get(constants.HeaderTransactionID)
+		transactionID := r.Header.Get(m.cfg.Headers.Keys.TransactionID)
 		if transactionID == "" {
 			transactionID = cryptoutil.V7()
-			rw.Header().Set(constants.HeaderTransactionID, transactionID)
-			r.Header.Set(constants.HeaderTransactionID, transactionID)
+			rw.Header().Set(m.cfg.Headers.Keys.TransactionID, transactionID)
+			r.Header.Set(m.cfg.Headers.Keys.TransactionID, transactionID)
 		}
 
 		if m.cfg.Core.EnableTelemetry {
@@ -112,19 +101,19 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			span.SetAttributes(
 				attribute.String("service", m.cfg.Core.ServiceName),
 				attribute.String("transaction_id", transactionID),
-				attribute.String("request_id", r.Header.Get(constants.HeaderRequestID)),
-				attribute.String("ip", r.Header.Get(constants.HeaderIP)),
-				attribute.String("ip_origin", r.Header.Get(constants.HeaderIPOrigin)),
-				attribute.String("user_id", r.Header.Get(constants.HeaderUserID)),
+				attribute.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
+				attribute.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
+				attribute.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
+				attribute.String("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)),
 				attribute.String("user_agent", r.UserAgent()),
 				attribute.String("path", r.URL.Path),
 				attribute.String("protocol", "HTTP "+r.Proto),
-				attribute.String("header_auth_type", r.Header.Get(constants.HeaderAuthType)),
+				attribute.String("header_auth_type", r.Header.Get(m.cfg.Headers.Keys.AuthType)),
 			)
 		}
 
 		// Context injection
-		r = WithActivityContext(r)
+		r = WithActivityContext(r, m.cfg.Headers.Keys)
 
 		if m.cfg.ContextInjector != nil {
 			r = m.cfg.ContextInjector(r)
@@ -137,18 +126,14 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		if m.cfg.Logging.LogRequestBodies {
 			raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
 			if err != nil {
-				m.cfg.Logger.Error().
+				event := m.cfg.Logger.Error().
 					Str("service", m.cfg.Core.ServiceName).
-					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Str("transaction_id", transactionID).
 					Str("method", r.Method).
 					Str("path", r.URL.Path).
-					Str("ip", r.Header.Get(constants.HeaderIP)).
-					Str("ip_origin", r.Header.Get(constants.HeaderIPOrigin)).
-					Str("user_id", r.Header.Get(constants.HeaderUserID)).
 					Str("user_agent", r.UserAgent()).
-					Err(err).
-					Msg("failed to read request body")
+					Err(err)
+				m.addLogHeaders(event, r).Msg("failed to read request body")
 				writeJSON(rw, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType))
 				if rw != nil {
 					rw.Free()
@@ -178,10 +163,10 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				FullURL:         FullURL(r),
 				StatusCode:      status,
 				LatencyMS:       time.Since(start).Milliseconds(),
-				IP:              r.Header.Get(constants.HeaderIP),
-				IPOrigin:        r.Header.Get(constants.HeaderIPOrigin),
-				RequestID:       r.Header.Get(constants.HeaderRequestID),
-				CreatedBy:       format.ToInt64(r.Header.Get(constants.HeaderUserID)),
+				IP:              r.Header.Get(m.cfg.Headers.Keys.IP),
+				IPOrigin:        r.Header.Get(m.cfg.Headers.Keys.IPOrigin),
+				RequestID:       r.Header.Get(m.cfg.Headers.Keys.RequestID),
+				CreatedBy:       format.ToInt64(r.Header.Get(m.cfg.Headers.Keys.UserID)),
 				CreatedAt:       format.NowUTC(),
 				TransactionID:   transactionID,
 				RequestHeaders:  requestHeadersBytes,
@@ -195,20 +180,15 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			}
 
 			if err := m.cfg.LogStore.Save(r.Context(), &entry); err != nil {
-				m.cfg.Logger.Error().
+				event := m.cfg.Logger.Error().
 					Str("service", m.cfg.Core.ServiceName).
-					Str("request_id", r.Header.Get(constants.HeaderRequestID)).
 					Str("transaction_id", transactionID).
 					Str("method", r.Method).
 					Str("path", r.URL.Path).
-					Str("ip", r.Header.Get(constants.HeaderIP)).
-					Str("ip_origin", r.Header.Get(constants.HeaderIPOrigin)).
-					Str("user_id", r.Header.Get(constants.HeaderUserID)).
 					Str("user_agent", r.UserAgent()).
 					Str("protocol", "HTTP "+r.Proto).
-					Str("header_auth_type", r.Header.Get(constants.HeaderAuthType)).
-					Err(err).
-					Msg("failed to save audit log")
+					Err(err)
+				m.addLogHeaders(event, r).Msg("failed to write audit log entry to store")
 			}
 
 			if rw != nil {
@@ -454,11 +434,10 @@ func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (valid bool, s
 
 	bodyBytes, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
 	if err != nil {
-		m.cfg.Logger.Error().
+		event := m.cfg.Logger.Error().
 			Str("service", m.cfg.Core.ServiceName).
-			Str("request_id", r.Header.Get(constants.HeaderRequestID)).
-			Err(err).
-			Msg("failed to read request body for signature validation")
+			Err(err)
+		m.addLogHeaders(event, r).Msg("failed to read request body for signature validation")
 		return false, err.Error()
 	}
 	parts = append(parts, ResolveBodyToken(r.Header.Get("Content-Type"), bodyBytes))
@@ -515,8 +494,8 @@ func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 
 		// clientIP is real user IP (extracted from X-Forwarded-For)
 		// remoteIP is IP from proxy/LB that directly connects to our server
-		r.Header.Set(constants.HeaderIP, clientIP)
-		r.Header.Set(constants.HeaderIPOrigin, remoteIP)
+		r.Header.Set(m.cfg.Headers.Keys.IP, clientIP)
+		r.Header.Set(m.cfg.Headers.Keys.IPOrigin, remoteIP)
 
 		if clientIP != remoteIP {
 			r.RemoteAddr = net.JoinHostPort(clientIP, "0")

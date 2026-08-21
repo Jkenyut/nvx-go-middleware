@@ -78,7 +78,6 @@ func TestNewWithError(t *testing.T) {
 			cfg:     Config{Security: ConfigSecurity{AllowedOrigins: []string{"*"}}},
 			wantErr: true,
 		},
-
 	}
 
 	for _, tt := range tests {

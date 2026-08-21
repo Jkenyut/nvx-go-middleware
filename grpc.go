@@ -9,7 +9,6 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/activity"
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/format"
-	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
 	"github.com/bytedance/sonic"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -45,18 +44,18 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		// Propagate / generate transaction ID
-		transactionID := get(constants.HeaderTransactionID)
+		transactionID := get(m.cfg.Headers.Keys.TransactionID)
 		if transactionID == "" {
 			transactionID = cryptoutil.V7()
 		}
 
 		// Enrich context
 		ctx = activity.WithTransactionID(ctx, transactionID)
-		ctx = activity.WithRequestID(ctx, get(constants.HeaderRequestID))
-		ctx = activity.WithAPIKey(ctx, get(constants.HeaderAPIKey))
-		ctx = activity.WithUserID(ctx, get(constants.HeaderUserID))
-		ctx = activity.WithUserIP(ctx, get(constants.HeaderIP))
-		ctx = activity.WithUserIPOrigin(ctx, get(constants.HeaderIPOrigin))
+		ctx = activity.WithRequestID(ctx, get(m.cfg.Headers.Keys.RequestID))
+		ctx = activity.WithAPIKey(ctx, get(m.cfg.Headers.Keys.APIKey))
+		ctx = activity.WithUserID(ctx, get(m.cfg.Headers.Keys.UserID))
+		ctx = activity.WithUserIP(ctx, get(m.cfg.Headers.Keys.IP))
+		ctx = activity.WithUserIPOrigin(ctx, get(m.cfg.Headers.Keys.IPOrigin))
 
 		if m.cfg.Core.EnableTelemetry {
 			span := trace.SpanFromContext(ctx)
@@ -66,10 +65,10 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 				span.SetAttributes(
 					attribute.String("service", m.cfg.Core.ServiceName),
 					attribute.String("transaction_id", transactionID),
-					attribute.String("request_id", get(constants.HeaderRequestID)),
-					attribute.String("ip", get(constants.HeaderIP)),
-					attribute.String("user_id", get(constants.HeaderUserID)),
-					attribute.String("ip_origin", get(constants.HeaderIPOrigin)),
+					attribute.String("request_id", get(m.cfg.Headers.Keys.RequestID)),
+					attribute.String("ip", get(m.cfg.Headers.Keys.IP)),
+					attribute.String("user_id", get(m.cfg.Headers.Keys.UserID)),
+					attribute.String("ip_origin", get(m.cfg.Headers.Keys.IPOrigin)),
 					attribute.String("user_agent", get("user-agent")),
 				)
 			}
@@ -94,10 +93,10 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 			FullURL:         info.FullMethod,
 			StatusCode:      0,
 			LatencyMS:       0,
-			IP:              get(constants.HeaderIP),
-			IPOrigin:        get(constants.HeaderIPOrigin),
-			RequestID:       get(constants.HeaderRequestID),
-			CreatedBy:       format.ToInt64(get(constants.HeaderUserID)),
+			IP:              get(m.cfg.Headers.Keys.IP),
+			IPOrigin:        get(m.cfg.Headers.Keys.IPOrigin),
+			RequestID:       get(m.cfg.Headers.Keys.RequestID),
+			CreatedBy:       format.ToInt64(get(m.cfg.Headers.Keys.UserID)),
 			CreatedAt:       format.NowUTC(),
 			TransactionID:   transactionID,
 			RequestHeaders:  reqHeadersBytes,
@@ -152,10 +151,10 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 					Str("service", m.cfg.Core.ServiceName).
 					Str("transaction_id", transactionID).
 					Str("method", info.FullMethod).
-					Str("request_id", get(constants.HeaderRequestID)).
-					Str("ip", get(constants.HeaderIP)).
-					Str("ip_origin", get(constants.HeaderIPOrigin)).
-					Str("user_id", get(constants.HeaderUserID)).
+					Str("request_id", get(m.cfg.Headers.Keys.RequestID)).
+					Str("ip", get(m.cfg.Headers.Keys.IP)).
+					Str("ip_origin", get(m.cfg.Headers.Keys.IPOrigin)).
+					Str("user_id", get(m.cfg.Headers.Keys.UserID)).
 					Str("user_agent", get("user-agent")).
 					Interface("panic", rec).
 					Msgf("gRPC unary panic:\n%s", stack)
@@ -191,17 +190,17 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			return ""
 		}
 
-		transactionID := get(constants.HeaderTransactionID)
+		transactionID := get(m.cfg.Headers.Keys.TransactionID)
 		if transactionID == "" {
 			transactionID = cryptoutil.V7()
 		}
 
 		ctx = activity.WithTransactionID(ctx, transactionID)
-		ctx = activity.WithRequestID(ctx, get(constants.HeaderRequestID))
-		ctx = activity.WithAPIKey(ctx, get(constants.HeaderAPIKey))
-		ctx = activity.WithUserID(ctx, get(constants.HeaderUserID))
-		ctx = activity.WithUserIP(ctx, get(constants.HeaderIP))
-		ctx = activity.WithUserIPOrigin(ctx, get(constants.HeaderIPOrigin))
+		ctx = activity.WithRequestID(ctx, get(m.cfg.Headers.Keys.RequestID))
+		ctx = activity.WithAPIKey(ctx, get(m.cfg.Headers.Keys.APIKey))
+		ctx = activity.WithUserID(ctx, get(m.cfg.Headers.Keys.UserID))
+		ctx = activity.WithUserIP(ctx, get(m.cfg.Headers.Keys.IP))
+		ctx = activity.WithUserIPOrigin(ctx, get(m.cfg.Headers.Keys.IPOrigin))
 
 		if m.cfg.Core.EnableTelemetry {
 			span := trace.SpanFromContext(ctx)
@@ -211,10 +210,10 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 				span.SetAttributes(
 					attribute.String("service", m.cfg.Core.ServiceName),
 					attribute.String("transaction_id", transactionID),
-					attribute.String("request_id", get(constants.HeaderRequestID)),
-					attribute.String("ip", get(constants.HeaderIP)),
-					attribute.String("ip_origin", get(constants.HeaderIPOrigin)),
-					attribute.String("user_id", get(constants.HeaderUserID)),
+					attribute.String("request_id", get(m.cfg.Headers.Keys.RequestID)),
+					attribute.String("ip", get(m.cfg.Headers.Keys.IP)),
+					attribute.String("ip_origin", get(m.cfg.Headers.Keys.IPOrigin)),
+					attribute.String("user_id", get(m.cfg.Headers.Keys.UserID)),
 					attribute.String("user_agent", get("user-agent")),
 				)
 			}
@@ -234,10 +233,10 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			FullURL:         info.FullMethod,
 			StatusCode:      0,
 			LatencyMS:       0,
-			IP:              get(constants.HeaderIP),
-			IPOrigin:        get(constants.HeaderIPOrigin),
-			RequestID:       get(constants.HeaderRequestID),
-			CreatedBy:       format.ToInt64(get(constants.HeaderUserID)),
+			IP:              get(m.cfg.Headers.Keys.IP),
+			IPOrigin:        get(m.cfg.Headers.Keys.IPOrigin),
+			RequestID:       get(m.cfg.Headers.Keys.RequestID),
+			CreatedBy:       format.ToInt64(get(m.cfg.Headers.Keys.UserID)),
 			CreatedAt:       format.NowUTC(),
 			TransactionID:   transactionID,
 			RequestHeaders:  reqHeadersBytes,

@@ -14,6 +14,7 @@ A high-performance, modular, and secure HTTP middleware library for Go. Designed
 - ✅ **Panic Recovery** - Graceful recovery across HTTP, gRPC, and WebSockets that logs the stack trace securely.
 - ✅ **Multi-Protocol Support** - Native wrappers for **HTTP**, **gRPC** (Unary & Stream), **GraphQL**, and **WebSockets**.
 - ✅ **Multi-Auth Pipelines** - Pre-built chains for Public, Auth, API Key, Internal, and Webhook endpoints.
+- ✅ **Dynamic Pluggable Headers** - Fully configurable header extraction (`X-Request-Id`, `X-User-Id`, etc.) and dynamic log injection.
 
 ## 📦 Installation
 
@@ -73,6 +74,27 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 func profileHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"message": "Profile"}`))
 }
+```
+
+## 🎛️ Dynamic Headers (Copot-Pasang)
+
+NVX Go Middleware allows you to fully customize or disable mandatory headers like `X-Request-Id`, `X-Transaction-Id`, etc., and dynamically configure which headers are logged without changing any code.
+
+```go
+mgr, _ := mw.NewWithError(mw.Config{
+	Headers: mw.ConfigHeaders{
+		// Customize default header names
+		Keys: mw.HeaderKeys{
+			RequestID:     "Trace-Id", // Rename X-Request-Id to Trace-Id
+			TransactionID: "X-Tx-Id",
+			UserID:        "X-User-Id",
+		},
+	},
+	Logging: mw.ConfigLogging{
+		// Dynamically plug/unplug headers from the logger
+		LogHeaders: []string{"Trace-Id", "X-Tx-Id", "X-User-Id", "X-Custom-Header"},
+	},
+})
 ```
 
 ## 🛡️ Smart Architecture (Execution Order)
