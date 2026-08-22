@@ -10,6 +10,7 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/activity"
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/format"
+	"github.com/Jkenyut/nvx-go-helper/response"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -92,9 +93,7 @@ func (m *Manager) WebSocketChain(
 						span.SetStatus(codes.Error, constants.ErrMsgInvalidToken)
 					}
 				}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": constants.ErrMsgInvalidToken})
+				response.WriteJSONResponse(w, response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken))
 				return
 			}
 

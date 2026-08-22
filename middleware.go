@@ -66,7 +66,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					return
 				}
 
-				writeJSON(w, http.StatusInternalServerError, response.InternalError(r.Context()))
+				response.WriteJSONResponse(w, response.InternalError(r.Context()))
 			}
 		}()
 
@@ -134,7 +134,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 					Str("user_agent", r.UserAgent()).
 					Err(err)
 				m.addLogHeaders(event, r).Msg("failed to read request body")
-				writeJSON(rw, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType))
+				response.WriteJSONResponse(rw, response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType))
 				if rw != nil {
 					rw.Free()
 				}
@@ -280,7 +280,7 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 
 		tokenString := r.Header.Get(constants.HeaderToken)
 		if tokenString == "" {
-			writeJSON(w, http.StatusUnauthorized, response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken))
+			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken))
 			return
 		}
 
@@ -289,7 +289,7 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 			if !m.envProd() {
 				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgInvalidSignature, signatureServer)
 			}
-			writeJSON(w, http.StatusUnauthorized, response.Unauthorized(r.Context(), errMsg))
+			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), errMsg))
 			return
 		}
 
@@ -306,7 +306,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 			return
 		}
 		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
-			writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
+			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
 		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
@@ -314,7 +314,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 			if !m.envProd() {
 				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgSignatureInvalid, signatureServer)
 			}
-			writeJSON(w, http.StatusUnauthorized, response.Unauthorized(r.Context(), errMsg))
+			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), errMsg))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -329,7 +329,7 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 			return
 		}
 		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
-			writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
+			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
 		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
@@ -337,7 +337,7 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 			if !m.envProd() {
 				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgSignatureInvalid, signatureServer)
 			}
-			writeJSON(w, http.StatusUnauthorized, response.Unauthorized(r.Context(), errMsg))
+			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), errMsg))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -352,7 +352,7 @@ func (m *Manager) EnsurePublicAPIKey(next http.Handler) http.Handler {
 			return
 		}
 		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
-			writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
+			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
 		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
@@ -360,7 +360,7 @@ func (m *Manager) EnsurePublicAPIKey(next http.Handler) http.Handler {
 			if !m.envProd() {
 				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgSignatureInvalid, signatureServer)
 			}
-			writeJSON(w, http.StatusUnauthorized, response.Unauthorized(r.Context(), errMsg))
+			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), errMsg))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -382,14 +382,14 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 		if !m.envProd() {
 			message = fmt.Sprintf("%s: %s", constants.ErrMsgMissingHeaders, strings.Join(missing, ", "))
 		}
-		writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), message))
+		response.WriteJSONResponse(w, response.BadRequest(r.Context(), message))
 		return false
 	}
 
 	// Validate timestamp (only if the header is present — internal routes may omit it)
 	if ts := r.Header.Get(constants.HeaderTimestamp); ts != "" {
 		if format.StringToUnixOrZero(ts).IsZero() {
-			writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgInvalidTimestamp))
+			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidTimestamp))
 			return false
 		}
 	}
@@ -405,7 +405,7 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 			}
 		}
 		if !valid {
-			writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgInvalidPlatform))
+			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidPlatform))
 			return false
 		}
 	}
@@ -550,14 +550,14 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 				}
 			}
 			if !isAllowed {
-				writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType))
+				response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType))
 				return
 			}
 
 			// File upload: apply overall limit only
 			if isMultipart(contentType) {
 				if r.ContentLength > m.cfg.Limits.RequestBodyLimitSize {
-					writeJSON(w, http.StatusRequestEntityTooLarge, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
+					response.WriteJSONResponse(w, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
 					return
 				}
 				r.Body = http.MaxBytesReader(w, r.Body, m.cfg.Limits.RequestBodyLimitSize)
@@ -567,7 +567,7 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 
 			// Non-file: apply tighter non-file limit
 			if r.ContentLength > m.cfg.Limits.RequestBodyNonFileLimitSize {
-				writeJSON(w, http.StatusRequestEntityTooLarge, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
+				response.WriteJSONResponse(w, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
 				return
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, m.cfg.Limits.RequestBodyNonFileLimitSize)
@@ -666,7 +666,7 @@ func ReadAndRestoreBody(r *http.Request, limit int64) ([]byte, error) {
 func (m *Manager) MethodOnly(method string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != method {
-			writeJSON(w, http.StatusMethodNotAllowed, response.MethodNotAllowed(r.Context(), constants.ErrMsgMethodNotAllowed))
+			response.WriteJSONResponse(w, response.MethodNotAllowed(r.Context(), constants.ErrMsgMethodNotAllowed))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -710,17 +710,17 @@ func (m *Manager) PreSignHandler(cfg *ChainConfig) http.Handler {
 
 			var req model.PresignRequest
 			if err := sonic.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgInvalidRequest))
+				response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidRequest))
 				return
 			}
 
 			if err := validator.Struct(req); err != nil {
-				writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), validator.GetErrorsFullStr(err)))
+				response.WriteJSONResponse(w, response.BadRequest(r.Context(), validator.GetErrorsFullStr(err)))
 				return
 			}
 
 			if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
-				writeJSON(w, http.StatusBadRequest, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
+				response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 				return
 			}
 
@@ -731,7 +731,7 @@ func (m *Manager) PreSignHandler(cfg *ChainConfig) http.Handler {
 			}
 			canonical = append(canonical, req.Body)
 
-			writeJSON(w, http.StatusOK, response.Success(r.Context(), model.PresignResponse{
+			response.WriteJSONResponse(w, response.Success(r.Context(), model.PresignResponse{
 				Signature: cryptoutil.Signature(m.cfg.Security.PublicKeySignature, canonical...),
 			}))
 		})))
@@ -755,15 +755,6 @@ func checkTimestamp(timestampStr string, allowedSkewSec int64) error {
 // PingHandler creates a GET endpoint that can be used for service health checks.
 func (m *Manager) PingHandler() http.Handler {
 	return m.MethodOnly("GET", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, response.Success(r.Context(), "pong"))
+		response.WriteJSONResponse(w, response.Success(r.Context(), "pong"))
 	}))
-}
-
-// writeJSON is an internal helper that sets Content-Type, writes the status
-// code, and encodes v as JSON using sonic. Encode errors are silently ignored
-// because the status code has already been committed.
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = sonic.ConfigDefault.NewEncoder(w).Encode(v)
 }

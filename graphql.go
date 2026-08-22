@@ -10,6 +10,7 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/activity"
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/format"
+	"github.com/Jkenyut/nvx-go-helper/response"
 	"github.com/Jkenyut/nvx-go-middleware/model"
 	"github.com/bytedance/sonic"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -83,9 +84,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 						targetW = rw
 					}
 
-					writeJSON(targetW, http.StatusInternalServerError, map[string]any{
-						"errors": []map[string]string{{"message": "internal server error"}},
-					})
+					response.WriteJSONResponse(targetW, response.InternalError(r.Context()))
 				}
 			}()
 
@@ -107,11 +106,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 			// ── Depth limiting ────────────────────────────────────────
 			if maxDepth > 0 && gqlBody.Query != "" {
 				if depth := graphqlQueryDepth(gqlBody.Query); depth > maxDepth {
-					writeJSON(w, http.StatusBadRequest, map[string]any{
-						"errors": []map[string]string{{
-							"message": fmt.Sprintf("query depth %d exceeds maximum allowed depth %d", depth, maxDepth),
-						}},
-					})
+					response.WriteJSONResponse(w, response.BadRequest(r.Context(), fmt.Sprintf("query depth %d exceeds maximum allowed depth %d", depth, maxDepth)))
 					return
 				}
 			}
@@ -247,9 +242,7 @@ func (m *Manager) GraphQLBlockIntrospection(next http.Handler) http.Handler {
 			if err == nil && len(raw) > 0 {
 				var body graphqlRequestBody
 				if sonic.Unmarshal(raw, &body) == nil && isGraphQLIntrospection(body.Query) {
-					writeJSON(w, http.StatusForbidden, map[string]any{
-						"errors": []map[string]string{{"message": "introspection disabled"}},
-					})
+					response.WriteJSONResponse(w, response.Forbidden(r.Context(), "introspection disabled"))
 					return
 				}
 			}
