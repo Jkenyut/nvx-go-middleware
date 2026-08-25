@@ -179,6 +179,9 @@ func (m *Manager) PublicChain(cfg *ChainConfig) func(http.Handler) http.Handler 
 // PublicRateLimitChain returns a middleware chain configured for public (unauthenticated) endpoints.
 func (m *Manager) PublicRateLimitChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return m.BaseChain(cfg, func(r chi.Router) {
+		r.Use(func(next http.Handler) http.Handler {
+			return m.SetHeaderAuthType(next, constants.AuthTypePublic)
+		})
 		if cfg.Features.UseChiRateLimitPublic {
 			r.Use(RateLimit(cfg.Limiter, m.cfg.Security.PublicKeySignature))
 		}
@@ -188,6 +191,9 @@ func (m *Manager) PublicRateLimitChain(cfg *ChainConfig) func(http.Handler) http
 // ProtectedRateLimitChain returns a middleware chain configured for authenticated endpoints.
 func (m *Manager) ProtectedRateLimitChain(cfg *ChainConfig) func(http.Handler) http.Handler {
 	return m.BaseChain(cfg, func(r chi.Router) {
+		r.Use(func(next http.Handler) http.Handler {
+			return m.SetHeaderAuthType(next, constants.AuthTypePublicAuth)
+		})
 		if cfg.Features.UseChiRateLimitAuth {
 			r.Use(RateLimit(cfg.Limiter, m.cfg.Security.PublicKeySignature))
 		}
