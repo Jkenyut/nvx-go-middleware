@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/bytedance/sonic"
+	"github.com/google/uuid"
 )
 
 // Recoverer recovers from panics, logs the panic with a stack trace,
@@ -757,4 +758,40 @@ func (m *Manager) PingHandler() http.Handler {
 	return m.MethodOnly("GET", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response.WriteJSONResponse(w, response.Success(r.Context(), "pong"))
 	}))
+}
+
+// ValidateUUIDHeaders validates that specified headers contain valid UUID strings.
+// If required is true, missing or empty headers cause a 400 Bad Request error.
+// If required is false, missing headers are skipped, but present headers must be valid UUIDs.
+func ValidateUUIDHeaders(required bool, headerNames ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, h := range headerNames {
+				val := strings.TrimSpace(r.Header.Get(h))
+				if val == "" {
+					if required {
+						response.WriteJSONResponse(w, response.BadRequest(r.Context(), fmt.Sprintf("%s: %s", constants.ErrMsgMissingHeaders, h)))
+						return
+					}
+					continue
+				}
+
+				if _, err := uuid.Parse(val); err != nil {
+					response.WriteJSONResponse(w, response.BadRequest(r.Context(), fmt.Sprintf("%s: header '%s' with value '%s' is not a valid UUID", constants.ErrMsgInvalidUUID, h, val)))
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireUUIDHeaders enforces that all specified headers exist and are valid UUIDs.
+func RequireUUIDHeaders(headerNames ...string) func(http.Handler) http.Handler {
+	return ValidateUUIDHeaders(true, headerNames...)
+}
+
+// ValidateOptionalUUIDHeaders validates that specified headers are valid UUIDs if present in the request.
+func ValidateOptionalUUIDHeaders(headerNames ...string) func(http.Handler) http.Handler {
+	return ValidateUUIDHeaders(false, headerNames...)
 }

@@ -39,6 +39,7 @@ const (
 	ErrMsgUnsupportedContentType = "unsupported content type"
 	ErrMsgInvalidRequest         = "Invalid request"
 	ErrMsgSignatureInvalid       = "Signature invalid"
+	ErrMsgInvalidUUID            = "invalid UUID format"
 )
 
 // Configuration defaults and limits.

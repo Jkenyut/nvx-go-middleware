@@ -463,6 +463,132 @@ func TestRemoveHeaders(t *testing.T) {
 	}
 }
 
+// ─── UUID Headers Validation ──────────────────────────────────────────────────
+
+func TestRequireUUIDHeaders(t *testing.T) {
+	okHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	tests := []struct {
+		name           string
+		headers        map[string]string
+		checkHeaders   []string
+		expectedStatus int
+	}{
+		{
+			name: "valid UUID v4",
+			headers: map[string]string{
+				"X-User-Id": "123e4567-e89b-12d3-a456-426614174000",
+			},
+			checkHeaders:   []string{"X-User-Id"},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name: "missing required header",
+			headers: map[string]string{
+				"Other-Header": "value",
+			},
+			checkHeaders:   []string{"X-User-Id"},
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "invalid UUID string",
+			headers: map[string]string{
+				"X-User-Id": "invalid-not-a-uuid",
+			},
+			checkHeaders:   []string{"X-User-Id"},
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "multiple valid UUID headers",
+			headers: map[string]string{
+				"X-User-Id":    "123e4567-e89b-12d3-a456-426614174000",
+				"X-Request-Id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+			},
+			checkHeaders:   []string{"X-User-Id", "X-Request-Id"},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name: "one valid one invalid among multiple",
+			headers: map[string]string{
+				"X-User-Id":    "123e4567-e89b-12d3-a456-426614174000",
+				"X-Request-Id": "12345",
+			},
+			checkHeaders:   []string{"X-User-Id", "X-Request-Id"},
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			standaloneHandler := RequireUUIDHeaders(tc.checkHeaders...)(okHandler)
+			reqStandalone := httptest.NewRequest("GET", "/test", nil)
+			for k, v := range tc.headers {
+				reqStandalone.Header.Set(k, v)
+			}
+			wStandalone := httptest.NewRecorder()
+			standaloneHandler.ServeHTTP(wStandalone, reqStandalone)
+			if wStandalone.Code != tc.expectedStatus {
+				t.Errorf("RequireUUIDHeaders standalone: expected status %d, got %d. Body: %s", tc.expectedStatus, wStandalone.Code, wStandalone.Body.String())
+			}
+		})
+	}
+}
+
+func TestValidateOptionalUUIDHeaders(t *testing.T) {
+	okHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	tests := []struct {
+		name           string
+		headers        map[string]string
+		checkHeaders   []string
+		expectedStatus int
+	}{
+		{
+			name:           "empty/omitted header is allowed",
+			headers:        map[string]string{},
+			checkHeaders:   []string{"X-User-Id"},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name: "present valid UUID is allowed",
+			headers: map[string]string{
+				"X-User-Id": "123e4567-e89b-12d3-a456-426614174000",
+			},
+			checkHeaders:   []string{"X-User-Id"},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name: "present invalid UUID returns 400",
+			headers: map[string]string{
+				"X-User-Id": "abc-123-not-uuid",
+			},
+			checkHeaders:   []string{"X-User-Id"},
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			standaloneHandler := ValidateOptionalUUIDHeaders(tc.checkHeaders...)(okHandler)
+			reqStandalone := httptest.NewRequest("GET", "/test", nil)
+			for k, v := range tc.headers {
+				reqStandalone.Header.Set(k, v)
+			}
+			wStandalone := httptest.NewRecorder()
+			standaloneHandler.ServeHTTP(wStandalone, reqStandalone)
+			if wStandalone.Code != tc.expectedStatus {
+				t.Errorf("ValidateOptionalUUIDHeaders standalone: expected status %d, got %d", tc.expectedStatus, wStandalone.Code)
+			}
+		})
+	}
+}
+
 // ─── Benchmarks ──────────────────────────────────────────────────────────────
 
 func BenchmarkLogger(b *testing.B) {
