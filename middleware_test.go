@@ -277,30 +277,31 @@ func TestCORS(t *testing.T) {
 // ─── TrustProxy ──────────────────────────────────────────────────────────────
 
 func TestTrustProxy(t *testing.T) {
-	t.Run("trusted proxy extracts XFF", func(t *testing.T) {
-		mgr := newTestManager(func(c *Config) {
-			c.Security.TrustedProxies = []string{"192.168.1.0/24"}
-		})
+	t.Run("docker container with X-Real-Ip without trusted proxies config", func(t *testing.T) {
+		mgr := newTestManager() // No trustedProxies configured
 
-		var capturedIP string
+		var capturedIP, capturedOrigin string
 		handler := mgr.TrustProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			capturedIP = r.Header.Get(constants.HeaderIP)
+			capturedOrigin = r.Header.Get(constants.HeaderIPOrigin)
 		}))
 
 		req := httptest.NewRequest("GET", "/", nil)
-		req.RemoteAddr = "192.168.1.1:12345"
-		req.Header.Set("X-Forwarded-For", "1.2.3.4, 10.0.0.1")
+		req.RemoteAddr = "172.18.0.4:54321" // Docker bridge IP
+		req.Header.Set("X-Real-Ip", "43.133.91.48")
+		req.Header.Set("X-Forwarded-For", "172.18.0.4")
 		handler.ServeHTTP(httptest.NewRecorder(), req)
 
-		if capturedIP != "10.0.0.1" {
-			t.Errorf("expected 10.0.0.1 (untrusted), got %s", capturedIP)
+		if capturedIP != "43.133.91.48" {
+			t.Errorf("expected 43.133.91.48, got %s", capturedIP)
+		}
+		if capturedOrigin != "172.18.0.4" {
+			t.Errorf("expected 172.18.0.4, got %s", capturedOrigin)
 		}
 	})
 
-	t.Run("untrusted proxy keeps remote IP", func(t *testing.T) {
-		mgr := newTestManager(func(c *Config) {
-			c.Security.TrustedProxies = []string{"10.0.0.1"}
-		})
+	t.Run("docker container with XFF chain extracts public IP", func(t *testing.T) {
+		mgr := newTestManager()
 
 		var capturedIP string
 		handler := mgr.TrustProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -308,8 +309,46 @@ func TestTrustProxy(t *testing.T) {
 		}))
 
 		req := httptest.NewRequest("GET", "/", nil)
-		req.RemoteAddr = "5.5.5.5:9000"
+		req.RemoteAddr = "172.18.0.4:12345"
+		req.Header.Set("X-Forwarded-For", "43.133.91.48, 10.0.0.1")
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+
+		if capturedIP != "43.133.91.48" {
+			t.Errorf("expected 43.133.91.48, got %s", capturedIP)
+		}
+	})
+
+	t.Run("cloudflare header takes highest priority from trusted/private proxy", func(t *testing.T) {
+		mgr := newTestManager()
+
+		var capturedIP string
+		handler := mgr.TrustProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedIP = r.Header.Get(constants.HeaderIP)
+		}))
+
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("CF-Connecting-IP", "103.21.244.2")
+		req.Header.Set("X-Real-Ip", "43.133.91.48")
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+
+		if capturedIP != "103.21.244.2" {
+			t.Errorf("expected 103.21.244.2, got %s", capturedIP)
+		}
+	})
+
+	t.Run("untrusted direct public connection keeps remote IP and ignores spoofing", func(t *testing.T) {
+		mgr := newTestManager()
+
+		var capturedIP string
+		handler := mgr.TrustProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedIP = r.Header.Get(constants.HeaderIP)
+		}))
+
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "5.5.5.5:9000" // Public IP
 		req.Header.Set("X-Forwarded-For", "1.2.3.4")
+		req.Header.Set("X-Real-Ip", "1.2.3.4")
 		handler.ServeHTTP(httptest.NewRecorder(), req)
 
 		if capturedIP != "5.5.5.5" {

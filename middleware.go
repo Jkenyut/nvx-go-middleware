@@ -174,7 +174,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				ResponseHeaders: normalizeHeadersJSON(rw.Header(), m.cfg.Logging.MaskKeywords),
 				RequestBody:     reqBodyBytes,
 				ResponseBody:    resBodyBytes,
-				Protocol:        "HTTP " + r.Proto,
+				Protocol:        r.Proto,
 				ServiceName:     m.cfg.Core.ServiceName,
 				UserAgent:       r.UserAgent(),
 				ErrorMessage:    "",
@@ -458,10 +458,37 @@ func (m *Manager) validateSignatureHeaders(r *http.Request, key string, values [
 	return subtle.ConstantTimeCompare([]byte(clientSignature), []byte(signatureServer)) == 1, signatureServer
 }
 
-// TrustProxy extracts the real client IP from X-Forwarded-For when the
-// direct connection comes from a configured trusted proxy (IP or CIDR).
-// It updates r.RemoteAddr and sets the IP header so downstream handlers
-// see the real client address.
+// isPrivateIP checks if an IP is a private/loopback/link-local address (Docker network, localhost, LAN).
+func isPrivateIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
+// isTrustedIP checks if a given IP string is in the trusted proxies list or belongs
+// to standard private/loopback networks (e.g. Docker network, Kubernetes pod CIDR, localhost).
+func (m *Manager) isTrustedIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip != nil && isPrivateIP(ip) {
+		return true
+	}
+	for _, proxy := range m.cfg.Security.TrustedProxies {
+		if proxy == ipStr {
+			return true
+		}
+		if _, ipNet, err := net.ParseCIDR(proxy); err == nil {
+			if ip != nil && ipNet.Contains(ip) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TrustProxy extracts the real client IP from headers (CF-Connecting-IP, X-Real-Ip, X-Forwarded-For)
+// when the direct connection comes from a trusted proxy or private network (Docker, k8s, localhost).
+// It updates r.RemoteAddr and sets the IP header so downstream handlers and rate limiters see the real client address.
 func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		remoteIP, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -470,30 +497,43 @@ func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 		}
 
 		isTrusted := m.isTrustedIP(remoteIP)
-
 		clientIP := remoteIP
+
 		if isTrusted {
-			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// 1. Check Cloudflare header
+			if cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfIP != "" && net.ParseIP(cfIP) != nil {
+				clientIP = cfIP
+			} else if realIP := strings.TrimSpace(r.Header.Get("X-Real-Ip")); realIP != "" && net.ParseIP(realIP) != nil && !m.isTrustedIP(realIP) {
+				// 2. Check X-Real-Ip (if it contains a valid public/client IP)
+				clientIP = realIP
+			} else if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+				// 3. Check X-Forwarded-For from right to left (prefer first public/non-proxy IP)
 				parts := strings.Split(xff, ",")
-				// Read from right to left to avoid IP spoofing
 				for i := len(parts) - 1; i >= 0; i-- {
 					ipStr := strings.TrimSpace(parts[i])
-					if !m.isTrustedIP(ipStr) {
+					if parsed := net.ParseIP(ipStr); parsed != nil && !m.isTrustedIP(ipStr) {
 						clientIP = ipStr
 						break
 					}
 				}
-				// Fallback to leftmost if all are trusted proxies or couldn't find untrusted
-				if clientIP == "" && len(parts) > 0 {
-					clientIP = strings.TrimSpace(parts[0])
+				// Fallback to leftmost valid IP if all are private/trusted
+				if (clientIP == "" || clientIP == remoteIP) && len(parts) > 0 {
+					firstIP := strings.TrimSpace(parts[0])
+					if net.ParseIP(firstIP) != nil {
+						clientIP = firstIP
+					}
 				}
+			} else if realIP := strings.TrimSpace(r.Header.Get("X-Real-Ip")); realIP != "" && net.ParseIP(realIP) != nil {
+				// 4. Fallback to X-Real-Ip even if private (e.g. dev/staging environment)
+				clientIP = realIP
 			}
 		}
+
 		if net.ParseIP(clientIP) == nil {
 			clientIP = remoteIP
 		}
 
-		// clientIP is real user IP (extracted from X-Forwarded-For)
+		// clientIP is real user IP (extracted from CF-Connecting-IP, X-Real-Ip, or XFF)
 		// remoteIP is IP from proxy/LB that directly connects to our server
 		r.Header.Set(m.cfg.Headers.Keys.IP, clientIP)
 		r.Header.Set(m.cfg.Headers.Keys.IPOrigin, remoteIP)
@@ -509,21 +549,6 @@ func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 // isMultipart reports whether the Content-Type indicates a multipart/form-data body.
 func isMultipart(contentType string) bool {
 	return strings.HasPrefix(strings.ToLower(contentType), "multipart/")
-}
-
-// isTrustedIP checks if a given IP string is in the trusted proxies list.
-func (m *Manager) isTrustedIP(ipStr string) bool {
-	for _, proxy := range m.cfg.Security.TrustedProxies {
-		if proxy == ipStr {
-			return true
-		}
-		if _, ipNet, err := net.ParseCIDR(proxy); err == nil {
-			if ip := net.ParseIP(ipStr); ip != nil && ipNet.Contains(ip) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // MaxBodySize returns a middleware that limits the maximum size of the request body.
