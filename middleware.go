@@ -338,12 +338,6 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 			return
 		}
 
-		tokenString := r.Header.Get(constants.HeaderToken)
-		if tokenString == "" {
-			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken))
-			return
-		}
-
 		if validSignature, signatureServer := m.validateSignatureInternalHeaders(r); !validSignature {
 			errMsg := constants.ErrMsgInvalidSignature
 			if !m.envProd() {
