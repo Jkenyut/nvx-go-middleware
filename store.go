@@ -21,6 +21,9 @@ type ConsoleStore struct {
 
 // Save writes the audit log entry to the configured logger.
 func (c *ConsoleStore) Save(_ context.Context, entry *model.AuditLog) error {
+	if c.logger == nil {
+		return nil
+	}
 	c.logger.Info().
 		Str("service_name", entry.ServiceName).
 		Str("method", entry.Method).

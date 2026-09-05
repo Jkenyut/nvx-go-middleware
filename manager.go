@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/Jkenyut/nvx-go-middleware/constants"
@@ -11,11 +13,14 @@ import (
 	"github.com/rs/zerolog/diode"
 )
 
+var initZerologGlobalOnce sync.Once
+
 // Manager holds the middleware configuration and provides middleware methods.
 // It is the central entry point for creating and managing middleware chains.
 type Manager struct {
-	cfg       Config
-	logCloser io.Closer
+	cfg          Config
+	logCloser    io.Closer
+	trustedCIDRs []*net.IPNet
 }
 
 // NewWithError creates a new Middleware Manager, returning an error instead of panicking
@@ -26,7 +31,15 @@ func NewWithError(cfg *Config) (*Manager, error) {
 		return nil, err
 	}
 	closer := applyDefaults(cfg)
-	return &Manager{cfg: *cfg, logCloser: closer}, nil
+
+	var cidrs []*net.IPNet
+	for _, proxy := range cfg.Security.TrustedProxies {
+		if _, ipNet, err := net.ParseCIDR(proxy); err == nil {
+			cidrs = append(cidrs, ipNet)
+		}
+	}
+
+	return &Manager{cfg: *cfg, logCloser: closer, trustedCIDRs: cidrs}, nil
 }
 
 // applyDefaults fills in all missing Config fields with safe defaults.
@@ -51,26 +64,25 @@ func applyDefaults(cfg *Config) io.Closer {
 			}
 		}
 
-		// Use RFC3339 seconds internally, but display in human format via ConsoleWriter
-		zerolog.TimeFieldFormat = time.RFC3339
+		// Initialize global format settings only once to avoid concurrent write races.
+		initZerologGlobalOnce.Do(func() {
+			zerolog.TimeFieldFormat = time.RFC3339
+		})
 
-		// Respect LOG_LEVEL environment variable if set
+		level := zerolog.DebugLevel
+		if isProd {
+			level = zerolog.InfoLevel
+		}
 		if levelStr := os.Getenv("LOG_LEVEL"); levelStr != "" {
-			if level, err := zerolog.ParseLevel(levelStr); err == nil {
-				zerolog.SetGlobalLevel(level)
-			}
-		} else {
-			// Default level based on environment
-			if isProd {
-				zerolog.SetGlobalLevel(zerolog.InfoLevel)
-			} else {
-				zerolog.SetGlobalLevel(zerolog.DebugLevel)
+			if parsed, err := zerolog.ParseLevel(levelStr); err == nil {
+				level = parsed
 			}
 		}
 
 		wr := diode.NewWriter(writer, 1000, 10*time.Millisecond, func(_ int) {})
 		logCloser = wr
 		logContext := zerolog.New(wr).
+			Level(level).
 			With().
 			Timestamp().
 			Str("service", cfg.Core.ServiceName)
@@ -81,7 +93,6 @@ func applyDefaults(cfg *Config) io.Closer {
 		}
 
 		log := logContext.Logger()
-		zerolog.DefaultContextLogger = &log
 		cfg.Logger = NewZerologLogger(&log)
 	}
 
@@ -238,8 +249,12 @@ func (m *Manager) envProd() bool {
 }
 
 func uniqueStrings(items ...[]string) []string {
-	seen := make(map[string]struct{})
-	out := make([]string, 0)
+	totalLen := 0
+	for _, list := range items {
+		totalLen += len(list)
+	}
+	seen := make(map[string]struct{}, totalLen)
+	out := make([]string, 0, totalLen)
 	for _, list := range items {
 		for _, v := range list {
 			if _, ok := seen[v]; !ok {

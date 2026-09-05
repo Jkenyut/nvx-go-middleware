@@ -17,7 +17,6 @@ const (
 	HeaderUserAgent      = "User-Agent" // Standard HTTP header
 	HeaderAuthType       = "X-Auth-Type"
 	HeaderRateKey        = "X-Rate-Key"
-	HeaderAppID          = "X-App-Id"
 	AuthTypePublic       = "public"
 	AuthTypePublicAuth   = "public-auth"
 	AuthTypePublicAPIKey = "public-api-key"
@@ -37,8 +36,6 @@ const (
 
 	ErrMsgInvalidTimestamp       = "invalid timestamp format"
 	ErrMsgUnsupportedContentType = "unsupported content type"
-	ErrMsgInvalidRequest         = "Invalid request"
-	ErrMsgSignatureInvalid       = "Signature invalid"
 	ErrMsgInvalidUUID            = "invalid UUID format"
 )
 
@@ -61,8 +58,6 @@ const (
 	// DefaultRateLimitWindow is the default rate limit window
 	DefaultRateLimitWindow = 1
 
-	// MaxHeaderSize is the maximum size for header values
-	MaxHeaderSize    = 8192
 	TimestampExpired = 600 // seconds
 	RequestTimeout   = 60  // seconds
 )
@@ -72,7 +67,6 @@ var (
 	// RequiredPublicHeaders are headers required for public requests
 	RequiredPublicHeaders = []string{
 		HeaderRequestID,
-		HeaderAppID,
 		HeaderPlatform,
 		HeaderUserAgent,
 		HeaderTimestamp,
@@ -82,7 +76,6 @@ var (
 	// RequiredPublicAuthHeaders are headers required for authenticated public requests
 	RequiredPublicAuthHeaders = []string{
 		HeaderRequestID,
-		HeaderAppID,
 		HeaderPlatform,
 		HeaderToken,
 		HeaderTimestamp,
@@ -92,7 +85,6 @@ var (
 	// RequiredPublicAPIKeyHeaders are headers required for authenticated public requests
 	RequiredPublicAPIKeyHeaders = []string{
 		HeaderRequestID,
-		HeaderAppID,
 		HeaderPlatform,
 		HeaderAPIKey,
 		HeaderTimestamp,
@@ -117,7 +109,6 @@ var (
 	// RequiredSignaturePublicHeaders are headers required for signature validation for public requests
 	RequiredSignaturePublicHeaders = []string{
 		HeaderRequestID,
-		HeaderAppID,
 		HeaderPlatform,
 		HeaderTimestamp,
 	}

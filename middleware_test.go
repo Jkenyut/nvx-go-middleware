@@ -2,14 +2,21 @@ package middleware
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
 	"github.com/bytedance/sonic"
@@ -169,28 +176,34 @@ func TestMaxBodySize(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 
 	tests := []struct {
-		name        string
-		bodySize    int
-		contentType string
-		wantStatus  int
+		name          string
+		bodySize      int
+		contentLength int64
+		contentType   string
+		wantStatus    int
 	}{
-		{"json within limit", 50, "application/json", http.StatusOK},
-		{"json exceeds limit", 200, "application/json", http.StatusRequestEntityTooLarge},
-		{"multipart within limit", 50, "multipart/form-data; boundary=x", http.StatusOK},
-		{"unsupported content type", 50, "text/plain", http.StatusBadRequest},
-		{"no body no content type (GET-like)", 0, "", http.StatusOK},
+		{"json within limit", 50, 50, "application/json", http.StatusOK},
+		{"case-insensitive json within limit", 50, 50, "Application/JSON; charset=utf-8", http.StatusOK},
+		{"json exceeds limit", 200, 200, "application/json", http.StatusRequestEntityTooLarge},
+		{"multipart within limit", 50, 50, "multipart/form-data; boundary=x", http.StatusOK},
+		{"unsupported content type", 50, 50, "text/plain", http.StatusBadRequest},
+		{"no body no content type (GET-like)", 0, 0, "", http.StatusOK},
+		{"bodyless with -1 content length", 0, -1, "", http.StatusOK},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body := bytes.Repeat([]byte("a"), tt.bodySize)
-			req := httptest.NewRequest("POST", "/test", bytes.NewReader(body))
-			req.ContentLength = int64(len(body)) // required for Content-Length check in MaxBodySize
+			var bodyReader *bytes.Reader
+			if tt.bodySize > 0 {
+				body := bytes.Repeat([]byte("a"), tt.bodySize)
+				bodyReader = bytes.NewReader(body)
+			} else {
+				bodyReader = bytes.NewReader([]byte{})
+			}
+			req := httptest.NewRequest("POST", "/test", bodyReader)
+			req.ContentLength = tt.contentLength
 			if tt.contentType != "" {
 				req.Header.Set("Content-Type", tt.contentType)
-			}
-			if tt.bodySize == 0 {
-				req.ContentLength = 0
 			}
 
 			w := httptest.NewRecorder()
@@ -355,6 +368,29 @@ func TestTrustProxy(t *testing.T) {
 			t.Errorf("expected 5.5.5.5, got %s", capturedIP)
 		}
 	})
+
+	t.Run("xff public ip takes precedence over spoofed x-real-ip from trusted proxy", func(t *testing.T) {
+		mgr := newTestManager()
+
+		var capturedIP, capturedRemote string
+		handler := mgr.TrustProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedIP = r.Header.Get(constants.HeaderIP)
+			capturedRemote = r.RemoteAddr
+		}))
+
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "127.0.0.1:45678"                // Trusted local proxy (e.g. Traefik)
+		req.Header.Set("X-Forwarded-For", "203.0.113.50") // Legitimate client IP
+		req.Header.Set("X-Real-Ip", "8.8.8.8")            // Spoofed X-Real-Ip header
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+
+		if capturedIP != "203.0.113.50" {
+			t.Errorf("expected 203.0.113.50 from XFF, got %s", capturedIP)
+		}
+		if capturedRemote != "203.0.113.50:45678" {
+			t.Errorf("expected RemoteAddr to preserve port 45678, got %s", capturedRemote)
+		}
+	})
 }
 
 // ─── ResolveBodyToken ────────────────────────────────────────────────────────
@@ -500,6 +536,96 @@ func TestRemoveHeaders(t *testing.T) {
 	if got := w.Header().Get("Content-Type"); got == "" {
 		t.Error("Content-Type should be preserved")
 	}
+
+	t.Run("strips headers even on direct Write without WriteHeader", func(t *testing.T) {
+		handlerWrite := mgr.RemoveHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Powered-By", "Go")
+			w.Header().Set("Server", "nginx")
+			_, _ = w.Write([]byte("direct body without WriteHeader"))
+		}))
+
+		w2 := httptest.NewRecorder()
+		handlerWrite.ServeHTTP(w2, req)
+
+		if got := w2.Header().Get("X-Powered-By"); got != "" {
+			t.Errorf("X-Powered-By should be removed on direct Write, got %q", got)
+		}
+		if got := w2.Header().Get("Server"); got != "" {
+			t.Errorf("Server should be removed on direct Write, got %q", got)
+		}
+	})
+
+	t.Run("supports native Unwrap and Status inspection", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		rw := &headerCleanerResponseWriter{
+			ResponseWriter:  rec,
+			headersToRemove: []string{"Server"},
+		}
+		if rw.Unwrap() != rec {
+			t.Error("expected Unwrap to return underlying recorder")
+		}
+
+		// Status and BytesWritten return 0 when underlying does not implement them
+		if rw.Status() != 0 {
+			t.Errorf("expected Status 0, got %d", rw.Status())
+		}
+		if rw.BytesWritten() != 0 {
+			t.Errorf("expected BytesWritten 0, got %d", rw.BytesWritten())
+		}
+	})
+
+	t.Run("supports Hijack and Flush", func(t *testing.T) {
+		rw := &headerCleanerResponseWriter{
+			ResponseWriter:  httptest.NewRecorder(),
+			headersToRemove: []string{"Server"},
+		}
+		rw.Flush()
+		if !rw.cleaned {
+			t.Error("expected cleaned to be true after Flush")
+		}
+
+		_, _, err := rw.Hijack()
+		if err == nil {
+			t.Error("expected error when underlying does not implement Hijacker")
+		}
+
+		// ReadFrom test
+		rw2 := &headerCleanerResponseWriter{
+			ResponseWriter:  httptest.NewRecorder(),
+			headersToRemove: []string{"Server"},
+		}
+		rw2.Header().Set("Server", "nginx")
+		n, err := rw2.ReadFrom(strings.NewReader("hello from reader"))
+		if err != nil {
+			t.Errorf("unexpected error on ReadFrom: %v", err)
+		}
+		if n != 17 {
+			t.Errorf("expected 17 bytes read, got %d", n)
+		}
+		if !rw2.cleaned {
+			t.Error("expected cleaned to be true after ReadFrom")
+		}
+		if got := rw2.Header().Get("Server"); got != "" {
+			t.Errorf("Server should be removed on ReadFrom, got %q", got)
+		}
+
+		// WriteString test
+		rw3 := &headerCleanerResponseWriter{
+			ResponseWriter:  httptest.NewRecorder(),
+			headersToRemove: []string{"Server"},
+		}
+		rw3.Header().Set("Server", "nginx")
+		sn, serr := io.WriteString(rw3, "string test")
+		if serr != nil || sn != 11 {
+			t.Errorf("unexpected error on WriteString: %v, sn: %d", serr, sn)
+		}
+		if !rw3.cleaned {
+			t.Error("expected cleaned to be true after WriteString")
+		}
+		if got := rw3.Header().Get("Server"); got != "" {
+			t.Errorf("Server should be removed on WriteString, got %q", got)
+		}
+	})
 }
 
 // ─── UUID Headers Validation ──────────────────────────────────────────────────
@@ -628,6 +754,672 @@ func TestValidateOptionalUUIDHeaders(t *testing.T) {
 	}
 }
 
+// ─── WithActivityContext & Signature Tests ──────────────────────────────────
+
+func TestWithActivityContext(t *testing.T) {
+	keys := &HeaderKeys{
+		RequestID:     constants.HeaderRequestID,
+		TransactionID: constants.HeaderTransactionID,
+		IP:            constants.HeaderIP,
+		IPOrigin:      constants.HeaderIPOrigin,
+		UserID:        constants.HeaderUserID,
+		APIKey:        constants.HeaderAPIKey,
+		AuthType:      constants.HeaderAuthType,
+	}
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set(constants.HeaderRequestID, "req-1")
+	req.Header.Set(constants.HeaderTransactionID, "tx-1")
+	req.Header.Set(constants.HeaderUserID, "user-123")
+
+	reqEnriched := WithActivityContext(req, keys)
+	if reqEnriched == nil {
+		t.Fatal("expected non-nil request")
+	}
+
+	// Nil keys test
+	reqNil := WithActivityContext(req, nil)
+	if reqNil != req {
+		t.Fatal("expected same request pointer when keys is nil")
+	}
+}
+
+func TestSignatureValidationPublic(t *testing.T) {
+	mgr := newTestManager()
+	handler := mgr.EnsurePublic(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	now := strconv.FormatInt(time.Now().Unix(), 10)
+	reqID := "req-123"
+	platform := "web"
+	userAgent := "Mozilla/5.0"
+	method := "POST"
+	path := "/test-endpoint"
+	bodyContent := `{"name":"test"}`
+	bodyBytes := []byte(bodyContent)
+	bodyToken := ResolveBodyToken("application/json", bodyBytes)
+
+	// Canonical: METHOD, URI, HeaderRequestID, HeaderPlatform, HeaderTimestamp, BodyToken
+	canonical := []string{
+		method,
+		path,
+		reqID,
+		platform,
+		now,
+		bodyToken,
+	}
+	validSig := cryptoutil.Signature("test-public-key", canonical...)
+
+	req := httptest.NewRequest(method, path, bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(constants.HeaderRequestID, reqID)
+	req.Header.Set(constants.HeaderPlatform, platform)
+	req.Header.Set(constants.HeaderUserAgent, userAgent)
+	req.Header.Set(constants.HeaderTimestamp, now)
+	req.Header.Set(constants.HeaderSignature, validSig)
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Tampered signature should fail with 401
+	reqTampered := httptest.NewRequest(method, path, bytes.NewReader(bodyBytes))
+	reqTampered.Header.Set("Content-Type", "application/json")
+	reqTampered.Header.Set(constants.HeaderRequestID, reqID)
+	reqTampered.Header.Set(constants.HeaderPlatform, platform)
+	reqTampered.Header.Set(constants.HeaderUserAgent, userAgent)
+	reqTampered.Header.Set(constants.HeaderTimestamp, now)
+	reqTampered.Header.Set(constants.HeaderSignature, "invalid-sig")
+
+	wTampered := httptest.NewRecorder()
+	handler.ServeHTTP(wTampered, reqTampered)
+
+	if wTampered.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for tampered signature, got %d", wTampered.Code)
+	}
+
+	// Missing header should fail with 400
+	reqMissing := httptest.NewRequest(method, path, bytes.NewReader(bodyBytes))
+	reqMissing.Header.Set("Content-Type", "application/json")
+	reqMissing.Header.Set(constants.HeaderPlatform, platform)
+	reqMissing.Header.Set(constants.HeaderSignature, validSig)
+
+	wMissing := httptest.NewRecorder()
+	handler.ServeHTTP(wMissing, reqMissing)
+
+	if wMissing.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for missing headers, got %d", wMissing.Code)
+	}
+}
+
+func TestConsoleStore_NilLogger(t *testing.T) {
+	store := &ConsoleStore{logger: nil}
+	err := store.Save(context.Background(), &model.AuditLog{
+		ServiceName: "test-service",
+	})
+	if err != nil {
+		t.Fatalf("expected nil error when logger is nil, got %v", err)
+	}
+}
+
+func TestGraphqlQueryDepth_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  int
+	}{
+		{name: "empty query", query: "", want: 0},
+		{name: "no braces query", query: "query MyQuery", want: 0},
+		{name: "single level braces", query: "{ user }", want: 0},
+		{name: "nested 2 levels", query: "{ user { profile } }", want: 1},
+		{name: "nested 3 levels", query: "{ user { profile { avatar } } }", want: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := graphqlQueryDepth(tt.query)
+			if got != tt.want {
+				t.Errorf("graphqlQueryDepth(%q) = %d, want %d", tt.query, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewSlogLogger(t *testing.T) {
+	var buf bytes.Buffer
+	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	logger := NewSlogLogger(slog.New(handler))
+
+	logger.Info().
+		Str("key", "value").
+		Interface("status", 200).
+		Msg("test info message")
+
+	logger.Error().
+		Str("errKey", "errVal").
+		Err(errors.New("custom error")).
+		Msgf("test error formatted %s", "detail")
+
+	output := buf.String()
+	if !strings.Contains(output, "test info message") {
+		t.Errorf("expected info message in output, got: %s", output)
+	}
+	if !strings.Contains(output, "test error formatted detail") {
+		t.Errorf("expected error message in output, got: %s", output)
+	}
+	if !strings.Contains(output, "custom error") {
+		t.Errorf("expected error attribute in output, got: %s", output)
+	}
+}
+
+func TestFullURL_SanitizedHost(t *testing.T) {
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Host = "legit.example.com"
+	req.Header.Set("X-Forwarded-Host", "attacker.com\r\nInjected-Header: evil")
+
+	url := FullURL(req)
+	if strings.Contains(url, "Injected-Header") || strings.Contains(url, "attacker.com") {
+		t.Errorf("expected malicious X-Forwarded-Host to be rejected, got: %s", url)
+	}
+	if !strings.Contains(url, "legit.example.com") {
+		t.Errorf("expected fallback to legit host, got: %s", url)
+	}
+}
+
+func TestRateLimit(t *testing.T) {
+	limiterCfg := ConfigLimiter{
+		RateLimitRequests: 2,
+		RateLimitWindow:   1, // 1 minute
+	}
+
+	handler := RateLimit(limiterCfg, "test-secret")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Received-Rate-Key", r.Header.Get(constants.HeaderRateKey))
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Request 1: should pass and receive rate key
+	req1 := httptest.NewRequest("GET", "/api/test", nil)
+	req1.Header.Set(constants.HeaderIP, "192.168.1.100")
+	w1 := httptest.NewRecorder()
+	handler.ServeHTTP(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on request 1, got %d", w1.Code)
+	}
+	if w1.Header().Get("X-Received-Rate-Key") == "" {
+		t.Error("expected X-Rate-Key to be injected into request")
+	}
+
+	// Request 2: should pass
+	req2 := httptest.NewRequest("GET", "/api/test", nil)
+	req2.Header.Set(constants.HeaderIP, "192.168.1.100")
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on request 2, got %d", w2.Code)
+	}
+
+	// Request 3: should be rate limited (429)
+	req3 := httptest.NewRequest("GET", "/api/test", nil)
+	req3.Header.Set(constants.HeaderIP, "192.168.1.100")
+	w3 := httptest.NewRecorder()
+	handler.ServeHTTP(w3, req3)
+
+	if w3.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 Too Many Requests on request 3, got %d", w3.Code)
+	}
+
+	// OPTIONS request should bypass rate limiting
+	reqOptions := httptest.NewRequest("OPTIONS", "/api/test", nil)
+	reqOptions.Header.Set(constants.HeaderIP, "192.168.1.100")
+	wOptions := httptest.NewRecorder()
+	handler.ServeHTTP(wOptions, reqOptions)
+
+	if wOptions.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on OPTIONS bypass, got %d", wOptions.Code)
+	}
+}
+
+func TestGraphQLChain(t *testing.T) {
+	mgr := newTestManager()
+
+	var capturedOp string
+	graphqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedOp = r.Header.Get("X-GraphQL-Operation")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":{"user":{"id":"1"}}}`))
+	})
+
+	// maxDepth = 2
+	chain := mgr.GraphQLChain(2)(graphqlHandler)
+
+	// Valid query with depth 1
+	validBody := `{"query":"query GetUser { user { id } }","operationName":"GetUser"}`
+	reqValid := httptest.NewRequest("POST", "/graphql", bytes.NewBufferString(validBody))
+	reqValid.Header.Set("Content-Type", "application/json")
+	wValid := httptest.NewRecorder()
+	chain.ServeHTTP(wValid, reqValid)
+
+	if wValid.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for valid GraphQL query, got %d: %s", wValid.Code, wValid.Body.String())
+	}
+	if capturedOp != "GetUser" {
+		t.Errorf("expected operationName 'GetUser', got %q", capturedOp)
+	}
+
+	// Deep query with depth 3 (exceeds maxDepth 2)
+	deepBody := `{"query":"query Deep { user { profile { avatar { url } } } }","operationName":"Deep"}`
+	reqDeep := httptest.NewRequest("POST", "/graphql", bytes.NewBufferString(deepBody))
+	reqDeep.Header.Set("Content-Type", "application/json")
+	wDeep := httptest.NewRecorder()
+	chain.ServeHTTP(wDeep, reqDeep)
+
+	if wDeep.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for exceeding depth, got %d", wDeep.Code)
+	}
+}
+
+func TestWebSocketChain(t *testing.T) {
+	mgr := newTestManager()
+
+	wsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	})
+
+	authenticator := func(r *http.Request) bool {
+		return r.Header.Get("Authorization") == "Bearer valid-token"
+	}
+
+	chain := mgr.WebSocketChain(authenticator)(wsHandler)
+
+	// Test 1: Non-websocket request returns 400
+	reqNonWS := httptest.NewRequest("GET", "/ws", nil)
+	wNonWS := httptest.NewRecorder()
+	chain.ServeHTTP(wNonWS, reqNonWS)
+
+	if wNonWS.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for non-WS request, got %d", wNonWS.Code)
+	}
+
+	// Test 2: WebSocket request with invalid auth returns 401
+	reqAuthFail := httptest.NewRequest("GET", "/ws", nil)
+	reqAuthFail.Header.Set("Upgrade", "websocket")
+	reqAuthFail.Header.Set("Connection", "Upgrade")
+	wAuthFail := httptest.NewRecorder()
+	chain.ServeHTTP(wAuthFail, reqAuthFail)
+
+	if wAuthFail.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for unauthorized WS upgrade, got %d", wAuthFail.Code)
+	}
+
+	// Test 3: WebSocket request with valid auth succeeds
+	reqSuccess := httptest.NewRequest("GET", "/ws", nil)
+	reqSuccess.Header.Set("Upgrade", "websocket")
+	reqSuccess.Header.Set("Connection", "Upgrade")
+	reqSuccess.Header.Set("Authorization", "Bearer valid-token")
+	wSuccess := httptest.NewRecorder()
+	chain.ServeHTTP(wSuccess, reqSuccess)
+
+	if wSuccess.Code != http.StatusSwitchingProtocols {
+		t.Errorf("expected 101 SwitchingProtocols, got %d", wSuccess.Code)
+	}
+}
+
+func TestGraphQLQueryDepth_StringsAndComments(t *testing.T) {
+	// Query with braces inside strings and comments
+	query := `
+		query GetUser {
+			# { this comment has braces { { {
+			user(filter: "{ not a nested query }", note: "escaped \" { quote") {
+				id
+				name
+			}
+		}
+	`
+	depth := graphqlQueryDepth(query)
+	if depth != 1 {
+		t.Errorf("expected depth 1, got %d", depth)
+	}
+}
+
+func TestGraphQLBlockIntrospection_GET(t *testing.T) {
+	mgr := newTestManager()
+	handler := mgr.GraphQLBlockIntrospection(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+
+	// GET request with __schema introspection
+	req := httptest.NewRequest("GET", "/graphql?query={__schema{types{name}}}", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for GET introspection, got %d", w.Code)
+	}
+
+	// GET request with normal query
+	reqNormal := httptest.NewRequest("GET", "/graphql?query={user{id}}", nil)
+	wNormal := httptest.NewRecorder()
+	handler.ServeHTTP(wNormal, reqNormal)
+
+	if wNormal.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for normal GET query, got %d", wNormal.Code)
+	}
+}
+
+type mockContextCapturingStore struct {
+	onSave func(ctx context.Context, entry *model.AuditLog) error
+}
+
+func (m *mockContextCapturingStore) Save(ctx context.Context, entry *model.AuditLog) error {
+	if m.onSave != nil {
+		return m.onSave(ctx, entry)
+	}
+	return nil
+}
+
+func TestLogger_ContextCancelledPreservation(t *testing.T) {
+	var capturedCtx context.Context
+	var mu sync.Mutex
+
+	customStore := &mockContextCapturingStore{
+		onSave: func(ctx context.Context, _ *model.AuditLog) error {
+			mu.Lock()
+			capturedCtx = ctx
+			mu.Unlock()
+			return nil
+		},
+	}
+
+	mgr := newTestManager(func(c *Config) {
+		c.LogStore = customStore
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest("GET", "/test", nil).WithContext(ctx)
+
+	handler := mgr.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Cancel context mid-flight
+		cancel()
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if capturedCtx == nil {
+		t.Fatal("expected capturedCtx to be non-nil")
+	}
+	if err := capturedCtx.Err(); err != nil {
+		t.Errorf("expected log context to remain active (without cancel), got err: %v", err)
+	}
+}
+
+func TestResponseRecorder_BufferPoolCapLimit(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/test", nil)
+
+	// Case 1: Normal body (< 256KB)
+	rec1 := wrapResponseWriter(w, r, 1024)
+	_, _ = rec1.Write([]byte("small response"))
+	rec1.Free()
+
+	// Case 2: Huge buffer (> 256KB)
+	rec2 := wrapResponseWriter(w, r, 5*1024*1024)
+	hugeData := make([]byte, 300*1024)
+	_, _ = rec2.Write(hugeData)
+	if rec2.body.Cap() <= maxPooledBufferSize {
+		t.Fatalf("expected buffer cap > %d, got %d", maxPooledBufferSize, rec2.body.Cap())
+	}
+	rec2.Free()
+	if rec2.body != nil {
+		t.Error("expected rec2.body to be nil after Free()")
+	}
+}
+
+func TestResponseRecorder_NativeInterfaces(t *testing.T) {
+	inner := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/test", nil)
+
+	rec := wrapResponseWriter(inner, r, 1024)
+
+	// Idempotent wrapResponseWriter returns same pointer
+	if wrapResponseWriter(rec, r, 1024) != rec {
+		t.Error("expected wrapResponseWriter to return existing *responseRecorder")
+	}
+
+	// Unwrap
+	if rec.Unwrap() != inner {
+		t.Errorf("expected Unwrap to return inner recorder, got %v", rec.Unwrap())
+	}
+
+	// Default status before write
+	if rec.Status() != http.StatusOK {
+		t.Errorf("expected default Status 200, got %d", rec.Status())
+	}
+
+	// WriteHeader
+	rec.WriteHeader(http.StatusCreated)
+	if rec.Status() != http.StatusCreated {
+		t.Errorf("expected Status 201, got %d", rec.Status())
+	}
+	// Secondary WriteHeader should be ignored
+	rec.WriteHeader(http.StatusBadRequest)
+	if rec.Status() != http.StatusCreated {
+		t.Errorf("expected Status to remain 201, got %d", rec.Status())
+	}
+
+	// Write
+	payload := []byte("hello world")
+	n, err := rec.Write(payload)
+	if err != nil || n != len(payload) {
+		t.Fatalf("unexpected Write result: n=%d, err=%v", n, err)
+	}
+	if rec.BytesWritten() != len(payload) {
+		t.Errorf("expected BytesWritten %d, got %d", len(payload), rec.BytesWritten())
+	}
+	if string(rec.Body()) != "hello world" {
+		t.Errorf("expected Body 'hello world', got %q", string(rec.Body()))
+	}
+
+	// WriteString (io.StringWriter)
+	strPayload := " additional text"
+	sn, serr := io.WriteString(rec, strPayload)
+	if serr != nil || sn != len(strPayload) {
+		t.Fatalf("unexpected WriteString result: sn=%d, err=%v", sn, serr)
+	}
+	if !strings.Contains(string(rec.Body()), "additional text") {
+		t.Errorf("expected Body to contain 'additional text', got %q", string(rec.Body()))
+	}
+
+	// Flush (httptest.ResponseRecorder implements http.Flusher)
+	rec.Flush()
+	if !inner.Flushed {
+		t.Error("expected inner recorder to be flushed")
+	}
+
+	// ReadFrom
+	src := bytes.NewReader([]byte(" extra data"))
+	rn, rerr := rec.ReadFrom(src)
+	if rerr != nil || rn != int64(len(" extra data")) {
+		t.Fatalf("unexpected ReadFrom result: rn=%d, err=%v", rn, rerr)
+	}
+
+	// Free
+	rec.Free()
+	if rec.Body() != nil {
+		t.Error("expected Body() to be nil after Free()")
+	}
+}
+
+func TestBuildInnerChain_CompressAndLogger(t *testing.T) {
+	mockStore := &MockLogStore{}
+	mgr := newTestManager(func(c *Config) {
+		c.LogStore = mockStore
+		c.Logging.LogResponseBodies = true
+		c.Logging.ResponseBodyLogLimitSize = 4096
+	})
+
+	cfg := &ChainConfig{
+		Features: ChainFeatures{
+			UseChiCompress: true,
+		},
+		Compression: ChainCompression{
+			CompressionLevel: 5,
+		},
+	}
+	cfg.ApplyDefaults()
+
+	jsonResponse := `{"status":"ok","message":"compressed payload"}`
+	appHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(jsonResponse))
+	})
+
+	chain := mgr.buildInnerChain(cfg, appHandler)
+
+	req := httptest.NewRequest("GET", "/api/data", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	chain.ServeHTTP(rec, req)
+
+	// 1. Verify client received gzip compressed body
+	if rec.Header().Get("Content-Encoding") != "gzip" {
+		t.Errorf("expected Content-Encoding 'gzip', got %q", rec.Header().Get("Content-Encoding"))
+	}
+
+	gzReader, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatalf("failed to create gzip reader from response: %v", err)
+	}
+	decompressed, err := io.ReadAll(gzReader)
+	if err != nil {
+		t.Fatalf("failed to read decompressed gzip data: %v", err)
+	}
+	_ = gzReader.Close()
+
+	if string(decompressed) != jsonResponse {
+		t.Errorf("expected decompressed body %q, got %q", jsonResponse, string(decompressed))
+	}
+
+	// 2. Verify Audit Log recorded readable uncompressed JSON (not raw gzip binary)
+	logs := mockStore.GetLogs()
+	if len(logs) == 0 {
+		t.Fatal("expected 1 audit log entry to be recorded")
+	}
+	logEntry := logs[0]
+	if logEntry.StatusCode != http.StatusOK {
+		t.Errorf("expected log StatusCode 200, got %d", logEntry.StatusCode)
+	}
+
+	// ResBody should be parsed as map[string]any or uncompressed string, NOT binary gzip
+	m, ok := logEntry.ResponseBody.(map[string]any)
+	if !ok {
+		t.Fatalf("expected log ResponseBody to be uncompressed JSON map, got %T: %v", logEntry.ResponseBody, logEntry.ResponseBody)
+	}
+	if m["status"] != "ok" || m["message"] != "compressed payload" {
+		t.Errorf("unexpected logged response body values: %+v", m)
+	}
+}
+
+func TestManager_Config_Close(t *testing.T) {
+	mgr := newTestManager()
+	cfg := mgr.Config()
+	if cfg.Security.PublicKeySignature != "test-public-key" {
+		t.Errorf("unexpected PublicKeySignature: %s", cfg.Security.PublicKeySignature)
+	}
+	if err := mgr.Close(); err != nil {
+		t.Errorf("unexpected error on Close: %v", err)
+	}
+}
+
+func TestPingHandler(t *testing.T) {
+	mgr := newTestManager()
+	handler := mgr.PingHandler()
+
+	// GET -> 200 pong
+	req := httptest.NewRequest("GET", "/ping", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "pong") {
+		t.Errorf("expected response to contain 'pong', got %s", rec.Body.String())
+	}
+
+	// POST -> 405 Method Not Allowed
+	reqPost := httptest.NewRequest("POST", "/ping", nil)
+	recPost := httptest.NewRecorder()
+	handler.ServeHTTP(recPost, reqPost)
+	if recPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405, got %d", recPost.Code)
+	}
+}
+
+func TestApplyMiddleware(t *testing.T) {
+	var order []string
+	mw1 := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			order = append(order, "mw1-before")
+			next.ServeHTTP(w, r)
+			order = append(order, "mw1-after")
+		})
+	}
+	mw2 := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			order = append(order, "mw2-before")
+			next.ServeHTTP(w, r)
+			order = append(order, "mw2-after")
+		})
+	}
+
+	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		order = append(order, "final")
+	})
+
+	chained := ApplyMiddleware(final, mw1, mw2)
+	chained.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+
+	expected := []string{"mw1-before", "mw2-before", "final", "mw2-after", "mw1-after"}
+	if !slices.Equal(order, expected) {
+		t.Errorf("expected execution order %v, got %v", expected, order)
+	}
+}
+
+func TestWebhookChain(t *testing.T) {
+	mgr := newTestManager()
+	cfg := &ChainConfig{}
+	cfg.ApplyDefaults()
+
+	called := false
+	handler := mgr.WebhookChain(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/webhook", strings.NewReader(`{"event":"test"}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	handler.ServeHTTP(rec, req)
+	if !called {
+		t.Error("expected webhook handler to be called")
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+}
+
 // ─── Benchmarks ──────────────────────────────────────────────────────────────
 
 func BenchmarkLogger(b *testing.B) {
@@ -659,5 +1451,36 @@ func BenchmarkResolveBodyToken(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		ResolveBodyToken("application/json", body)
+	}
+}
+
+func BenchmarkBuildRateKey(b *testing.B) {
+	req := httptest.NewRequest("GET", "/api/v1/users", nil)
+	req.Header.Set(constants.HeaderIP, "192.168.1.100")
+	req.Header.Set(constants.HeaderUserAgent, "Go-Client/1.0")
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = buildRateKeyPublic(req, constants.AuthTypePublic, "test-secret")
+	}
+}
+
+func BenchmarkRateLimit(b *testing.B) {
+	cfg := ConfigLimiter{
+		RateLimitRequests: 1000000,
+		RateLimitWindow:   1,
+	}
+	rl := RateLimit(cfg, "test-secret")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.Header.Set(constants.HeaderIP, "192.168.1.50")
+	req.Header.Set(constants.HeaderUserAgent, "Benchmark/1.0")
+	req.Header.Set(constants.HeaderPlatform, "mobile")
+
+	b.ReportAllocs()
+	for b.Loop() {
+		rl.ServeHTTP(httptest.NewRecorder(), req)
 	}
 }

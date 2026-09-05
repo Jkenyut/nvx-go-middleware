@@ -89,12 +89,13 @@ func (m *Manager) buildInnerChain(cfg *ChainConfig, next http.Handler) http.Hand
 	}
 	handler = m.RemoveHeaders(handler)
 
+	// Logger only records requests that survived Outer layers (DDoS, Bad Auth)
+	// Placing Logger inside ChiCompress ensures it captures uncompressed plaintext bodies.
+	handler = m.Logger(handler)
+
 	if cfg.Features.UseChiCompress {
 		handler = m.ChiCompress(cfg.Compression.CompressionLevel)(handler)
 	}
-
-	// Logger only records requests that survived Outer layers (DDoS, Bad Auth)
-	handler = m.Logger(handler)
 
 	return handler
 }
@@ -258,19 +259,6 @@ func Heartbeat(path string) func(http.Handler) http.Handler {
 			}
 			next.ServeHTTP(w, r)
 		})
-	}
-}
-
-// PreSignChain creates a middleware chain specifically for pre-signed requests.
-func (m *Manager) PreSignChain(cfg *ChainConfig) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		handler := m.buildInnerChain(cfg, next)
-		if cfg.Features.UseChiRateLimitPublic {
-			handler = RateLimit(cfg.Limiter, m.cfg.Security.PublicKeySignature)(handler)
-		}
-		handler = m.EnsurePreSignHeaders(handler)
-		handler = m.SetHeaderAuthType(handler, constants.AuthTypePublic)
-		return m.buildOuterChain(cfg, handler)
 	}
 }
 

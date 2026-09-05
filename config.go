@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
 
 	"github.com/Jkenyut/nvx-go-helper/activity"
@@ -89,14 +89,15 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-var (
-	// ErrMissingKeys is returned when PublicKeySignature or PrivateKeySignature are empty.
-	ErrMissingKeys = fmt.Errorf("PublicKeySignature and PrivateKeySignature are required")
-)
+// ErrMissingKeys is returned when PublicKeySignature or PrivateKeySignature are empty.
+var ErrMissingKeys = errors.New("PublicKeySignature and PrivateKeySignature are required")
 
 // WithActivityContext injects standard NVX context values from request headers.
 // Exported so protocol-specific adapters (WebSocket, gRPC) can reuse it.
-func WithActivityContext(r *http.Request, keys HeaderKeys) *http.Request {
+func WithActivityContext(r *http.Request, keys *HeaderKeys) *http.Request {
+	if keys == nil {
+		return r
+	}
 	h := r.Header
 	ctx := r.Context()
 	ctx = activity.WithTransactionID(ctx, h.Get(keys.TransactionID))

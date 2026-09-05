@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -11,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,10 +21,8 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/format"
 	"github.com/Jkenyut/nvx-go-helper/response"
-	"github.com/Jkenyut/nvx-go-helper/validator"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
-	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -56,12 +57,7 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 				}
 
 				// Abort if response already started
-				if ww, ok := w.(chimiddleware.WrapResponseWriter); ok && ww.Status() != 0 {
-					event := m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName)
-					m.addLogHeaders(event, r).Msg("response already written, cannot recover")
-					return
-				}
-				if rw, ok := w.(*responseRecorder); ok && rw.Status() != 0 {
+				if sp, ok := w.(interface{ Status() int }); ok && sp.Status() != 0 {
 					event := m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName)
 					m.addLogHeaders(event, r).Msg("response already written, cannot recover")
 					return
@@ -114,7 +110,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		}
 
 		// Context injection
-		r = WithActivityContext(r, m.cfg.Headers.Keys)
+		r = WithActivityContext(r, &m.cfg.Headers.Keys)
 
 		if m.cfg.ContextInjector != nil {
 			r = m.cfg.ContextInjector(r)
@@ -180,7 +176,8 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				ErrorMessage:    "",
 			}
 
-			if err := m.cfg.LogStore.Save(r.Context(), &entry); err != nil {
+			reqCtx := context.WithoutCancel(r.Context())
+			if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {
 				event := m.cfg.Logger.Error().
 					Str("service", m.cfg.Core.ServiceName).
 					Str("transaction_id", transactionID).
@@ -219,7 +216,7 @@ func normalizeBodyRaw(raw []byte, keywordList []string) any {
 			return v
 		}
 	}
-	return string(str)
+	return str
 }
 
 // normalizeHeadersJSON serializes HTTP headers to a JSON object.
@@ -254,21 +251,86 @@ func (m *Manager) RemoveHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// headerCleanerResponseWriter strips specified headers when WriteHeader is called.
+// headerCleanerResponseWriter strips specified headers when response headers are written.
+// It wraps standard http.ResponseWriter and preserves compatibility with Flusher, Hijacker,
+// ReaderFrom, and Go 1.20+ ResponseController unwrap contracts.
 type headerCleanerResponseWriter struct {
 	http.ResponseWriter
 	headersToRemove []string
 	cleaned         bool
 }
 
-func (w *headerCleanerResponseWriter) WriteHeader(statusCode int) {
+func (w *headerCleanerResponseWriter) cleanHeaders() {
 	if !w.cleaned {
 		for _, h := range w.headersToRemove {
 			w.ResponseWriter.Header().Del(h)
 		}
 		w.cleaned = true
 	}
+}
+
+func (w *headerCleanerResponseWriter) WriteHeader(statusCode int) {
+	w.cleanHeaders()
 	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *headerCleanerResponseWriter) Write(b []byte) (int, error) {
+	w.cleanHeaders()
+	return w.ResponseWriter.Write(b)
+}
+
+// WriteString implements io.StringWriter to support zero-allocation string writing while ensuring headers are cleaned.
+func (w *headerCleanerResponseWriter) WriteString(s string) (int, error) {
+	w.cleanHeaders()
+	if sw, ok := w.ResponseWriter.(io.StringWriter); ok {
+		return sw.WriteString(s)
+	}
+	return w.ResponseWriter.Write([]byte(s))
+}
+
+func (w *headerCleanerResponseWriter) Flush() {
+	w.cleanHeaders()
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack implements http.Hijacker to allow connection hijacking under RemoveHeaders.
+func (w *headerCleanerResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	w.cleanHeaders()
+	if h, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, errors.New("underlying ResponseWriter does not implement http.Hijacker")
+}
+
+// ReadFrom implements io.ReaderFrom to support zero-copy transmission (e.g. sendfile) while ensuring headers are cleaned.
+func (w *headerCleanerResponseWriter) ReadFrom(src io.Reader) (int64, error) {
+	w.cleanHeaders()
+	if rf, ok := w.ResponseWriter.(io.ReaderFrom); ok {
+		return rf.ReadFrom(src)
+	}
+	return io.Copy(w.ResponseWriter, src)
+}
+
+func (w *headerCleanerResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// Status returns the response status code if the underlying writer tracks it.
+func (w *headerCleanerResponseWriter) Status() int {
+	if sp, ok := w.ResponseWriter.(interface{ Status() int }); ok {
+		return sp.Status()
+	}
+	return 0
+}
+
+// BytesWritten returns the response bytes written if the underlying writer tracks it.
+func (w *headerCleanerResponseWriter) BytesWritten() int {
+	if bp, ok := w.ResponseWriter.(interface{ BytesWritten() int }); ok {
+		return bp.BytesWritten()
+	}
+	return 0
 }
 
 // EnsureInternal validates that headers required for internal service-to-service
@@ -298,12 +360,11 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 	})
 }
 
-// EnsurePublicAuth validates headers required for authenticated public requests
-// (e.g., a logged-in user calling a mobile app endpoint).
-// It checks header presence, timestamp validity, and request signature.
-func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
+// ensurePublicWithHeaders validates the given required headers, checks timestamp expiration,
+// and verifies the public HMAC signature.
+func (m *Manager) ensurePublicWithHeaders(headers []string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicAuthHeaders) {
+		if !m.validateHeaders(w, r, headers) {
 			return
 		}
 		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
@@ -311,61 +372,34 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 			return
 		}
 		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
-			errMsg := constants.ErrMsgSignatureInvalid
+			errMsg := constants.ErrMsgInvalidSignature
 			if !m.envProd() {
-				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgSignatureInvalid, signatureServer)
+				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgInvalidSignature, signatureServer)
 			}
 			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), errMsg))
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// EnsurePublicAuth validates headers required for authenticated public requests
+// (e.g., a logged-in user calling a mobile app endpoint).
+// It checks header presence, timestamp validity, and request signature.
+func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
+	return m.ensurePublicWithHeaders(m.cfg.Headers.RequiredPublicAuthHeaders, next)
 }
 
 // EnsurePublic validates headers required for unauthenticated public requests.
 // It checks header presence, timestamp validity, and request signature.
 func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicHeaders) {
-			return
-		}
-		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
-			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
-			return
-		}
-		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
-			errMsg := constants.ErrMsgSignatureInvalid
-			if !m.envProd() {
-				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgSignatureInvalid, signatureServer)
-			}
-			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), errMsg))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	return m.ensurePublicWithHeaders(m.cfg.Headers.RequiredPublicHeaders, next)
 }
 
 // EnsurePublicAPIKey validates headers required for API-key authenticated public requests.
 // It checks header presence, timestamp validity, and request signature.
 func (m *Manager) EnsurePublicAPIKey(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicAPIKeyHeaders) {
-			return
-		}
-		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
-			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
-			return
-		}
-		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
-			errMsg := constants.ErrMsgSignatureInvalid
-			if !m.envProd() {
-				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgSignatureInvalid, signatureServer)
-			}
-			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), errMsg))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	return m.ensurePublicWithHeaders(m.cfg.Headers.RequiredPublicAPIKeyHeaders, next)
 }
 
 // validateHeaders checks that all required headers are non-empty.
@@ -397,18 +431,9 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 
 	// Validate platform
 	platform := r.Header.Get(constants.HeaderPlatform)
-	if platform != "" {
-		valid := false
-		for _, v := range constants.CheckPlatform {
-			if platform == v {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidPlatform))
-			return false
-		}
+	if platform != "" && !slices.Contains(constants.CheckPlatform, platform) {
+		response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidPlatform))
+		return false
 	}
 
 	return true
@@ -473,12 +498,12 @@ func (m *Manager) isTrustedIP(ipStr string) bool {
 	if ip != nil && isPrivateIP(ip) {
 		return true
 	}
-	for _, proxy := range m.cfg.Security.TrustedProxies {
-		if proxy == ipStr {
-			return true
-		}
-		if _, ipNet, err := net.ParseCIDR(proxy); err == nil {
-			if ip != nil && ipNet.Contains(ip) {
+	if slices.Contains(m.cfg.Security.TrustedProxies, ipStr) {
+		return true
+	}
+	if ip != nil {
+		for _, ipNet := range m.trustedCIDRs {
+			if ipNet.Contains(ip) {
 				return true
 			}
 		}
@@ -486,46 +511,61 @@ func (m *Manager) isTrustedIP(ipStr string) bool {
 	return false
 }
 
-// TrustProxy extracts the real client IP from headers (CF-Connecting-IP, X-Real-Ip, X-Forwarded-For)
+// TrustProxy extracts the real client IP from headers (CF-Connecting-IP, X-Forwarded-For, X-Real-Ip)
 // when the direct connection comes from a trusted proxy or private network (Docker, k8s, localhost).
 // It updates r.RemoteAddr and sets the IP header so downstream handlers and rate limiters see the real client address.
 func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		remoteIP, _, err := net.SplitHostPort(r.RemoteAddr)
+		remoteIP, port, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
 			remoteIP = r.RemoteAddr
+			port = "0"
 		}
 
 		isTrusted := m.isTrustedIP(remoteIP)
 		clientIP := remoteIP
 
 		if isTrusted {
-			// 1. Check Cloudflare header
+			// 1. Check Cloudflare header (highest priority, set and guaranteed by Cloudflare edge)
 			if cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfIP != "" && net.ParseIP(cfIP) != nil {
 				clientIP = cfIP
-			} else if realIP := strings.TrimSpace(r.Header.Get("X-Real-Ip")); realIP != "" && net.ParseIP(realIP) != nil && !m.isTrustedIP(realIP) {
-				// 2. Check X-Real-Ip (if it contains a valid public/client IP)
-				clientIP = realIP
-			} else if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-				// 3. Check X-Forwarded-For from right to left (prefer first public/non-proxy IP)
-				parts := strings.Split(xff, ",")
-				for i := len(parts) - 1; i >= 0; i-- {
-					ipStr := strings.TrimSpace(parts[i])
-					if parsed := net.ParseIP(ipStr); parsed != nil && !m.isTrustedIP(ipStr) {
-						clientIP = ipStr
-						break
+			} else {
+				// 2. Check X-Forwarded-For from right to left (prefer first public/non-proxy IP)
+				if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+					parts := strings.Split(xff, ",")
+					for i := len(parts) - 1; i >= 0; i-- {
+						ipStr := strings.TrimSpace(parts[i])
+						if parsed := net.ParseIP(ipStr); parsed != nil && !m.isTrustedIP(ipStr) {
+							clientIP = ipStr
+							break
+						}
 					}
 				}
-				// Fallback to leftmost valid IP if all are private/trusted
-				if (clientIP == "" || clientIP == remoteIP) && len(parts) > 0 {
-					firstIP := strings.TrimSpace(parts[0])
-					if net.ParseIP(firstIP) != nil {
-						clientIP = firstIP
+
+				// 3. If no public IP in X-Forwarded-For, check X-Real-Ip for a valid public IP
+				if clientIP == "" || clientIP == remoteIP {
+					if realIP := strings.TrimSpace(r.Header.Get("X-Real-Ip")); realIP != "" && net.ParseIP(realIP) != nil && !m.isTrustedIP(realIP) {
+						clientIP = realIP
 					}
 				}
-			} else if realIP := strings.TrimSpace(r.Header.Get("X-Real-Ip")); realIP != "" && net.ParseIP(realIP) != nil {
-				// 4. Fallback to X-Real-Ip even if private (e.g. dev/staging environment)
-				clientIP = realIP
+
+				// 4. Fallback to leftmost valid IP from X-Forwarded-For if all were private/trusted
+				if (clientIP == "" || clientIP == remoteIP) && r.Header.Get("X-Forwarded-For") != "" {
+					parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+					if len(parts) > 0 {
+						firstIP := strings.TrimSpace(parts[0])
+						if net.ParseIP(firstIP) != nil {
+							clientIP = firstIP
+						}
+					}
+				}
+
+				// 5. Fallback to X-Real-Ip even if private (e.g. local dev / staging)
+				if clientIP == "" || clientIP == remoteIP {
+					if realIP := strings.TrimSpace(r.Header.Get("X-Real-Ip")); realIP != "" && net.ParseIP(realIP) != nil {
+						clientIP = realIP
+					}
+				}
 			}
 		}
 
@@ -533,13 +573,13 @@ func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 			clientIP = remoteIP
 		}
 
-		// clientIP is real user IP (extracted from CF-Connecting-IP, X-Real-Ip, or XFF)
+		// clientIP is real user IP (extracted from CF-Connecting-IP, XFF, or X-Real-Ip)
 		// remoteIP is IP from proxy/LB that directly connects to our server
 		r.Header.Set(m.cfg.Headers.Keys.IP, clientIP)
 		r.Header.Set(m.cfg.Headers.Keys.IPOrigin, remoteIP)
 
 		if clientIP != remoteIP {
-			r.RemoteAddr = net.JoinHostPort(clientIP, "0")
+			r.RemoteAddr = net.JoinHostPort(clientIP, port)
 		}
 
 		next.ServeHTTP(w, r)
@@ -548,29 +588,29 @@ func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 
 // isMultipart reports whether the Content-Type indicates a multipart/form-data body.
 func isMultipart(contentType string) bool {
-	return strings.HasPrefix(strings.ToLower(contentType), "multipart/")
+	ct := strings.TrimSpace(contentType)
+	return len(ct) >= 10 && strings.EqualFold(ct[:10], "multipart/")
 }
 
-// MaxBodySize returns a middleware that limits the maximum size of the request body.
-// It also restricts the allowed Content-Types based on the configuration.
 // MaxBodySize returns a middleware that limits the size of the request body.
-// It supports different limits for file uploads (multipart) vs regular requests.
-// It also enforces allowed content types.
+// It supports different limits for file uploads (multipart) vs regular requests
+// and enforces allowed content types (case-insensitively).
 func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			contentType := r.Header.Get("Content-Type")
 
-			// Allow bodyless requests (e.g. GET)
-			if contentType == "" && r.ContentLength == 0 {
+			// Allow bodyless requests (e.g. GET, HEAD, OPTIONS, or requests with empty body)
+			if r.Body == nil || r.Body == http.NoBody || (contentType == "" && r.ContentLength <= 0) {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			// Validate Content-Type
-			isAllowed := false
+			// Validate Content-Type (case-insensitive)
+			lowerContentType := strings.ToLower(contentType)
+			isAllowed := len(m.cfg.Security.AllowedContentTypes) == 0
 			for _, allowed := range m.cfg.Security.AllowedContentTypes {
-				if strings.Contains(contentType, allowed) {
+				if allowed == "*" || strings.Contains(lowerContentType, strings.ToLower(allowed)) {
 					isAllowed = true
 					break
 				}
@@ -581,12 +621,14 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 			}
 
 			// File upload: apply overall limit only
-			if isMultipart(contentType) {
+			if isMultipart(lowerContentType) {
 				if r.ContentLength > m.cfg.Limits.RequestBodyLimitSize {
 					response.WriteJSONResponse(w, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
 					return
 				}
-				r.Body = http.MaxBytesReader(w, r.Body, m.cfg.Limits.RequestBodyLimitSize)
+				if r.Body != nil && r.Body != http.NoBody {
+					r.Body = http.MaxBytesReader(w, r.Body, m.cfg.Limits.RequestBodyLimitSize)
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -596,7 +638,9 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 				response.WriteJSONResponse(w, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, m.cfg.Limits.RequestBodyNonFileLimitSize)
+			if r.Body != nil && r.Body != http.NoBody {
+				r.Body = http.MaxBytesReader(w, r.Body, m.cfg.Limits.RequestBodyNonFileLimitSize)
+			}
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -656,9 +700,12 @@ func FullURL(r *http.Request) string {
 
 	host := r.Host
 	if xfHost := r.Header.Get("X-Forwarded-Host"); xfHost != "" {
-		// Use only the first host to guard against header injection
-		host = strings.SplitN(xfHost, ",", 2)[0]
-		host = strings.TrimSpace(host)
+		// Use only the first host to guard against header injection and sanitize illegal chars
+		h := strings.SplitN(xfHost, ",", 2)[0]
+		h = strings.TrimSpace(h)
+		if h != "" && !strings.ContainsAny(h, "\r\n/\\") {
+			host = h
+		}
 	}
 
 	return scheme + "://" + host + r.RequestURI
@@ -704,8 +751,7 @@ func (m *Manager) MethodOnly(method string, next http.Handler) http.Handler {
 //   - Empty bodies     → "EMPTY"
 //   - All others       → hex-encoded SHA-256 of the raw body
 func ResolveBodyToken(contentType string, body []byte) string {
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	if strings.HasPrefix(ct, "multipart/") {
+	if isMultipart(contentType) {
 		return "UNSIGNED"
 	}
 	if len(body) == 0 {
@@ -713,54 +759,6 @@ func ResolveBodyToken(contentType string, body []byte) string {
 	}
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
-}
-
-// EnsurePreSignHeaders validates that the headers required for presigned request
-// generation are present.
-func (m *Manager) EnsurePreSignHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredSignaturePublicHeaders) {
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// PreSignHandler creates a POST endpoint that generates a presigned signature
-// for a described request. The caller supplies method, URI, and body hash;
-// the handler returns the HMAC signature the caller should include as Signature.
-func (m *Manager) PreSignHandler(cfg *ChainConfig) http.Handler {
-	return m.MethodOnly("POST", m.PreSignChain(cfg)(
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-
-			var req model.PresignRequest
-			if err := sonic.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {
-				response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidRequest))
-				return
-			}
-
-			if err := validator.Struct(req); err != nil {
-				response.WriteJSONResponse(w, response.BadRequest(r.Context(), validator.GetErrorsFullStr(err)))
-				return
-			}
-
-			if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
-				response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
-				return
-			}
-
-			canonical := make([]string, 0, len(m.cfg.Headers.RequiredSignaturePublicHeaders)+3)
-			canonical = append(canonical, strings.ToUpper(req.Method), req.URI)
-			for _, name := range m.cfg.Headers.RequiredSignaturePublicHeaders {
-				canonical = append(canonical, r.Header.Get(name))
-			}
-			canonical = append(canonical, req.Body)
-
-			response.WriteJSONResponse(w, response.Success(r.Context(), model.PresignResponse{
-				Signature: cryptoutil.Signature(m.cfg.Security.PublicKeySignature, canonical...),
-			}))
-		})))
 }
 
 // checkTimestamp validates that the given Unix timestamp string is within

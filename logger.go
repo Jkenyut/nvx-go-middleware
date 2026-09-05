@@ -1,6 +1,10 @@
 package middleware
 
 import (
+	"context"
+	"fmt"
+	"log/slog"
+
 	"github.com/rs/zerolog"
 )
 
@@ -67,4 +71,68 @@ func (a *zerologAdapter) Info() LogEvent {
 // NewZerologLogger wraps a *zerolog.Logger into the Logger interface.
 func NewZerologLogger(l *zerolog.Logger) Logger {
 	return &zerologAdapter{l: l}
+}
+
+// slogAdapter wraps *slog.Logger to implement the Logger interface.
+type slogAdapter struct {
+	l *slog.Logger
+}
+
+// slogEventAdapter accumulates attributes and emits an slog record on Msg/Msgf.
+type slogEventAdapter struct {
+	l     *slog.Logger
+	level slog.Level
+	attrs []slog.Attr
+}
+
+func (a *slogEventAdapter) Str(key, val string) LogEvent {
+	a.attrs = append(a.attrs, slog.String(key, val))
+	return a
+}
+
+func (a *slogEventAdapter) Err(err error) LogEvent {
+	if err != nil {
+		a.attrs = append(a.attrs, slog.Any("error", err))
+	}
+	return a
+}
+
+func (a *slogEventAdapter) Interface(key string, val any) LogEvent {
+	a.attrs = append(a.attrs, slog.Any(key, val))
+	return a
+}
+
+func (a *slogEventAdapter) Msgf(format string, args ...any) {
+	if a.l == nil || !a.l.Enabled(context.Background(), a.level) {
+		return
+	}
+	a.emit(fmt.Sprintf(format, args...))
+}
+
+func (a *slogEventAdapter) Msg(msg string) {
+	if a.l == nil || !a.l.Enabled(context.Background(), a.level) {
+		return
+	}
+	a.emit(msg)
+}
+
+func (a *slogEventAdapter) emit(msg string) {
+	args := make([]any, 0, len(a.attrs))
+	for _, attr := range a.attrs {
+		args = append(args, attr)
+	}
+	a.l.Log(context.Background(), a.level, msg, args...)
+}
+
+func (a *slogAdapter) Error() LogEvent {
+	return &slogEventAdapter{l: a.l, level: slog.LevelError, attrs: make([]slog.Attr, 0, 8)}
+}
+
+func (a *slogAdapter) Info() LogEvent {
+	return &slogEventAdapter{l: a.l, level: slog.LevelInfo, attrs: make([]slog.Attr, 0, 8)}
+}
+
+// NewSlogLogger wraps a standard library *slog.Logger into the Logger interface.
+func NewSlogLogger(l *slog.Logger) Logger {
+	return &slogAdapter{l: l}
 }

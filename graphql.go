@@ -42,7 +42,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		coreHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// ── Context injection ─────────────────────────────────────
-			r = WithActivityContext(r, m.cfg.Headers.Keys)
+			r = WithActivityContext(r, &m.cfg.Headers.Keys)
 
 			transactionID := r.Header.Get(m.cfg.Headers.Keys.TransactionID)
 			if transactionID == "" {
@@ -89,17 +89,23 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 			}()
 
 			// ── Operation name extraction ─────────────────────────────
+			operationName := r.Header.Get("X-GraphQL-Operation")
 			var gqlBody graphqlRequestBody
 			if r.Method == http.MethodPost {
 				raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
 				if err == nil && len(raw) > 0 {
 					_ = sonic.Unmarshal(raw, &gqlBody)
 				}
+				if operationName == "" && gqlBody.OperationName != "" {
+					operationName = gqlBody.OperationName
+				}
+			} else if r.Method == http.MethodGet && operationName == "" {
+				if op := r.URL.Query().Get("operationName"); op != "" {
+					operationName = op
+				}
 			}
-
-			operationName := ResolveGraphQLOperation(r)
-			if operationName == "anonymous" && gqlBody.OperationName != "" {
-				operationName = gqlBody.OperationName
+			if operationName == "" {
+				operationName = "anonymous"
 			}
 			r.Header.Set("X-GraphQL-Operation", operationName)
 
@@ -204,13 +210,43 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 	}
 }
 
-// graphqlQueryDepth returns a naive brace-depth count for the given GraphQL query string.
-// It counts the maximum nesting level of `{` / `}` pairs, which is a safe approximation
-// of field selection depth without full AST parsing.
+// graphqlQueryDepth returns a brace-depth count for the given GraphQL query string.
+// It counts the maximum nesting level of `{` / `}` pairs while ignoring characters
+// inside string literals and single-line comments (#), providing a safe approximation
+// of field selection depth without requiring full AST parsing.
 func graphqlQueryDepth(query string) int {
 	maxDepth, curDepth := 0, 0
+	inString := false
+	inComment := false
+	escaped := false
+
 	for _, ch := range query {
+		if inComment {
+			if ch == '\n' || ch == '\r' {
+				inComment = false
+			}
+			continue
+		}
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+
 		switch ch {
+		case '#':
+			inComment = true
+		case '"':
+			inString = true
 		case '{':
 			curDepth++
 			if curDepth > maxDepth {
@@ -223,6 +259,9 @@ func graphqlQueryDepth(query string) int {
 		}
 	}
 	// Subtract 1: the outermost { } wrapper is not a field level
+	if maxDepth <= 1 {
+		return 0
+	}
 	return maxDepth - 1
 }
 
@@ -234,10 +273,11 @@ func isGraphQLIntrospection(query string) bool {
 }
 
 // GraphQLBlockIntrospection is a middleware that rejects GraphQL introspection
-// queries. Useful for hardening production endpoints.
+// queries (both POST bodies and GET query parameters). Useful for hardening production endpoints.
 func (m *Manager) GraphQLBlockIntrospection(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
+		switch r.Method {
+		case http.MethodPost:
 			raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
 			if err == nil && len(raw) > 0 {
 				var body graphqlRequestBody
@@ -245,6 +285,11 @@ func (m *Manager) GraphQLBlockIntrospection(next http.Handler) http.Handler {
 					response.WriteJSONResponse(w, response.Forbidden(r.Context(), "introspection disabled"))
 					return
 				}
+			}
+		case http.MethodGet:
+			if query := r.URL.Query().Get("query"); query != "" && isGraphQLIntrospection(query) {
+				response.WriteJSONResponse(w, response.Forbidden(r.Context(), "introspection disabled"))
+				return
 			}
 		}
 		next.ServeHTTP(w, r)

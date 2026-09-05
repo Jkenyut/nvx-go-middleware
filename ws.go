@@ -1,8 +1,11 @@
 package middleware
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -19,8 +22,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// wsResponseWriter wraps http.ResponseWriter to detect the WebSocket upgrade
-// and track whether the upgrade succeeded.
+// wsResponseWriter wraps standard http.ResponseWriter to detect the WebSocket upgrade
+// and track whether the upgrade succeeded, while preserving Hijacker and Flusher contracts.
 type wsResponseWriter struct {
 	http.ResponseWriter
 	hijacked bool
@@ -31,6 +34,27 @@ func (w *wsResponseWriter) WriteHeader(code int) {
 		w.hijacked = true
 	}
 	w.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack implements http.Hijacker to allow WebSocket upgrade libraries to take over the connection.
+func (w *wsResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := w.ResponseWriter.(http.Hijacker); ok {
+		w.hijacked = true
+		return h.Hijack()
+	}
+	return nil, nil, errors.New("underlying ResponseWriter does not implement http.Hijacker")
+}
+
+// Flush implements http.Flusher to support streaming or flushing before/during upgrade.
+func (w *wsResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap implements the Go 1.20+ ResponseController unwrap contract.
+func (w *wsResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 // WebSocketChain returns a middleware chain designed for WebSocket upgrade endpoints.
@@ -56,7 +80,7 @@ func (m *Manager) WebSocketChain(
 			}
 
 			// Inject context values
-			r = WithActivityContext(r, m.cfg.Headers.Keys)
+			r = WithActivityContext(r, &m.cfg.Headers.Keys)
 
 			// Generate / propagate transaction ID
 			transactionID := r.Header.Get(m.cfg.Headers.Keys.TransactionID)

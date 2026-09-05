@@ -46,7 +46,7 @@ bin/
 
 # Added by graphify
 graphify-out/
-AGENTS.md
 GEMINI.md
 
 skills-lock.json
+AGENTS.md

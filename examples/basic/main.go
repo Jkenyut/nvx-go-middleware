@@ -85,11 +85,6 @@ func main() {
 		_, _ = w.Write([]byte("OK"))
 	})
 
-	// ========================================
-	// PRESIGN ROUTES (device validation only)
-	// ========================================
-	mux.Handle("/api/presign", mgr.PreSignHandler(&chainCfg))
-
 	mux.Handle("/ping", mw.Heartbeat("/ping")(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})))
 
 	// Start server
