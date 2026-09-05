@@ -117,11 +117,7 @@ func (a *slogEventAdapter) Msg(msg string) {
 }
 
 func (a *slogEventAdapter) emit(msg string) {
-	args := make([]any, 0, len(a.attrs))
-	for _, attr := range a.attrs {
-		args = append(args, attr)
-	}
-	a.l.Log(context.Background(), a.level, msg, args...)
+	a.l.LogAttrs(context.Background(), a.level, msg, a.attrs...)
 }
 
 func (a *slogAdapter) Error() LogEvent {

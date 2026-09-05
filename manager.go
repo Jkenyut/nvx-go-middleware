@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -120,22 +121,22 @@ func applyDefaults(cfg *Config) io.Closer {
 	}
 
 	if len(cfg.Headers.RequiredPublicAuthHeaders) == 0 {
-		cfg.Headers.RequiredPublicAuthHeaders = constants.RequiredPublicAuthHeaders
+		cfg.Headers.RequiredPublicAuthHeaders = slices.Clone(constants.RequiredPublicAuthHeaders)
 	}
 	if len(cfg.Headers.RequiredPublicHeaders) == 0 {
-		cfg.Headers.RequiredPublicHeaders = constants.RequiredPublicHeaders
+		cfg.Headers.RequiredPublicHeaders = slices.Clone(constants.RequiredPublicHeaders)
 	}
 	if len(cfg.Headers.RequiredInternalHeaders) == 0 {
-		cfg.Headers.RequiredInternalHeaders = constants.RequiredInternalHeaders
+		cfg.Headers.RequiredInternalHeaders = slices.Clone(constants.RequiredInternalHeaders)
 	}
 	if len(cfg.Headers.RequiredPublicAPIKeyHeaders) == 0 {
-		cfg.Headers.RequiredPublicAPIKeyHeaders = constants.RequiredPublicAPIKeyHeaders
+		cfg.Headers.RequiredPublicAPIKeyHeaders = slices.Clone(constants.RequiredPublicAPIKeyHeaders)
 	}
 	if len(cfg.Headers.RequiredSignaturePublicHeaders) == 0 {
-		cfg.Headers.RequiredSignaturePublicHeaders = constants.RequiredSignaturePublicHeaders
+		cfg.Headers.RequiredSignaturePublicHeaders = slices.Clone(constants.RequiredSignaturePublicHeaders)
 	}
 	if len(cfg.Headers.RequiredSignatureInternalHeaders) == 0 {
-		cfg.Headers.RequiredSignatureInternalHeaders = constants.RequiredSignatureInternalHeaders
+		cfg.Headers.RequiredSignatureInternalHeaders = slices.Clone(constants.RequiredSignatureInternalHeaders)
 	}
 	if len(cfg.Security.TrustedProxies) == 0 {
 		cfg.Security.TrustedProxies = []string{}

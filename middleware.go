@@ -120,28 +120,8 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		requestHeadersBytes := normalizeHeadersJSON(r.Header, m.cfg.Logging.MaskKeywords)
 
 		var reqBodyBytes any
-		if m.cfg.Logging.LogRequestBodies {
-			raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
-			if err != nil {
-				event := m.cfg.Logger.Error().
-					Str("service", m.cfg.Core.ServiceName).
-					Str("transaction_id", transactionID).
-					Str("method", r.Method).
-					Str("path", r.URL.Path).
-					Str("user_agent", r.UserAgent()).
-					Err(err)
-				m.addLogHeaders(event, r).Msg("failed to read request body")
-				response.WriteJSONResponse(rw, response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType))
-				if rw != nil {
-					rw.Free()
-				}
-				return
-			}
 
-			reqBodyBytes = normalizeBodyRaw(raw, m.cfg.Logging.MaskKeywords)
-		}
-
-		// Ensure cleanup and logging ALWAYS happens, even on panics.
+		// Ensure cleanup and logging ALWAYS happens, even on panics or early error returns.
 		defer func() {
 			var resBodyBytes any
 			if m.cfg.Logging.LogResponseBodies {
@@ -194,6 +174,24 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			}
 		}()
 
+		if m.cfg.Logging.LogRequestBodies {
+			raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
+			if err != nil {
+				event := m.cfg.Logger.Error().
+					Str("service", m.cfg.Core.ServiceName).
+					Str("transaction_id", transactionID).
+					Str("method", r.Method).
+					Str("path", r.URL.Path).
+					Str("user_agent", r.UserAgent()).
+					Err(err)
+				m.addLogHeaders(event, r).Msg("failed to read request body")
+				response.WriteJSONResponse(rw, response.BadRequest(r.Context(), constants.ErrMsgPayloadTooLarge))
+				return
+			}
+
+			reqBodyBytes = normalizeBodyRaw(raw, m.cfg.Logging.MaskKeywords)
+		}
+
 		next.ServeHTTP(rw, r)
 	})
 }
@@ -207,14 +205,13 @@ func normalizeBodyRaw(raw []byte, keywordList []string) any {
 
 	str := string(raw)
 
-	// MaskSensitiveDataHelper mask keywords
-	str = format.MaskAfterKeywords(str, keywordList, "*")
+	if len(keywordList) > 0 {
+		str = format.MaskAfterKeywords(str, keywordList, "*")
+	}
 
-	if sonic.ConfigDefault.Valid([]byte(str)) {
-		var v any
-		if err := sonic.ConfigDefault.Unmarshal([]byte(str), &v); err == nil {
-			return v
-		}
+	var v any
+	if err := sonic.ConfigDefault.UnmarshalFromString(str, &v); err == nil {
+		return v
 	}
 	return str
 }
@@ -453,7 +450,11 @@ func (m *Manager) validateSignatureInternalHeaders(r *http.Request) (valid bool,
 // (method + URI + configured headers + body token) and delegates to validateSignatureHeaders.
 func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (valid bool, signature string) {
 	parts := make([]string, 0, len(m.cfg.Headers.RequiredSignaturePublicHeaders)+3)
-	parts = append(parts, strings.ToUpper(r.Method), r.RequestURI)
+	uri := r.RequestURI
+	if uri == "" && r.URL != nil {
+		uri = r.URL.RequestURI()
+	}
+	parts = append(parts, strings.ToUpper(r.Method), uri)
 	for _, name := range m.cfg.Headers.RequiredSignaturePublicHeaders {
 		parts = append(parts, r.Header.Get(name))
 	}
@@ -662,17 +663,26 @@ func (m *Manager) CORS(
 		}
 
 		allowed := false
+		matchedExact := false
 		for _, o := range allowedOrigins {
-			if o == "*" || o == origin {
+			if o == origin {
 				allowed = true
+				matchedExact = true
 				break
+			}
+			if o == "*" {
+				allowed = true
 			}
 		}
 
 		if allowed {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Add("Vary", "Origin")
+			if matchedExact {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Add("Vary", "Origin")
+			} else {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			}
 		}
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -727,6 +737,7 @@ func ReadAndRestoreBody(r *http.Request, limit int64) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read request body: %w", err)
 	}
 	if int64(len(bodyBytes)) > limit {
+		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(bodyBytes), r.Body))
 		return nil, fmt.Errorf("request body exceeds limit of %d bytes", limit)
 	}
 
@@ -800,7 +811,11 @@ func ValidateUUIDHeaders(required bool, headerNames ...string) func(http.Handler
 				}
 
 				if _, err := uuid.Parse(val); err != nil {
-					response.WriteJSONResponse(w, response.BadRequest(r.Context(), fmt.Sprintf("%s: header '%s' with value '%s' is not a valid UUID", constants.ErrMsgInvalidUUID, h, val)))
+					displayVal := val
+					if len(displayVal) > 64 {
+						displayVal = displayVal[:64] + "..."
+					}
+					response.WriteJSONResponse(w, response.BadRequest(r.Context(), fmt.Sprintf("%s: header '%s' with value '%s' is not a valid UUID", constants.ErrMsgInvalidUUID, h, displayVal)))
 					return
 				}
 			}

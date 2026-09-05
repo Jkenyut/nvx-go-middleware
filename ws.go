@@ -26,14 +26,23 @@ import (
 // and track whether the upgrade succeeded, while preserving Hijacker and Flusher contracts.
 type wsResponseWriter struct {
 	http.ResponseWriter
+	status   int
 	hijacked bool
 }
 
 func (w *wsResponseWriter) WriteHeader(code int) {
+	w.status = code
 	if code == http.StatusSwitchingProtocols {
 		w.hijacked = true
 	}
 	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *wsResponseWriter) Status() int {
+	if w.status != 0 {
+		return w.status
+	}
+	return 0
 }
 
 // Hijack implements http.Hijacker to allow WebSocket upgrade libraries to take over the connection.
@@ -73,12 +82,6 @@ func (m *Manager) WebSocketChain(
 ) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		coreHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Must be a WebSocket upgrade request
-			if !isWebSocketUpgrade(r) {
-				http.Error(w, "expected WebSocket upgrade", http.StatusBadRequest)
-				return
-			}
-
 			// Inject context values
 			r = WithActivityContext(r, &m.cfg.Headers.Keys)
 
@@ -90,70 +93,8 @@ func (m *Manager) WebSocketChain(
 			}
 			r = r.WithContext(activity.WithTransactionID(r.Context(), transactionID))
 
-			if m.cfg.Core.EnableTelemetry {
-				span := trace.SpanFromContext(r.Context())
-				if span.SpanContext().IsValid() {
-					span.SetName("WebSocket Upgrade")
-					span.SetAttributes(
-						attribute.String("transaction_id", transactionID),
-						attribute.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
-						attribute.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
-						attribute.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
-						attribute.String("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)),
-						attribute.String("user_agent", r.UserAgent()),
-						attribute.String("service", m.cfg.Core.ServiceName),
-						attribute.String("protocol", "WebSocket"),
-
-						attribute.String("http.target", r.URL.Path),
-					)
-				}
-			}
-
-			// Authenticate
-			if authenticator != nil && !authenticator(r) {
-				if m.cfg.Core.EnableTelemetry {
-					span := trace.SpanFromContext(r.Context())
-					if span.SpanContext().IsValid() {
-						span.SetStatus(codes.Error, constants.ErrMsgInvalidToken)
-					}
-				}
-				response.WriteJSONResponse(w, response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken))
-				return
-			}
-
-			var ww *wsResponseWriter
-
-			// Panic guard (pre-upgrade)
-			defer func() {
-				if rec := recover(); rec != nil {
-					if m.cfg.Core.EnableTelemetry {
-						span := trace.SpanFromContext(r.Context())
-						if span.SpanContext().IsValid() {
-							span.RecordError(fmt.Errorf("panic: %v", rec))
-							span.SetStatus(codes.Error, "panic recovered")
-						}
-					}
-					m.cfg.Logger.Error().
-						Str("service", m.cfg.Core.ServiceName).
-						Str("transaction_id", transactionID).
-						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
-						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
-						Str("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)).
-						Str("user_agent", r.UserAgent()).
-						Str("protocol", "WebSocket").
-						Str("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)).
-						Interface("panic", rec).
-						Msg("panic in WebSocket handler")
-
-					if ww == nil || !ww.hijacked {
-						http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-						return
-					}
-				}
-			}()
-
 			start := time.Now()
-			ww = &wsResponseWriter{ResponseWriter: w}
+			ww := &wsResponseWriter{ResponseWriter: w}
 
 			IDAuditLog := cryptoutil.V7()
 			entry := model.AuditLog{
@@ -184,6 +125,10 @@ func (m *Manager) WebSocketChain(
 				statusCode := http.StatusBadRequest
 				if ww.hijacked {
 					statusCode = http.StatusSwitchingProtocols
+				} else if ww.status != 0 {
+					statusCode = ww.status
+				} else if sp, ok := ww.ResponseWriter.(interface{ Status() int }); ok && sp.Status() != 0 {
+					statusCode = sp.Status()
 				}
 				if m.cfg.Core.EnableTelemetry {
 					span := trace.SpanFromContext(r.Context())
@@ -210,6 +155,71 @@ func (m *Manager) WebSocketChain(
 						Msg("failed to save ws audit log")
 				}
 			}()
+
+			// Panic guard (pre-upgrade)
+			defer func() {
+				if rec := recover(); rec != nil {
+					if m.cfg.Core.EnableTelemetry {
+						span := trace.SpanFromContext(r.Context())
+						if span.SpanContext().IsValid() {
+							span.RecordError(fmt.Errorf("panic: %v", rec))
+							span.SetStatus(codes.Error, "panic recovered")
+						}
+					}
+					m.cfg.Logger.Error().
+						Str("service", m.cfg.Core.ServiceName).
+						Str("transaction_id", transactionID).
+						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
+						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
+						Str("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)).
+						Str("user_agent", r.UserAgent()).
+						Str("protocol", "WebSocket").
+						Str("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)).
+						Interface("panic", rec).
+						Msg("panic in WebSocket handler")
+
+					if !ww.hijacked {
+						http.Error(ww, "Internal Server Error", http.StatusInternalServerError)
+						return
+					}
+				}
+			}()
+
+			// Must be a WebSocket upgrade request
+			if !isWebSocketUpgrade(r) {
+				http.Error(ww, "expected WebSocket upgrade", http.StatusBadRequest)
+				return
+			}
+
+			if m.cfg.Core.EnableTelemetry {
+				span := trace.SpanFromContext(r.Context())
+				if span.SpanContext().IsValid() {
+					span.SetName("WebSocket Upgrade")
+					span.SetAttributes(
+						attribute.String("transaction_id", transactionID),
+						attribute.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
+						attribute.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
+						attribute.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
+						attribute.String("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)),
+						attribute.String("user_agent", r.UserAgent()),
+						attribute.String("service", m.cfg.Core.ServiceName),
+						attribute.String("protocol", "WebSocket"),
+						attribute.String("http.target", r.URL.Path),
+					)
+				}
+			}
+
+			// Authenticate
+			if authenticator != nil && !authenticator(r) {
+				if m.cfg.Core.EnableTelemetry {
+					span := trace.SpanFromContext(r.Context())
+					if span.SpanContext().IsValid() {
+						span.SetStatus(codes.Error, constants.ErrMsgInvalidToken)
+					}
+				}
+				response.WriteJSONResponse(ww, response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken))
+				return
+			}
 
 			next.ServeHTTP(ww, r)
 		})

@@ -1484,3 +1484,165 @@ func BenchmarkRateLimit(b *testing.B) {
 		rl.ServeHTTP(httptest.NewRecorder(), req)
 	}
 }
+
+// ─── Regression & Hardening Tests ───────────────────────────────────────────
+
+func TestReadAndRestoreBody_ExceedsLimitPreservesBody(t *testing.T) {
+	originalContent := "this is a long payload exceeding limit"
+	req := httptest.NewRequest("POST", "/test", strings.NewReader(originalContent))
+	req.Header.Set("Content-Type", "application/json")
+
+	// Read with limit smaller than payload
+	_, err := ReadAndRestoreBody(req, 10)
+	if err == nil {
+		t.Fatal("expected error for body exceeding limit, got nil")
+	}
+
+	// Verify that req.Body was restored and can still be fully read
+	restoredBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("failed to read restored body: %v", err)
+	}
+	if string(restoredBytes) != originalContent {
+		t.Errorf("expected restored body %q, got %q", originalContent, string(restoredBytes))
+	}
+}
+
+func TestGraphQLChain_AuditsDepthRejection(t *testing.T) {
+	store := &MockLogStore{}
+	mgr := newTestManager(func(c *Config) { c.LogStore = store })
+
+	handler := mgr.GraphQLChain(1)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Query with depth 2 > maxDepth 1
+	body := `{"query":"query { user { profile { name } } }"}`
+	req := httptest.NewRequest("POST", "/graphql", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400 for depth rejection, got %d", w.Code)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	logs := store.GetLogs()
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 audit log entry for depth rejection, got %d", len(logs))
+	}
+	if logs[0].StatusCode != http.StatusBadRequest {
+		t.Errorf("expected audit log status 400, got %d", logs[0].StatusCode)
+	}
+}
+
+func TestWebSocketChain_AuditsAuthRejection(t *testing.T) {
+	store := &MockLogStore{}
+	mgr := newTestManager(func(c *Config) { c.LogStore = store })
+
+	// Reject all connections
+	chain := mgr.WebSocketChain(func(r *http.Request) bool {
+		return false
+	})
+
+	handler := chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401 for unauthorized WS attempt, got %d", w.Code)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	logs := store.GetLogs()
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 audit log entry for rejected WS attempt, got %d", len(logs))
+	}
+	if logs[0].StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected audit log status 401, got %d", logs[0].StatusCode)
+	}
+}
+
+func TestCORS_WildcardCredentialsHardened(t *testing.T) {
+	mgr := newTestManager(func(c *Config) {
+		c.Security.AllowedOrigins = []string{"*"}
+	})
+
+	handler := mgr.CORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}), []string{"*"}, []string{"Authorization"})
+
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.Header.Set("Origin", "https://untrusted-site.com")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// When wildcard * is matched, credentials MUST NOT be true, and Allow-Origin should be *
+	if w.Header().Get("Access-Control-Allow-Credentials") == "true" {
+		t.Error("Access-Control-Allow-Credentials must not be true when origin matched via wildcard *")
+	}
+	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Errorf("expected Access-Control-Allow-Origin to be '*', got %q", w.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
+
+func TestBuildOuterChain_ExecutionOrder(t *testing.T) {
+	mgr := newTestManager(func(c *Config) {
+		c.Core.EnableTelemetry = true
+		c.Security.TrustedProxies = []string{"10.0.0.1"}
+	})
+
+	chainCfg := ChainConfig{
+		Features: ChainFeatures{
+			UseChiTimeout:  true,
+			UseChiThrottle: true,
+		},
+	}
+	chainCfg.ApplyDefaults()
+
+	var observedIP string
+	innerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observedIP = r.Header.Get(mgr.Config().Headers.Keys.IP)
+		if r.URL.Path == "/panic" {
+			panic("test panic for trace")
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	outer := mgr.buildOuterChain(&chainCfg, innerHandler)
+
+	// 1. Verify TrustProxy runs before inner handler and resolves real IP
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "10.0.0.1:12345"
+	req.Header.Set("X-Forwarded-For", "203.0.113.195")
+	w := httptest.NewRecorder()
+	outer.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if observedIP != "203.0.113.195" {
+		t.Errorf("expected resolved client IP 203.0.113.195, got %q", observedIP)
+	}
+
+	// 2. Verify Recoverer catches panics safely
+	panicReq := httptest.NewRequest("GET", "/panic", nil)
+	panicReq.RemoteAddr = "10.0.0.1:12345"
+	panicReq.Header.Set("X-Forwarded-For", "203.0.113.195")
+	panicW := httptest.NewRecorder()
+	outer.ServeHTTP(panicW, panicReq)
+
+	if panicW.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 on panic, got %d", panicW.Code)
+	}
+}

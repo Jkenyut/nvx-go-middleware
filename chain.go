@@ -101,23 +101,24 @@ func (m *Manager) buildInnerChain(cfg *ChainConfig, next http.Handler) http.Hand
 }
 
 // buildOuterChain applies the outermost core middleware.
-// This executes BEFORE validation, logging, and application logic.
+// Execution order for incoming requests:
+// TrustProxy (outermost) -> otelhttp -> Recoverer -> ChiTimeout -> ChiThrottleBacklog -> inner layers
 func (m *Manager) buildOuterChain(cfg *ChainConfig, handler http.Handler) http.Handler {
-	// TrustProxy MUST run before RateLimit and Validation to resolve Real IP accurately.
-	handler = m.TrustProxy(handler)
+	if cfg.Features.UseChiThrottle {
+		handler = m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, time.Duration(cfg.Throttle.ThrottleTimeout)*time.Second)(handler)
+	}
+	if cfg.Features.UseChiTimeout {
+		handler = m.ChiTimeout(time.Duration(m.cfg.Limits.RequestTimeout) * time.Second)(handler)
+	}
+
+	handler = m.Recoverer(handler)
 
 	if m.cfg.Core.EnableTelemetry {
 		handler = otelhttp.NewMiddleware(m.cfg.Core.ServiceName)(handler)
 	}
 
-	if cfg.Features.UseChiTimeout {
-		handler = m.ChiTimeout(time.Duration(m.cfg.Limits.RequestTimeout) * time.Second)(handler)
-	}
-	if cfg.Features.UseChiThrottle {
-		handler = m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, time.Duration(cfg.Throttle.ThrottleTimeout)*time.Second)(handler)
-	}
-
-	handler = m.Recoverer(handler)
+	// TrustProxy MUST be the outermost layer so otelhttp and downstream handlers receive the resolved real IP.
+	handler = m.TrustProxy(handler)
 
 	return handler
 }
@@ -127,15 +128,15 @@ func (m *Manager) BaseChain(cfg *ChainConfig, setupRoute func(r chi.Router)) fun
 	return func(next http.Handler) http.Handler {
 		r := chi.NewRouter()
 
-		if m.cfg.Core.EnableTelemetry {
-			r.Use(otelhttp.NewMiddleware(m.cfg.Core.ServiceName))
-		}
-
 		if cfg.Features.UseChiStripSlashes {
 			r.Use(chimiddleware.StripSlashes)
 		}
 
 		r.Use(m.TrustProxy)
+
+		if m.cfg.Core.EnableTelemetry {
+			r.Use(otelhttp.NewMiddleware(m.cfg.Core.ServiceName))
+		}
 
 		r.Use(m.Recoverer)
 

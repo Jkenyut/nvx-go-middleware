@@ -51,96 +51,12 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 			r.Header.Set(m.cfg.Headers.Keys.TransactionID, transactionID)
 			r = r.WithContext(activity.WithTransactionID(r.Context(), transactionID))
 
-			var rw *responseRecorder
-
-			// ── Panic recovery ────────────────────────────────────────
-			defer func() {
-				if rec := recover(); rec != nil {
-					if m.cfg.Core.EnableTelemetry {
-						span := trace.SpanFromContext(r.Context())
-						if span.SpanContext().IsValid() {
-							span.RecordError(fmt.Errorf("panic: %v", rec))
-							span.SetStatus(codes.Error, "panic recovered")
-						}
-					}
-					m.cfg.Logger.Error().
-						Str("service", m.cfg.Core.ServiceName).
-						Str("transaction_id", transactionID).
-						Str("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)).
-						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
-						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
-						Str("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)).
-						Str("user_agent", r.UserAgent()).
-						Interface("panic", rec).
-						Msg("panic in GraphQL handler")
-
-					// Abort if response already started
-					if rw != nil && rw.Status() != 0 {
-						return
-					}
-
-					targetW := w
-					if rw != nil {
-						targetW = rw
-					}
-
-					response.WriteJSONResponse(targetW, response.InternalError(r.Context()))
-				}
-			}()
-
-			// ── Operation name extraction ─────────────────────────────
-			operationName := r.Header.Get("X-GraphQL-Operation")
-			var gqlBody graphqlRequestBody
-			if r.Method == http.MethodPost {
-				raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
-				if err == nil && len(raw) > 0 {
-					_ = sonic.Unmarshal(raw, &gqlBody)
-				}
-				if operationName == "" && gqlBody.OperationName != "" {
-					operationName = gqlBody.OperationName
-				}
-			} else if r.Method == http.MethodGet && operationName == "" {
-				if op := r.URL.Query().Get("operationName"); op != "" {
-					operationName = op
-				}
-			}
-			if operationName == "" {
-				operationName = "anonymous"
-			}
-			r.Header.Set("X-GraphQL-Operation", operationName)
-
-			// ── Depth limiting ────────────────────────────────────────
-			if maxDepth > 0 && gqlBody.Query != "" {
-				if depth := graphqlQueryDepth(gqlBody.Query); depth > maxDepth {
-					response.WriteJSONResponse(w, response.BadRequest(r.Context(), fmt.Sprintf("query depth %d exceeds maximum allowed depth %d", depth, maxDepth)))
-					return
-				}
-			}
-
-			if m.cfg.Core.EnableTelemetry {
-				span := trace.SpanFromContext(r.Context())
-				if span.SpanContext().IsValid() {
-					span.SetName("GraphQL " + operationName)
-					span.SetAttributes(
-						attribute.String("service", m.cfg.Core.ServiceName),
-						attribute.String("transaction_id", transactionID),
-						attribute.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
-						attribute.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
-						attribute.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
-						attribute.String("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)),
-						attribute.String("user_agent", r.UserAgent()),
-						attribute.String("graphql.operation.name", operationName),
-					)
-					if gqlBody.Query != "" {
-						span.SetAttributes(attribute.Int("graphql.query.depth", graphqlQueryDepth(gqlBody.Query)))
-					}
-				}
-			}
-
 			start := time.Now()
-			rw = wrapResponseWriter(w, r, int(m.cfg.Logging.ResponseBodyLogLimitSize))
+			rw := wrapResponseWriter(w, r, int(m.cfg.Logging.ResponseBodyLogLimitSize))
 
 			IDAuditLog := cryptoutil.V7()
+			var gqlBody graphqlRequestBody
+
 			entry := model.AuditLog{
 				ID:              IDAuditLog,
 				Method:          r.Method,
@@ -155,7 +71,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				TransactionID:   transactionID,
 				RequestHeaders:  normalizeHeadersJSON(r.Header, m.cfg.Logging.MaskKeywords),
 				ResponseHeaders: nil,
-				RequestBody:     gqlBody,
+				RequestBody:     nil,
 				ResponseBody:    nil,
 				Protocol:        "GraphQL",
 				ServiceName:     m.cfg.Core.ServiceName,
@@ -179,6 +95,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				entry.StatusCode = status
 				entry.LatencyMS = time.Since(start).Milliseconds()
 				entry.ResponseHeaders = normalizeHeadersJSON(rw.Header(), m.cfg.Logging.MaskKeywords)
+				entry.RequestBody = gqlBody
 				if m.cfg.Logging.LogResponseBodies {
 					entry.ResponseBody = normalizeBodyRaw(rw.Body(), m.cfg.Logging.MaskKeywords)
 				}
@@ -194,6 +111,86 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 					rw.Free()
 				}
 			}()
+
+			// ── Panic recovery ────────────────────────────────────────
+			defer func() {
+				if rec := recover(); rec != nil {
+					if m.cfg.Core.EnableTelemetry {
+						span := trace.SpanFromContext(r.Context())
+						if span.SpanContext().IsValid() {
+							span.RecordError(fmt.Errorf("panic: %v", rec))
+							span.SetStatus(codes.Error, "panic recovered")
+						}
+					}
+					m.cfg.Logger.Error().
+						Str("service", m.cfg.Core.ServiceName).
+						Str("transaction_id", transactionID).
+						Str("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)).
+						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
+						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
+						Str("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)).
+						Str("user_agent", r.UserAgent()).
+						Interface("panic", rec).
+						Msg("panic in GraphQL handler")
+
+					// Abort if response already started
+					if rw.Status() != 0 {
+						return
+					}
+
+					response.WriteJSONResponse(rw, response.InternalError(r.Context()))
+				}
+			}()
+
+			// ── Operation name extraction ─────────────────────────────
+			operationName := r.Header.Get("X-GraphQL-Operation")
+			if r.Method == http.MethodPost {
+				raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
+				if err == nil && len(raw) > 0 {
+					_ = sonic.Unmarshal(raw, &gqlBody)
+				}
+				if operationName == "" && gqlBody.OperationName != "" {
+					operationName = gqlBody.OperationName
+				}
+			} else if r.Method == http.MethodGet && operationName == "" {
+				if op := r.URL.Query().Get("operationName"); op != "" {
+					operationName = op
+				}
+			}
+			if operationName == "" {
+				operationName = "anonymous"
+			}
+			r.Header.Set("X-GraphQL-Operation", operationName)
+
+			// ── Depth limiting (evaluate once) ────────────────────────
+			queryDepth := 0
+			if gqlBody.Query != "" {
+				queryDepth = graphqlQueryDepth(gqlBody.Query)
+				if maxDepth > 0 && queryDepth > maxDepth {
+					response.WriteJSONResponse(rw, response.BadRequest(r.Context(), fmt.Sprintf("query depth %d exceeds maximum allowed depth %d", queryDepth, maxDepth)))
+					return
+				}
+			}
+
+			if m.cfg.Core.EnableTelemetry {
+				span := trace.SpanFromContext(r.Context())
+				if span.SpanContext().IsValid() {
+					span.SetName("GraphQL " + operationName)
+					span.SetAttributes(
+						attribute.String("service", m.cfg.Core.ServiceName),
+						attribute.String("transaction_id", transactionID),
+						attribute.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
+						attribute.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
+						attribute.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
+						attribute.String("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)),
+						attribute.String("user_agent", r.UserAgent()),
+						attribute.String("graphql.operation.name", operationName),
+					)
+					if gqlBody.Query != "" {
+						span.SetAttributes(attribute.Int("graphql.query.depth", queryDepth))
+					}
+				}
+			}
 
 			next.ServeHTTP(rw, r)
 		})
