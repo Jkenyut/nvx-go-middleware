@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -9,9 +10,26 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/response"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/bytedance/sonic"
+	chi "github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
 )
+
+type routePatternContextKey struct{}
+
+// WithRoutePattern injects the matched canonical route pattern/template (e.g. "/api/v1/users/{id}") into the context.
+func WithRoutePattern(ctx context.Context, pattern string) context.Context {
+	return context.WithValue(ctx, routePatternContextKey{}, pattern)
+}
+
+// RoutePatternFromContext retrieves the canonical route pattern/template from context, if set.
+func RoutePatternFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	pattern, ok := ctx.Value(routePatternContextKey{}).(string)
+	return pattern, ok && pattern != ""
+}
 
 // ChiCompress wraps Chi's Compress middleware.
 // It returns a middleware that compresses the response body based on the client's Accept-Encoding header.
@@ -81,6 +99,9 @@ type ConfigLimiter struct {
 	PreRequestOnAfterLimiter func(w http.ResponseWriter, r *http.Request) bool `yaml:"-"`
 	// LimiterHook is the rate limiter function to use.
 	LimiterHook func(http.Handler) http.Handler `yaml:"-"`
+	// EndpointFunc optionally customizes how the endpoint identifier is extracted for rate limiting.
+	// If nil, defaults to canonical route pattern detection (RoutePatternFromContext, Chi, ServeMux) with fallback to URL Path.
+	EndpointFunc func(r *http.Request) string `yaml:"-"`
 }
 
 // RateLimit creates a rate limiting middleware based on the provided configuration.
@@ -138,7 +159,7 @@ func RateLimit(
 		}
 
 		// LAYER 4: Rate Key Injector
-		injectedHandler := rateKeyInjector(signatureSecret)(limitedHandler)
+		injectedHandler := rateKeyInjector(signatureSecret, cfg.EndpointFunc)(limitedHandler)
 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// LAYER 6 (OUTERMOST): OPTIONS Check
@@ -186,8 +207,14 @@ func detectProtocol(r *http.Request) string {
 	return "rest"
 }
 
-func resolveRateLimitEndpoint(r *http.Request, protocol string) string {
-	endpoint, _ := httprate.KeyByEndpoint(r)
+func resolveRateLimitEndpoint(r *http.Request, protocol string, customEndpointFunc ...func(*http.Request) string) string {
+	var endpoint string
+	if len(customEndpointFunc) > 0 && customEndpointFunc[0] != nil {
+		endpoint = customEndpointFunc[0](r)
+	}
+	if endpoint == "" {
+		endpoint = extractRoutePattern(r)
+	}
 	if protocol == "graphql" {
 		if op := ResolveGraphQLOperation(r); op != "anonymous" {
 			return endpoint + ":" + op
@@ -196,40 +223,60 @@ func resolveRateLimitEndpoint(r *http.Request, protocol string) string {
 	return endpoint
 }
 
-func buildRateKeyPublic(r *http.Request, zone, signature string) string {
+func extractRoutePattern(r *http.Request) string {
+	if pattern, ok := RoutePatternFromContext(r.Context()); ok {
+		return pattern
+	}
+	if rctx := chi.RouteContext(r.Context()); rctx != nil {
+		if pattern := rctx.RoutePattern(); pattern != "" {
+			return pattern
+		}
+	}
+	if r.Pattern != "" {
+		parts := strings.SplitN(r.Pattern, " ", 2)
+		if len(parts) == 2 {
+			return parts[1]
+		}
+		return r.Pattern
+	}
+	endpoint, _ := httprate.KeyByEndpoint(r)
+	return endpoint
+}
+
+func buildRateKeyPublic(r *http.Request, zone, signature string, endpointFunc ...func(*http.Request) string) string {
 	ip, _ := keyByHeader(r, constants.HeaderIP)
 	userAgent, _ := keyByHeader(r, constants.HeaderUserAgent)
 	protocol := detectProtocol(r)
-	endpoint := resolveRateLimitEndpoint(r, protocol)
+	endpoint := resolveRateLimitEndpoint(r, protocol, endpointFunc...)
 	return cryptoutil.Signature(signature, "zone:"+zone+":protocol:"+protocol+":method:"+r.Method+":ip:"+ip+":endpoint:"+endpoint+":useragent:"+userAgent)
 }
 
-func buildRateKeyPublicAPIKey(r *http.Request, zone, signature string) string {
+func buildRateKeyPublicAPIKey(r *http.Request, zone, signature string, endpointFunc ...func(*http.Request) string) string {
 	apiKey, _ := keyByHeader(r, constants.HeaderAPIKey)
 	protocol := detectProtocol(r)
-	endpoint := resolveRateLimitEndpoint(r, protocol)
+	endpoint := resolveRateLimitEndpoint(r, protocol, endpointFunc...)
 	return cryptoutil.Signature(signature, "zone:"+zone+":protocol:"+protocol+":method:"+r.Method+":endpoint:"+endpoint+":apikey:"+apiKey)
 }
 
-func buildRateKeyPublicAuth(r *http.Request, zone, signature string) string {
+func buildRateKeyPublicAuth(r *http.Request, zone, signature string, endpointFunc ...func(*http.Request) string) string {
 	tokenKey, _ := keyByHeader(r, constants.HeaderToken)
 	protocol := detectProtocol(r)
-	endpoint := resolveRateLimitEndpoint(r, protocol)
+	endpoint := resolveRateLimitEndpoint(r, protocol, endpointFunc...)
 	return cryptoutil.Signature(signature, "zone:"+zone+":protocol:"+protocol+":method:"+r.Method+":endpoint:"+endpoint+":token:"+tokenKey)
 }
 
 // RateKeyInjector injects a rate key into the request header based on the authentication type.
-func rateKeyInjector(signature string) func(http.Handler) http.Handler {
+func rateKeyInjector(signature string, endpointFunc ...func(*http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var key string
 			switch r.Header.Get(constants.HeaderAuthType) {
 			case constants.AuthTypePublicAPIKey:
-				key = buildRateKeyPublicAPIKey(r, constants.AuthTypePublicAPIKey, signature)
+				key = buildRateKeyPublicAPIKey(r, constants.AuthTypePublicAPIKey, signature, endpointFunc...)
 			case constants.AuthTypePublicAuth:
-				key = buildRateKeyPublicAuth(r, constants.AuthTypePublicAuth, signature)
+				key = buildRateKeyPublicAuth(r, constants.AuthTypePublicAuth, signature, endpointFunc...)
 			default:
-				key = buildRateKeyPublic(r, constants.AuthTypePublic, signature)
+				key = buildRateKeyPublic(r, constants.AuthTypePublic, signature, endpointFunc...)
 			}
 			r.Header.Set(constants.HeaderRateKey, key)
 			next.ServeHTTP(w, r)

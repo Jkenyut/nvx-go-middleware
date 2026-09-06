@@ -1817,3 +1817,59 @@ func TestIsProdEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestRateLimit_RoutePatternGrouping(t *testing.T) {
+	secret := "test-secret-123"
+
+	// Request 1: /api/v1/users/user-123 with WithRoutePattern("/api/v1/users/{id}")
+	req1 := httptest.NewRequest("GET", "/api/v1/users/user-123", nil)
+	req1.Header.Set(constants.HeaderIP, "192.168.1.1")
+	req1.Header.Set(constants.HeaderUserAgent, "TestAgent")
+	req1 = req1.WithContext(WithRoutePattern(req1.Context(), "/api/v1/users/{id}"))
+
+	// Request 2: /api/v1/users/user-456 with WithRoutePattern("/api/v1/users/{id}")
+	req2 := httptest.NewRequest("GET", "/api/v1/users/user-456", nil)
+	req2.Header.Set(constants.HeaderIP, "192.168.1.1")
+	req2.Header.Set(constants.HeaderUserAgent, "TestAgent")
+	req2 = req2.WithContext(WithRoutePattern(req2.Context(), "/api/v1/users/{id}"))
+
+	key1 := buildRateKeyPublic(req1, constants.AuthTypePublic, secret)
+	key2 := buildRateKeyPublic(req2, constants.AuthTypePublic, secret)
+
+	if key1 != key2 {
+		t.Fatalf("expected rate keys to match across dynamic parameter values, got key1=%q key2=%q", key1, key2)
+	}
+
+	// Request 3: Without WithRoutePattern, should fallback to URL Path
+	req3 := httptest.NewRequest("GET", "/api/v1/users/user-123", nil)
+	req3.Header.Set(constants.HeaderIP, "192.168.1.1")
+	req3.Header.Set(constants.HeaderUserAgent, "TestAgent")
+
+	key3 := buildRateKeyPublic(req3, constants.AuthTypePublic, secret)
+	if key1 == key3 {
+		t.Fatalf("expected route pattern key to differ from raw path fallback key")
+	}
+}
+
+func TestRateLimit_CustomEndpointFunc(t *testing.T) {
+	secret := "test-secret-123"
+
+	customFunc := func(r *http.Request) string {
+		return "custom-endpoint-key"
+	}
+
+	req1 := httptest.NewRequest("GET", "/dynamic/abc", nil)
+	req1.Header.Set(constants.HeaderIP, "192.168.1.1")
+	req1.Header.Set(constants.HeaderUserAgent, "TestAgent")
+
+	req2 := httptest.NewRequest("GET", "/dynamic/xyz", nil)
+	req2.Header.Set(constants.HeaderIP, "192.168.1.1")
+	req2.Header.Set(constants.HeaderUserAgent, "TestAgent")
+
+	key1 := buildRateKeyPublic(req1, constants.AuthTypePublic, secret, customFunc)
+	key2 := buildRateKeyPublic(req2, constants.AuthTypePublic, secret, customFunc)
+
+	if key1 != key2 {
+		t.Fatalf("expected rate keys using custom endpointFunc to match, got %q vs %q", key1, key2)
+	}
+}
