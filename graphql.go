@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -101,10 +102,10 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				}
 
 				if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {
-					m.cfg.Logger.Error().
-						Str("transaction_id", transactionID).
-						Err(err).
-						Msg("failed to save graphql audit log")
+					m.cfg.Logger.LogAttrs(reqCtx, slog.LevelError, "failed to save graphql audit log",
+						slog.String("transaction_id", transactionID),
+						slog.Any("error", err),
+					)
 				}
 
 				if rw != nil {
@@ -122,16 +123,16 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 							span.SetStatus(codes.Error, "panic recovered")
 						}
 					}
-					m.cfg.Logger.Error().
-						Str("service", m.cfg.Core.ServiceName).
-						Str("transaction_id", transactionID).
-						Str("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)).
-						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
-						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
-						Str("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)).
-						Str("user_agent", r.UserAgent()).
-						Interface("panic", rec).
-						Msg("panic in GraphQL handler")
+					m.cfg.Logger.LogAttrs(r.Context(), slog.LevelError, "panic in GraphQL handler",
+						slog.String("service", m.cfg.Core.ServiceName),
+						slog.String("transaction_id", transactionID),
+						slog.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
+						slog.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
+						slog.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
+						slog.String("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)),
+						slog.String("user_agent", r.UserAgent()),
+						slog.Any("panic", rec),
+					)
 
 					// Abort if response already started
 					if rw.Status() != 0 {

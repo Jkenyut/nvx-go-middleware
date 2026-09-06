@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/Jkenyut/nvx-go-helper/activity"
@@ -77,7 +78,7 @@ type Config struct {
 
 	// Interfaces / Unmarshallable
 	LogStore        LogStore                            `yaml:"-"`
-	Logger          Logger                              `yaml:"-"`
+	Logger          *slog.Logger                        `yaml:"-"`
 	ContextInjector func(r *http.Request) *http.Request `yaml:"-"`
 }
 
@@ -99,12 +100,12 @@ func WithActivityContext(r *http.Request, keys *HeaderKeys) *http.Request {
 		return r
 	}
 	h := r.Header
-	ctx := r.Context()
-	ctx = activity.WithTransactionID(ctx, h.Get(keys.TransactionID))
-	ctx = activity.WithAPIKey(ctx, h.Get(keys.APIKey))
-	ctx = activity.WithUserID(ctx, h.Get(keys.UserID))
-	ctx = activity.WithUserIP(ctx, h.Get(keys.IP))
-	ctx = activity.WithRequestID(ctx, h.Get(keys.RequestID))
-	ctx = activity.WithUserIPOrigin(ctx, h.Get(keys.IPOrigin))
+	ctx := activity.WithActivity(r.Context(), activity.Activity{
+		TransactionID: h.Get(keys.TransactionID),
+		RequestID:     h.Get(keys.RequestID),
+		UserID:        h.Get(keys.UserID),
+		UserIP:        h.Get(keys.IP),
+		UserIPOrigin:  h.Get(keys.IPOrigin),
+	})
 	return r.WithContext(ctx)
 }

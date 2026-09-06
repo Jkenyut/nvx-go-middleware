@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"runtime/debug"
@@ -42,13 +43,16 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 		defer func() {
 			if rec := recover(); rec != nil {
 				stack := string(debug.Stack())
-				event := m.cfg.Logger.Error().
-					Str("service", m.cfg.Core.ServiceName).
-					Str("method", r.Method).
-					Str("path", r.URL.Path).
-					Str("user_agent", r.UserAgent()).
-					Interface("panic", rec)
-				m.addLogHeaders(event, r).Msgf("panic recovered:\n%s", stack)
+				attrs := make([]slog.Attr, 0, 5+len(m.cfg.Logging.LogHeaders))
+				attrs = append(attrs,
+					slog.String("service", m.cfg.Core.ServiceName),
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+					slog.String("user_agent", r.UserAgent()),
+					slog.Any("panic", rec),
+				)
+				attrs = append(attrs, m.logHeadersAttrs(r)...)
+				m.cfg.Logger.LogAttrs(r.Context(), slog.LevelError, fmt.Sprintf("panic recovered:\n%s", stack), attrs...)
 
 				if m.cfg.Core.EnableTelemetry {
 					span := trace.SpanFromContext(r.Context())
@@ -58,8 +62,10 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 
 				// Abort if response already started
 				if sp, ok := w.(interface{ Status() int }); ok && sp.Status() != 0 {
-					event := m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName)
-					m.addLogHeaders(event, r).Msg("response already written, cannot recover")
+					attrs := make([]slog.Attr, 0, 1+len(m.cfg.Logging.LogHeaders))
+					attrs = append(attrs, slog.String("service", m.cfg.Core.ServiceName))
+					attrs = append(attrs, m.logHeadersAttrs(r)...)
+					m.cfg.Logger.LogAttrs(r.Context(), slog.LevelError, "response already written, cannot recover", attrs...)
 					return
 				}
 
@@ -158,15 +164,18 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 
 			reqCtx := context.WithoutCancel(r.Context())
 			if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {
-				event := m.cfg.Logger.Error().
-					Str("service", m.cfg.Core.ServiceName).
-					Str("transaction_id", transactionID).
-					Str("method", r.Method).
-					Str("path", r.URL.Path).
-					Str("user_agent", r.UserAgent()).
-					Str("protocol", "HTTP "+r.Proto).
-					Err(err)
-				m.addLogHeaders(event, r).Msg("failed to write audit log entry to store")
+				attrs := make([]slog.Attr, 0, 7+len(m.cfg.Logging.LogHeaders))
+				attrs = append(attrs,
+					slog.String("service", m.cfg.Core.ServiceName),
+					slog.String("transaction_id", transactionID),
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+					slog.String("user_agent", r.UserAgent()),
+					slog.String("protocol", "HTTP "+r.Proto),
+					slog.Any("error", err),
+				)
+				attrs = append(attrs, m.logHeadersAttrs(r)...)
+				m.cfg.Logger.LogAttrs(reqCtx, slog.LevelError, "failed to write audit log entry to store", attrs...)
 			}
 
 			if rw != nil {
@@ -177,14 +186,17 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		if m.cfg.Logging.LogRequestBodies {
 			raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
 			if err != nil {
-				event := m.cfg.Logger.Error().
-					Str("service", m.cfg.Core.ServiceName).
-					Str("transaction_id", transactionID).
-					Str("method", r.Method).
-					Str("path", r.URL.Path).
-					Str("user_agent", r.UserAgent()).
-					Err(err)
-				m.addLogHeaders(event, r).Msg("failed to read request body")
+				attrs := make([]slog.Attr, 0, 6+len(m.cfg.Logging.LogHeaders))
+				attrs = append(attrs,
+					slog.String("service", m.cfg.Core.ServiceName),
+					slog.String("transaction_id", transactionID),
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+					slog.String("user_agent", r.UserAgent()),
+					slog.Any("error", err),
+				)
+				attrs = append(attrs, m.logHeadersAttrs(r)...)
+				m.cfg.Logger.LogAttrs(r.Context(), slog.LevelError, "failed to read request body", attrs...)
 				response.WriteJSONResponse(rw, response.BadRequest(r.Context(), constants.ErrMsgPayloadTooLarge))
 				return
 			}
@@ -455,10 +467,13 @@ func (m *Manager) validateSignaturePublicHeaders(r *http.Request) (valid bool, s
 
 	bodyBytes, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
 	if err != nil {
-		event := m.cfg.Logger.Error().
-			Str("service", m.cfg.Core.ServiceName).
-			Err(err)
-		m.addLogHeaders(event, r).Msg("failed to read request body for signature validation")
+		attrs := make([]slog.Attr, 0, 2+len(m.cfg.Logging.LogHeaders))
+		attrs = append(attrs,
+			slog.String("service", m.cfg.Core.ServiceName),
+			slog.Any("error", err),
+		)
+		attrs = append(attrs, m.logHeadersAttrs(r)...)
+		m.cfg.Logger.LogAttrs(r.Context(), slog.LevelError, "failed to read request body for signature validation", attrs...)
 		return false, err.Error()
 	}
 	parts = append(parts, ResolveBodyToken(r.Header.Get("Content-Type"), bodyBytes))

@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"runtime/debug"
 	"time"
 
@@ -50,17 +51,18 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		// Enrich context
-		ctx = activity.WithTransactionID(ctx, transactionID)
-		ctx = activity.WithRequestID(ctx, get(m.cfg.Headers.Keys.RequestID))
-		ctx = activity.WithAPIKey(ctx, get(m.cfg.Headers.Keys.APIKey))
-		ctx = activity.WithUserID(ctx, get(m.cfg.Headers.Keys.UserID))
-		ctx = activity.WithUserIP(ctx, get(m.cfg.Headers.Keys.IP))
-		ctx = activity.WithUserIPOrigin(ctx, get(m.cfg.Headers.Keys.IPOrigin))
+		ctx = activity.WithActivity(ctx, activity.Activity{
+			TransactionID: transactionID,
+			RequestID:     get(m.cfg.Headers.Keys.RequestID),
+			UserID:        get(m.cfg.Headers.Keys.UserID),
+			UserIP:        get(m.cfg.Headers.Keys.IP),
+			UserIPOrigin:  get(m.cfg.Headers.Keys.IPOrigin),
+		})
 
 		if m.cfg.Core.EnableTelemetry {
 			span := trace.SpanFromContext(ctx)
 			if !span.SpanContext().IsValid() {
-				m.cfg.Logger.Error().Msg("🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
+				m.cfg.Logger.ErrorContext(ctx, "🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
 			} else {
 				span.SetAttributes(
 					attribute.String("service", m.cfg.Core.ServiceName),
@@ -131,10 +133,10 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 			}
 
 			if saveErr := m.cfg.LogStore.Save(reqCtx, &entry); saveErr != nil {
-				m.cfg.Logger.Error().
-					Str("transaction_id", transactionID).
-					Err(saveErr).
-					Msg("failed to save grpc audit log")
+				m.cfg.Logger.LogAttrs(reqCtx, slog.LevelError, "failed to save grpc audit log",
+					slog.String("transaction_id", transactionID),
+					slog.Any("error", saveErr),
+				)
 			}
 		}()
 
@@ -147,17 +149,17 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 					span.SetStatus(otelcodes.Error, "panic recovered")
 				}
 				stack := string(debug.Stack())
-				m.cfg.Logger.Error().
-					Str("service", m.cfg.Core.ServiceName).
-					Str("transaction_id", transactionID).
-					Str("method", info.FullMethod).
-					Str("request_id", get(m.cfg.Headers.Keys.RequestID)).
-					Str("ip", get(m.cfg.Headers.Keys.IP)).
-					Str("ip_origin", get(m.cfg.Headers.Keys.IPOrigin)).
-					Str("user_id", get(m.cfg.Headers.Keys.UserID)).
-					Str("user_agent", get("user-agent")).
-					Interface("panic", rec).
-					Msgf("gRPC unary panic:\n%s", stack)
+				m.cfg.Logger.LogAttrs(ctx, slog.LevelError, fmt.Sprintf("gRPC unary panic:\n%s", stack),
+					slog.String("service", m.cfg.Core.ServiceName),
+					slog.String("transaction_id", transactionID),
+					slog.String("method", info.FullMethod),
+					slog.String("request_id", get(m.cfg.Headers.Keys.RequestID)),
+					slog.String("ip", get(m.cfg.Headers.Keys.IP)),
+					slog.String("ip_origin", get(m.cfg.Headers.Keys.IPOrigin)),
+					slog.String("user_id", get(m.cfg.Headers.Keys.UserID)),
+					slog.String("user_agent", get("user-agent")),
+					slog.Any("panic", rec),
+				)
 				err = status.Errorf(codes.Internal, "internal server error")
 			}
 		}()
@@ -195,17 +197,18 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			transactionID = cryptoutil.V7()
 		}
 
-		ctx = activity.WithTransactionID(ctx, transactionID)
-		ctx = activity.WithRequestID(ctx, get(m.cfg.Headers.Keys.RequestID))
-		ctx = activity.WithAPIKey(ctx, get(m.cfg.Headers.Keys.APIKey))
-		ctx = activity.WithUserID(ctx, get(m.cfg.Headers.Keys.UserID))
-		ctx = activity.WithUserIP(ctx, get(m.cfg.Headers.Keys.IP))
-		ctx = activity.WithUserIPOrigin(ctx, get(m.cfg.Headers.Keys.IPOrigin))
+		ctx = activity.WithActivity(ctx, activity.Activity{
+			TransactionID: transactionID,
+			RequestID:     get(m.cfg.Headers.Keys.RequestID),
+			UserID:        get(m.cfg.Headers.Keys.UserID),
+			UserIP:        get(m.cfg.Headers.Keys.IP),
+			UserIPOrigin:  get(m.cfg.Headers.Keys.IPOrigin),
+		})
 
 		if m.cfg.Core.EnableTelemetry {
 			span := trace.SpanFromContext(ctx)
 			if !span.SpanContext().IsValid() {
-				m.cfg.Logger.Error().Msg("🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
+				m.cfg.Logger.ErrorContext(ctx, "🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
 			} else {
 				span.SetAttributes(
 					attribute.String("service", m.cfg.Core.ServiceName),
@@ -266,10 +269,10 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			entry.LatencyMS = time.Since(start).Milliseconds()
 
 			if saveErr := m.cfg.LogStore.Save(reqCtx, &entry); saveErr != nil {
-				m.cfg.Logger.Error().
-					Str("transaction_id", transactionID).
-					Err(saveErr).
-					Msg("failed to save grpc stream audit log")
+				m.cfg.Logger.LogAttrs(reqCtx, slog.LevelError, "failed to save grpc stream audit log",
+					slog.String("transaction_id", transactionID),
+					slog.Any("error", saveErr),
+				)
 			}
 		}()
 
@@ -281,12 +284,12 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 					span.SetStatus(otelcodes.Error, "panic recovered")
 				}
 				stack := string(debug.Stack())
-				m.cfg.Logger.Error().
-					Str("service", m.cfg.Core.ServiceName).
-					Str("transaction_id", transactionID).
-					Str("method", info.FullMethod).
-					Interface("panic", rec).
-					Msgf("gRPC stream panic:\n%s", stack)
+				m.cfg.Logger.LogAttrs(ctx, slog.LevelError, fmt.Sprintf("gRPC stream panic:\n%s", stack),
+					slog.String("service", m.cfg.Core.ServiceName),
+					slog.String("transaction_id", transactionID),
+					slog.String("method", info.FullMethod),
+					slog.Any("panic", rec),
+				)
 				err = status.Errorf(codes.Internal, "internal server error")
 			}
 		}()

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -142,17 +143,17 @@ func (m *Manager) WebSocketChain(
 				entry.ResponseHeaders = normalizeHeadersJSON(ww.Header(), m.cfg.Logging.MaskKeywords)
 
 				if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {
-					m.cfg.Logger.Error().
-						Str("service", m.cfg.Core.ServiceName).
-						Str("transaction_id", transactionID).
-						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
-						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
-						Str("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)).
-						Str("user_agent", r.UserAgent()).
-						Str("protocol", "WebSocket").
-						Str("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)).
-						Err(err).
-						Msg("failed to save ws audit log")
+					m.cfg.Logger.LogAttrs(reqCtx, slog.LevelError, "failed to save ws audit log",
+						slog.String("service", m.cfg.Core.ServiceName),
+						slog.String("transaction_id", transactionID),
+						slog.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
+						slog.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
+						slog.String("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)),
+						slog.String("user_agent", r.UserAgent()),
+						slog.String("protocol", "WebSocket"),
+						slog.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
+						slog.Any("error", err),
+					)
 				}
 			}()
 
@@ -166,17 +167,17 @@ func (m *Manager) WebSocketChain(
 							span.SetStatus(codes.Error, "panic recovered")
 						}
 					}
-					m.cfg.Logger.Error().
-						Str("service", m.cfg.Core.ServiceName).
-						Str("transaction_id", transactionID).
-						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
-						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
-						Str("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)).
-						Str("user_agent", r.UserAgent()).
-						Str("protocol", "WebSocket").
-						Str("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)).
-						Interface("panic", rec).
-						Msg("panic in WebSocket handler")
+					m.cfg.Logger.LogAttrs(r.Context(), slog.LevelError, "panic in WebSocket handler",
+						slog.String("service", m.cfg.Core.ServiceName),
+						slog.String("transaction_id", transactionID),
+						slog.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
+						slog.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
+						slog.String("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)),
+						slog.String("user_agent", r.UserAgent()),
+						slog.String("protocol", "WebSocket"),
+						slog.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
+						slog.Any("panic", rec),
+					)
 
 					if !ww.hijacked {
 						http.Error(ww, "Internal Server Error", http.StatusInternalServerError)

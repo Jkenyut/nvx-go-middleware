@@ -893,15 +893,8 @@ func TestNewSlogLogger(t *testing.T) {
 	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
 	logger := NewSlogLogger(slog.New(handler))
 
-	logger.Info().
-		Str("key", "value").
-		Interface("status", 200).
-		Msg("test info message")
-
-	logger.Error().
-		Str("errKey", "errVal").
-		Err(errors.New("custom error")).
-		Msgf("test error formatted %s", "detail")
+	logger.Info("test info message", slog.String("key", "value"), slog.Int("status", 200))
+	logger.Error("test error formatted detail", slog.String("errKey", "errVal"), slog.Any("error", errors.New("custom error")))
 
 	output := buf.String()
 	if !strings.Contains(output, "test info message") {

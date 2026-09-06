@@ -2,19 +2,14 @@ package middleware
 
 import (
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"slices"
-	"sync"
-	"time"
 
 	"github.com/Jkenyut/nvx-go-middleware/constants"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/diode"
 )
-
-var initZerologGlobalOnce sync.Once
 
 // Manager holds the middleware configuration and provides middleware methods.
 // It is the central entry point for creating and managing middleware chains.
@@ -37,64 +32,54 @@ func NewWithError(cfg *Config) (*Manager, error) {
 	for _, proxy := range cfg.Security.TrustedProxies {
 		if _, ipNet, err := net.ParseCIDR(proxy); err == nil {
 			cidrs = append(cidrs, ipNet)
+		} else if ip := net.ParseIP(proxy); ip != nil {
+			mask := net.CIDRMask(32, 32)
+			if ip.To4() == nil {
+				mask = net.CIDRMask(128, 128)
+			}
+			cidrs = append(cidrs, &net.IPNet{IP: ip, Mask: mask})
 		}
 	}
 
-	return &Manager{cfg: *cfg, logCloser: closer, trustedCIDRs: cidrs}, nil
+	return &Manager{
+		cfg:          *cfg,
+		logCloser:    closer,
+		trustedCIDRs: cidrs,
+	}, nil
 }
 
-// applyDefaults fills in all missing Config fields with safe defaults.
-// It returns an io.Closer if it created any resources that need to be closed.
+// applyDefaults populates zero-value configuration fields with sensible production defaults.
+// It returns an io.Closer for resources that must be flushed on shutdown (e.g. async log writers),
+// or nil if no cleanup is needed.
 func applyDefaults(cfg *Config) io.Closer {
 	var logCloser io.Closer
 
 	if cfg.Logger == nil {
-		env := cfg.Core.Env // defaults to "development" if empty
-
-		var writer io.Writer
-		isProd := env == "production" || env == "prod"
-
+		isProd := cfg.Core.Env == "production" || cfg.Core.Env == "prod"
+		level := slog.LevelDebug
 		if isProd {
-			// JSON output for log aggregation systems
-			writer = os.Stdout
-		} else {
-			// Pretty, colored output for local development and staging
-			writer = zerolog.ConsoleWriter{
-				Out:     os.Stderr,
-				NoColor: false,
-			}
-		}
-
-		// Initialize global format settings only once to avoid concurrent write races.
-		initZerologGlobalOnce.Do(func() {
-			zerolog.TimeFieldFormat = time.RFC3339
-		})
-
-		level := zerolog.DebugLevel
-		if isProd {
-			level = zerolog.InfoLevel
+			level = slog.LevelInfo
 		}
 		if levelStr := os.Getenv("LOG_LEVEL"); levelStr != "" {
-			if parsed, err := zerolog.ParseLevel(levelStr); err == nil {
+			var parsed slog.Level
+			if err := parsed.UnmarshalText([]byte(levelStr)); err == nil {
 				level = parsed
 			}
 		}
 
-		wr := diode.NewWriter(writer, 1000, 10*time.Millisecond, func(_ int) {})
-		logCloser = wr
-		logContext := zerolog.New(wr).
-			Level(level).
-			With().
-			Timestamp().
-			Str("service", cfg.Core.ServiceName)
-
-		// Caller is expensive. Only enable it in non-production environments.
-		if !isProd {
-			logContext = logContext.Caller()
+		opts := &slog.HandlerOptions{
+			Level:     level,
+			AddSource: !isProd,
 		}
 
-		log := logContext.Logger()
-		cfg.Logger = NewZerologLogger(&log)
+		var handler slog.Handler
+		if isProd {
+			handler = slog.NewJSONHandler(os.Stdout, opts)
+		} else {
+			handler = slog.NewTextHandler(os.Stderr, opts)
+		}
+
+		cfg.Logger = slog.New(handler).With(slog.String("service", cfg.Core.ServiceName))
 	}
 
 	if cfg.LogStore == nil {
@@ -200,6 +185,7 @@ func applyDefaults(cfg *Config) io.Closer {
 			"password", "password_cbo", "passphrase", "secret", "client_secret", "client_secret_encrypted",
 			"token", "access_token", "refresh_token", "id_token", "jwt",
 			"apikey", "api_key", "x-api-key", "client_id", "authorization",
+			"cookie", "set-cookie",
 
 			// Session & OTP
 			"session_id", "session_token", "auth_code", "verification_code", "otp",
@@ -276,11 +262,16 @@ func (m *Manager) SetHeaderAuthType(next http.Handler, authType string) http.Han
 }
 
 // addLogHeaders dynamically adds headers to the log context based on the LogHeaders config.
-func (m *Manager) addLogHeaders(event LogEvent, r *http.Request) LogEvent {
+// logHeadersAttrs dynamically adds headers to the log context based on the LogHeaders config.
+func (m *Manager) logHeadersAttrs(r *http.Request) []slog.Attr {
+	if len(m.cfg.Logging.LogHeaders) == 0 {
+		return nil
+	}
+	attrs := make([]slog.Attr, 0, len(m.cfg.Logging.LogHeaders))
 	for _, h := range m.cfg.Logging.LogHeaders {
 		if val := r.Header.Get(h); val != "" {
-			event = event.Str(h, val)
+			attrs = append(attrs, slog.String(h, val))
 		}
 	}
-	return event
+	return attrs
 }
