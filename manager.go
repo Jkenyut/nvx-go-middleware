@@ -261,7 +261,6 @@ func (m *Manager) SetHeaderAuthType(next http.Handler, authType string) http.Han
 	})
 }
 
-// addLogHeaders dynamically adds headers to the log context based on the LogHeaders config.
 // logHeadersAttrs dynamically adds headers to the log context based on the LogHeaders config.
 func (m *Manager) logHeadersAttrs(r *http.Request) []slog.Attr {
 	if len(m.cfg.Logging.LogHeaders) == 0 {

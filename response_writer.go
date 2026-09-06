@@ -59,7 +59,7 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	}
 
 	ct := r.Header().Get("Content-Type")
-	if !isMultipart(ct) && r.body != nil && r.maxBodySize > 0 {
+	if isLoggableBody(ct) && r.body != nil && r.maxBodySize > 0 {
 		// Only buffer if we haven't exceeded the limit
 		if r.body.Len() < r.maxBodySize {
 			remaining := r.maxBodySize - r.body.Len()
@@ -83,7 +83,7 @@ func (r *responseRecorder) WriteString(s string) (int, error) {
 	}
 
 	ct := r.Header().Get("Content-Type")
-	if !isMultipart(ct) && r.body != nil && r.maxBodySize > 0 {
+	if isLoggableBody(ct) && r.body != nil && r.maxBodySize > 0 {
 		// Only buffer if we haven't exceeded the limit
 		if r.body.Len() < r.maxBodySize {
 			remaining := r.maxBodySize - r.body.Len()

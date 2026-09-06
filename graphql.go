@@ -97,7 +97,7 @@ func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
 				entry.LatencyMS = time.Since(start).Milliseconds()
 				entry.ResponseHeaders = normalizeHeadersJSON(rw.Header(), m.cfg.Logging.MaskKeywords)
 				entry.RequestBody = gqlBody
-				if m.cfg.Logging.LogResponseBodies {
+				if m.cfg.Logging.LogResponseBodies && isLoggableBody(rw.Header().Get("Content-Type")) {
 					entry.ResponseBody = normalizeBodyRaw(rw.Body(), m.cfg.Logging.MaskKeywords)
 				}
 

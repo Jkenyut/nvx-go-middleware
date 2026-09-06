@@ -11,8 +11,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-// ChainFeatures configures which middleware to use in a middleware chain.
-// It allows toggling specific Chi middleware and configuring parameters like compression, throttling, and rate limiting.
 // ChainFeatures configures which middleware features are enabled.
 type ChainFeatures struct {
 	UseChiCompress        bool `yaml:"useChiCompress" default:"true"`

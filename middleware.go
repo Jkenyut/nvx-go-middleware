@@ -130,7 +130,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		// Ensure cleanup and logging ALWAYS happens, even on panics or early error returns.
 		defer func() {
 			var resBodyBytes any
-			if m.cfg.Logging.LogResponseBodies {
+			if m.cfg.Logging.LogResponseBodies && isLoggableBody(rw.Header().Get("Content-Type")) {
 				resBodyBytes = normalizeBodyRaw(rw.Body(), m.cfg.Logging.MaskKeywords)
 			}
 
@@ -183,7 +183,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			}
 		}()
 
-		if m.cfg.Logging.LogRequestBodies {
+		if m.cfg.Logging.LogRequestBodies && isLoggableBody(r.Header.Get("Content-Type")) {
 			raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
 			if err != nil {
 				attrs := make([]slog.Attr, 0, 6+len(m.cfg.Logging.LogHeaders))
@@ -600,6 +600,61 @@ func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 func isMultipart(contentType string) bool {
 	ct := strings.TrimSpace(contentType)
 	return len(ct) >= 10 && strings.EqualFold(ct[:10], "multipart/")
+}
+
+// isBinary reports whether the Content-Type indicates a binary payload
+// that must be excluded from body logging.
+func isBinary(contentType string) bool {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if ct == "" {
+		return false
+	}
+	if idx := strings.IndexByte(ct, ';'); idx != -1 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+	return strings.HasPrefix(ct, "application/octet-stream") ||
+		strings.HasPrefix(ct, "image/") ||
+		strings.HasPrefix(ct, "audio/") ||
+		strings.HasPrefix(ct, "video/") ||
+		strings.HasPrefix(ct, "application/pdf") ||
+		strings.HasPrefix(ct, "application/zip") ||
+		strings.HasPrefix(ct, "application/gzip") ||
+		strings.HasPrefix(ct, "application/x-gzip") ||
+		strings.HasPrefix(ct, "application/x-tar") ||
+		strings.HasPrefix(ct, "application/wasm")
+}
+
+// isLoggableBody reports whether the Content-Type represents a human-readable text payload
+// that is allowed to be recorded in audit logs (e.g. JSON, XML, plain text, HTML, CSV, form).
+// Multipart and binary payloads return false.
+func isLoggableBody(contentType string) bool {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if ct == "" {
+		return true // Default to true when Content-Type is omitted (e.g. standard REST or plain text)
+	}
+	if isMultipart(ct) || isBinary(ct) {
+		return false
+	}
+	if idx := strings.IndexByte(ct, ';'); idx != -1 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+	if strings.HasPrefix(ct, "text/") {
+		return true
+	}
+	if ct == "application/json" || strings.HasSuffix(ct, "+json") {
+		return true
+	}
+	if ct == "application/xml" || strings.HasSuffix(ct, "+xml") {
+		return true
+	}
+	if ct == "application/x-www-form-urlencoded" ||
+		ct == "application/javascript" ||
+		ct == "application/x-javascript" ||
+		ct == "application/graphql" ||
+		strings.HasPrefix(ct, "application/graphql-response") {
+		return true
+	}
+	return false
 }
 
 // MaxBodySize returns a middleware that limits the size of the request body.

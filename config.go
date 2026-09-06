@@ -8,8 +8,6 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/activity"
 )
 
-// ConfigCore holds the configuration for the middleware manager.
-// It includes core settings, logging configuration, security parameters, and header requirements.
 // ConfigCore holds core settings for the middleware.
 type ConfigCore struct {
 	Env             string `yaml:"env" default:"development"`

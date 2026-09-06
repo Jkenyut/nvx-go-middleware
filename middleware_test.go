@@ -1639,3 +1639,154 @@ func TestBuildOuterChain_ExecutionOrder(t *testing.T) {
 		t.Errorf("expected 500 on panic, got %d", panicW.Code)
 	}
 }
+
+func TestIsBinary(t *testing.T) {
+	tests := []struct {
+		contentType string
+		expected    bool
+	}{
+		{"application/octet-stream", true},
+		{"APPLICATION/OCTET-STREAM", true},
+		{"application/octet-stream; charset=binary", true},
+		{"image/png", true},
+		{"image/jpeg", true},
+		{"image/gif", true},
+		{"audio/mpeg", true},
+		{"audio/ogg", true},
+		{"video/mp4", true},
+		{"video/webm", true},
+		{"application/pdf", true},
+		{"application/zip", true},
+		{"application/gzip", true},
+		{"application/x-gzip", true},
+		{"application/x-tar", true},
+		{"application/wasm", true},
+		{"text/plain", false},
+		{"text/html", false},
+		{"application/json", false},
+		{"application/xml", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		if got := isBinary(tt.contentType); got != tt.expected {
+			t.Errorf("isBinary(%q) = %v, expected %v", tt.contentType, got, tt.expected)
+		}
+	}
+}
+
+func TestIsLoggableBody(t *testing.T) {
+	tests := []struct {
+		contentType string
+		expected    bool
+	}{
+		// Text and JSON variants allowed
+		{"application/json", true},
+		{"application/json; charset=utf-8", true},
+		{"application/problem+json", true},
+		{"application/vnd.api+json", true},
+		{"application/graphql-response+json", true},
+		{"application/xml", true},
+		{"application/atom+xml", true},
+		{"text/plain", true},
+		{"text/html; charset=utf-8", true},
+		{"text/csv", true},
+		{"application/x-www-form-urlencoded", true},
+		{"application/javascript", true},
+		{"application/graphql", true},
+		{"", true}, // Unspecified content-type defaults to allowed
+
+		// Multipart and binary rejected
+		{"multipart/form-data; boundary=xyz", false},
+		{"multipart/mixed", false},
+		{"application/octet-stream", false},
+		{"image/png", false},
+		{"image/jpeg", false},
+		{"audio/wav", false},
+		{"video/mp4", false},
+		{"application/pdf", false},
+		{"application/zip", false},
+		{"application/gzip", false},
+		{"application/vnd.ms-excel", false},
+		{"application/protobuf", false},
+		{"application/x-protobuf", false},
+	}
+
+	for _, tt := range tests {
+		if got := isLoggableBody(tt.contentType); got != tt.expected {
+			t.Errorf("isLoggableBody(%q) = %v, expected %v", tt.contentType, got, tt.expected)
+		}
+	}
+}
+
+func TestLogger_ExcludesBinaryBodies(t *testing.T) {
+	mockStore := &MockLogStore{}
+	mgr := newTestManager(func(c *Config) {
+		c.LogStore = mockStore
+		c.Logging.LogRequestBodies = true
+		c.Logging.LogResponseBodies = true
+		c.Logging.ResponseBodyLogLimitSize = 4096
+	})
+
+	binaryPayload := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01}
+
+	// 1. Request with binary body and response with binary body
+	handler := mgr.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(binaryPayload)
+	}))
+
+	req := httptest.NewRequest("POST", "/upload-image", bytes.NewReader(binaryPayload))
+	req.Header.Set("Content-Type", "image/png")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	logs := mockStore.GetLogs()
+	if len(logs) == 0 {
+		t.Fatal("expected 1 audit log entry")
+	}
+
+	logEntry := logs[0]
+	if logEntry.RequestBody != nil {
+		t.Errorf("expected RequestBody to be nil for binary image/png, got %v", logEntry.RequestBody)
+	}
+	if logEntry.ResponseBody != nil {
+		t.Errorf("expected ResponseBody to be nil for binary image/png, got %v", logEntry.ResponseBody)
+	}
+
+	// 2. Request and response with text/json should be logged normally
+	jsonReq := `{"hello":"world"}`
+	jsonRes := `{"status":"success"}`
+	jsonHandler := mgr.Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(jsonRes))
+	}))
+
+	reqJSON := httptest.NewRequest("POST", "/api/json", strings.NewReader(jsonReq))
+	reqJSON.Header.Set("Content-Type", "application/json")
+	recJSON := httptest.NewRecorder()
+
+	jsonHandler.ServeHTTP(recJSON, reqJSON)
+
+	time.Sleep(50 * time.Millisecond)
+	logs = mockStore.GetLogs()
+	if len(logs) < 2 {
+		t.Fatal("expected at least 2 audit log entries")
+	}
+
+	jsonLogEntry := logs[1]
+	if jsonLogEntry.RequestBody == nil {
+		t.Error("expected RequestBody to be recorded for application/json")
+	}
+	if jsonLogEntry.ResponseBody == nil {
+		t.Error("expected ResponseBody to be recorded for application/json")
+	}
+}
