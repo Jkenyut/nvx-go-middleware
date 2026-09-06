@@ -14,14 +14,46 @@ export interface SignaturePayload {
 }
 
 /**
+ * Checks whether the Content-Type indicates a multipart/form-data body.
+ */
+export function isMultipart(contentType?: string): boolean {
+  const ct = (contentType || '').trim().toLowerCase();
+  return ct.startsWith('multipart/');
+}
+
+/**
+ * Checks whether the Content-Type indicates a binary payload.
+ */
+export function isBinary(contentType?: string): boolean {
+  let ct = (contentType || '').trim().toLowerCase();
+  if (!ct) return false;
+  const idx = ct.indexOf(';');
+  if (idx !== -1) {
+    ct = ct.substring(0, idx).trim();
+  }
+  return (
+    ct.startsWith('application/octet-stream') ||
+    ct.startsWith('image/') ||
+    ct.startsWith('audio/') ||
+    ct.startsWith('video/') ||
+    ct.startsWith('application/pdf') ||
+    ct.startsWith('application/zip') ||
+    ct.startsWith('application/gzip') ||
+    ct.startsWith('application/x-gzip') ||
+    ct.startsWith('application/x-tar') ||
+    ct.startsWith('application/wasm')
+  );
+}
+
+/**
  * Resolves the canonical body token for NVX signature generation:
  * - Multipart -> "UNSIGNED"
+ * - Binary    -> "UNSIGNED"
  * - Empty body -> "EMPTY"
  * - Raw body   -> SHA-256 hex string of the body
  */
 export function resolveBodyToken(contentType?: string, body?: string | Buffer | null): string {
-  const ct = (contentType || '').trim().toLowerCase();
-  if (ct.startsWith('multipart/')) {
+  if (isMultipart(contentType) || isBinary(contentType)) {
     return 'UNSIGNED';
   }
 
@@ -82,8 +114,7 @@ export async function generateBrowserSignature(
 
   // 1. Resolve body token
   let bodyToken = 'EMPTY';
-  const ct = (payload.contentType || '').trim().toLowerCase();
-  if (ct.startsWith('multipart/')) {
+  if (isMultipart(payload.contentType) || isBinary(payload.contentType)) {
     bodyToken = 'UNSIGNED';
   } else if (payload.body && (typeof payload.body === 'string' ? payload.body.length > 0 : payload.body.byteLength > 0)) {
     const rawData = typeof payload.body === 'string' ? encoder.encode(payload.body) : payload.body;

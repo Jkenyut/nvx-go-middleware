@@ -15,13 +15,40 @@ import (
 	"github.com/google/uuid"
 )
 
+// IsMultipart reports whether the Content-Type indicates a multipart/form-data body.
+func IsMultipart(contentType string) bool {
+	ct := strings.TrimSpace(contentType)
+	return len(ct) >= 10 && strings.EqualFold(ct[:10], "multipart/")
+}
+
+// IsBinary reports whether the Content-Type indicates a binary payload.
+func IsBinary(contentType string) bool {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if ct == "" {
+		return false
+	}
+	if idx := strings.IndexByte(ct, ';'); idx != -1 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+	return strings.HasPrefix(ct, "application/octet-stream") ||
+		strings.HasPrefix(ct, "image/") ||
+		strings.HasPrefix(ct, "audio/") ||
+		strings.HasPrefix(ct, "video/") ||
+		strings.HasPrefix(ct, "application/pdf") ||
+		strings.HasPrefix(ct, "application/zip") ||
+		strings.HasPrefix(ct, "application/gzip") ||
+		strings.HasPrefix(ct, "application/x-gzip") ||
+		strings.HasPrefix(ct, "application/x-tar") ||
+		strings.HasPrefix(ct, "application/wasm")
+}
+
 // ResolveBodyToken mirrors the server-side ResolveBodyToken algorithm:
 // - Multipart bodies -> "UNSIGNED"
+// - Binary bodies    -> "UNSIGNED"
 // - Empty bodies     -> "EMPTY"
 // - All other bodies -> hex-encoded SHA-256 of raw bytes
 func ResolveBodyToken(contentType string, body []byte) string {
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	if strings.HasPrefix(ct, "multipart/") {
+	if IsMultipart(contentType) || IsBinary(contentType) {
 		return "UNSIGNED"
 	}
 	if len(body) == 0 {

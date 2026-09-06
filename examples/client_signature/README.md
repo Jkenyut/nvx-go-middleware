@@ -31,9 +31,11 @@ The server validates public requests using the following sequence of values:
 ### Body Token Calculation Rules
 1. **Multipart Requests (`multipart/form-data`)**:
    - Return constant string `"UNSIGNED"`.
-2. **Empty Requests (e.g., `GET` or bodyless `POST`)**:
+2. **Binary Requests (`application/octet-stream`, `image/*`, `audio/*`, `video/*`, `application/pdf`, `application/zip`, `application/gzip`, `application/wasm`, etc.)**:
+   - Return constant string `"UNSIGNED"`.
+3. **Empty Requests (e.g., `GET` or bodyless `POST`)**:
    - Return constant string `"EMPTY"`.
-3. **JSON / Other Content**:
+4. **JSON / Text / Other Content**:
    - Compute `sha256(rawBodyBytes)` and encode as a lowercase hexadecimal string.
 
 ---

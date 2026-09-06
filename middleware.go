@@ -596,15 +596,15 @@ func (m *Manager) TrustProxy(next http.Handler) http.Handler {
 	})
 }
 
-// isMultipart reports whether the Content-Type indicates a multipart/form-data body.
-func isMultipart(contentType string) bool {
+// IsMultipart reports whether the Content-Type indicates a multipart/form-data body.
+func IsMultipart(contentType string) bool {
 	ct := strings.TrimSpace(contentType)
 	return len(ct) >= 10 && strings.EqualFold(ct[:10], "multipart/")
 }
 
-// isBinary reports whether the Content-Type indicates a binary payload
+// IsBinary reports whether the Content-Type indicates a binary payload
 // that must be excluded from body logging.
-func isBinary(contentType string) bool {
+func IsBinary(contentType string) bool {
 	ct := strings.ToLower(strings.TrimSpace(contentType))
 	if ct == "" {
 		return false
@@ -632,7 +632,7 @@ func isLoggableBody(contentType string) bool {
 	if ct == "" {
 		return true // Default to true when Content-Type is omitted (e.g. standard REST or plain text)
 	}
-	if isMultipart(ct) || isBinary(ct) {
+	if IsMultipart(ct) || IsBinary(ct) {
 		return false
 	}
 	if idx := strings.IndexByte(ct, ';'); idx != -1 {
@@ -686,7 +686,7 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 			}
 
 			// File upload: apply overall limit only
-			if isMultipart(lowerContentType) {
+			if IsMultipart(lowerContentType) {
 				if r.ContentLength > m.cfg.Limits.RequestBodyLimitSize {
 					response.WriteJSONResponse(w, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
 					return
@@ -791,7 +791,7 @@ func ReadAndRestoreBody(r *http.Request, limit int64) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
 	}
-	if isMultipart(r.Header.Get("Content-Type")) {
+	if IsMultipart(r.Header.Get("Content-Type")) {
 		return nil, nil
 	}
 
@@ -823,10 +823,11 @@ func (m *Manager) MethodOnly(method string, next http.Handler) http.Handler {
 
 // ResolveBodyToken computes a canonical body token for use in signature generation.
 //   - Multipart bodies → "UNSIGNED"
+//   - Binary bodies    → "UNSIGNED"
 //   - Empty bodies     → "EMPTY"
 //   - All others       → hex-encoded SHA-256 of the raw body
 func ResolveBodyToken(contentType string, body []byte) string {
-	if isMultipart(contentType) {
+	if IsMultipart(contentType) || IsBinary(contentType) {
 		return "UNSIGNED"
 	}
 	if len(body) == 0 {

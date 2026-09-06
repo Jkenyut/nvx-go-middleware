@@ -404,6 +404,9 @@ func TestResolveBodyToken(t *testing.T) {
 		wantExact   string
 	}{
 		{"multipart returns UNSIGNED", "multipart/form-data; boundary=x", []byte("data"), "", "UNSIGNED"},
+		{"binary octet-stream returns UNSIGNED", "application/octet-stream", []byte("binary"), "", "UNSIGNED"},
+		{"binary image returns UNSIGNED", "image/png", []byte("png"), "", "UNSIGNED"},
+		{"binary pdf returns UNSIGNED", "application/pdf", []byte("%PDF-1.4"), "", "UNSIGNED"},
 		{"empty body returns EMPTY", "application/json", []byte{}, "", "EMPTY"},
 		{"nil body returns EMPTY", "application/json", nil, "", "EMPTY"},
 		{"json body returns sha256", "application/json", []byte(`{"a":1}`), "hex:", ""},
@@ -1669,8 +1672,8 @@ func TestIsBinary(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := isBinary(tt.contentType); got != tt.expected {
-			t.Errorf("isBinary(%q) = %v, expected %v", tt.contentType, got, tt.expected)
+		if got := IsBinary(tt.contentType); got != tt.expected {
+			t.Errorf("IsBinary(%q) = %v, expected %v", tt.contentType, got, tt.expected)
 		}
 	}
 }
