@@ -1790,3 +1790,30 @@ func TestLogger_ExcludesBinaryBodies(t *testing.T) {
 		t.Error("expected ResponseBody to be recorded for application/json")
 	}
 }
+
+func TestIsProdEnv(t *testing.T) {
+	tests := []struct {
+		env      string
+		expected bool
+	}{
+		{"production", true},
+		{"Production", true},
+		{"PRODUCTION", true},
+		{"prod", true},
+		{"Prod", true},
+		{"PROD", true},
+		{"  prod  ", true},
+		{"  Production  ", true},
+		{"development", false},
+		{"dev", false},
+		{"staging", false},
+		{"test", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		if got := isProdEnv(tt.env); got != tt.expected {
+			t.Errorf("isProdEnv(%q) = %v, expected %v", tt.env, got, tt.expected)
+		}
+	}
+}

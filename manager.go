@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 )
@@ -55,7 +56,7 @@ func applyDefaults(cfg *Config) io.Closer {
 	var logCloser io.Closer
 
 	if cfg.Logger == nil {
-		isProd := cfg.Core.Env == "production" || cfg.Core.Env == "prod"
+		isProd := isProdEnv(cfg.Core.Env)
 		level := slog.LevelDebug
 		if isProd {
 			level = slog.LevelInfo
@@ -232,7 +233,13 @@ func (m *Manager) Close() error {
 }
 
 func (m *Manager) envProd() bool {
-	return m.cfg.Core.Env == "prod" || m.cfg.Core.Env == "production"
+	return isProdEnv(m.cfg.Core.Env)
+}
+
+// isProdEnv checks whether the environment string represents a production environment (case-insensitive).
+func isProdEnv(env string) bool {
+	e := strings.ToLower(strings.TrimSpace(env))
+	return e == "prod" || e == "production"
 }
 
 func uniqueStrings(items ...[]string) []string {
