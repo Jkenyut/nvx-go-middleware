@@ -371,9 +371,14 @@ func (m *Manager) ensurePublicWithHeaders(headers []string, next http.Handler) h
 			return
 		}
 		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
-			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
+			errMsg := constants.ErrMsgInvalidSignature
+			if !m.envProd() {
+				errMsg = fmt.Sprintf("%s - Timestamp difference exceeds max allowed skew of %d seconds", constants.ErrMsgInvalidSignature, m.cfg.Security.SignatureTimestampExpired)
+			}
+			response.WriteJSONResponse(w, response.BadRequest(r.Context(), errMsg))
 			return
 		}
+		
 		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
 			errMsg := constants.ErrMsgInvalidSignature
 			if !m.envProd() {
