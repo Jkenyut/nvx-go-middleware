@@ -178,6 +178,8 @@ func TestMaxBodySize(t *testing.T) {
 		{"json exceeds limit", 200, "application/json", http.StatusRequestEntityTooLarge},
 		{"multipart within limit", 50, "multipart/form-data; boundary=x", http.StatusOK},
 		{"unsupported content type", 50, "text/plain", http.StatusBadRequest},
+		{"spoofed subtype rejected", 50, "application/json-evil", http.StatusBadRequest},
+		{"spoofed parameter rejected", 50, "text/html; dummy=application/json", http.StatusBadRequest},
 		{"no body no content type (GET-like)", 0, "", http.StatusOK},
 	}
 
@@ -270,6 +272,20 @@ func TestCORS(t *testing.T) {
 
 		if w.Code != http.StatusNoContent {
 			t.Errorf("expected 204, got %d", w.Code)
+		}
+	})
+
+	t.Run("wildcard origin does not set credentials", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.Header.Set("Origin", "https://random.org")
+		w := httptest.NewRecorder()
+		mgr.CORS(ok, []string{"*"}, []string{"Content-Type"}).ServeHTTP(w, req)
+
+		if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+			t.Errorf("expected ACAO *, got %q", got)
+		}
+		if got := w.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+			t.Errorf("expected no ACAC header for wildcard origin, got %q", got)
 		}
 	})
 }

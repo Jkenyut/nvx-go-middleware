@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -350,6 +351,30 @@ func TestGraphQLChain_Options(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
+
+	t.Run("string literals with braces do not inflate depth", func(t *testing.T) {
+		body := `{"query": "query { user(bio: \"{ { { {\") { name } }"}`
+		req := httptest.NewRequest("POST", "/graphql", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		chain.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected 200 OK because depth is 2, got %d. Body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("excessive actual depth is rejected", func(t *testing.T) {
+		body := `{"query": "query { user { profile { address { street } } } }"}`
+		req := httptest.NewRequest("POST", "/graphql", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		chain.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 BadRequest because depth is 4 > 2, got %d", w.Code)
+		}
+	})
 }
 
 func TestWebSocketChain_Options(t *testing.T) {

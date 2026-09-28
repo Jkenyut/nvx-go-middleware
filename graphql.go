@@ -212,25 +212,91 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 	}
 }
 
-// graphqlQueryDepth returns a naive brace-depth count for the given GraphQL query string.
-// It counts the maximum nesting level of `{` / `}` pairs, which is a safe approximation
-// of field selection depth without full AST parsing.
+// graphqlQueryDepth returns an accurate brace-depth count for the given GraphQL query string.
+// It skips braces inside string literals ("..."), block strings ("""..."""), and line comments (#...).
+// This prevents false positives from strings like { field(arg: "{{{{") } and evasions.
 func graphqlQueryDepth(query string) int {
 	maxDepth, curDepth := 0, 0
-	for _, ch := range query {
-		switch ch {
-		case '{':
+	inString := false
+	inBlockString := false
+	inComment := false
+	escaped := false
+
+	n := len(query)
+	for i := 0; i < n; i++ {
+		ch := query[i]
+
+		// Inside comment: skip until newline
+		if inComment {
+			if ch == '\n' || ch == '\r' {
+				inComment = false
+			}
+			continue
+		}
+
+		// Inside block string """..."""
+		if inBlockString {
+			if ch == '\\' {
+				escaped = !escaped
+				continue
+			}
+			if !escaped && ch == '"' && i+2 < n && query[i+1] == '"' && query[i+2] == '"' {
+				inBlockString = false
+				i += 2
+			}
+			escaped = false
+			continue
+		}
+
+		// Inside regular string "..."
+		if inString {
+			if ch == '\\' {
+				escaped = !escaped
+				continue
+			}
+			if !escaped && ch == '"' {
+				inString = false
+			}
+			escaped = false
+			continue
+		}
+
+		// Start comment
+		if ch == '#' {
+			inComment = true
+			continue
+		}
+
+		// Start block string
+		if ch == '"' && i+2 < n && query[i+1] == '"' && query[i+2] == '"' {
+			inBlockString = true
+			i += 2
+			continue
+		}
+
+		// Start regular string
+		if ch == '"' {
+			inString = true
+			continue
+		}
+
+		// Count field nesting braces
+		if ch == '{' {
 			curDepth++
 			if curDepth > maxDepth {
 				maxDepth = curDepth
 			}
-		case '}':
+		} else if ch == '}' {
 			if curDepth > 0 {
 				curDepth--
 			}
 		}
 	}
-	// Subtract 1: the outermost { } wrapper is not a field level
+
+	if maxDepth <= 0 {
+		return 0
+	}
+	// Subtract 1: the outermost { } wrapper is the root operation level, not field selection depth
 	return maxDepth - 1
 }
 

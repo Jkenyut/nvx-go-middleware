@@ -234,64 +234,44 @@ func resolveEndpoint(r *http.Request) string {
 	return endpoint
 }
 
-func buildRateKeyPublic(r *http.Request, zone, signature string) string {
-	ip, _ := keyByHeader(r, constants.HeaderIP)
+func resolveRateEndpoint(r *http.Request) string {
 	endpoint := resolveEndpoint(r)
-	userAgent, _ := keyByHeader(r, constants.HeaderUserAgent)
-	appID, _ := keyByHeader(r, constants.HeaderAppID)
-	protocol := detectProtocol(r)
-	if protocol == "graphql" {
+	if detectProtocol(r) == "graphql" {
 		if op := ResolveGraphQLOperation(r); op != "anonymous" {
 			endpoint = endpoint + ":" + op
 		}
 	}
-	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:protocol:%s:method:%s:ip:%s:endpoint:%s:useragent:%s:appid:%s", zone, protocol, r.Method, ip, endpoint, userAgent, appID))
+	return endpoint
 }
 
-func buildRateKeyPublicAPIKey(r *http.Request, zone, signature string) string {
-	endpoint := resolveEndpoint(r)
-	apiKey, _ := keyByHeader(r, constants.HeaderAPIKey)
+func buildRateKey(r *http.Request, authType, signature string) string {
+	endpoint := resolveRateEndpoint(r)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
 	protocol := detectProtocol(r)
-	if protocol == "graphql" {
-		if op := ResolveGraphQLOperation(r); op != "anonymous" {
-			endpoint = endpoint + ":" + op
-		}
-	}
-	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:apikey:%s:appid:%s", zone, protocol, r.Method, endpoint, apiKey, appID))
-}
 
-func buildRateKeyPublicAuth(r *http.Request, zone, signature string) string {
-	endpoint := resolveEndpoint(r)
-	tokenKey, _ := keyByHeader(r, constants.HeaderToken)
-	appID, _ := keyByHeader(r, constants.HeaderAppID)
-	protocol := detectProtocol(r)
-	if protocol == "graphql" {
-		if op := ResolveGraphQLOperation(r); op != "anonymous" {
-			endpoint = endpoint + ":" + op
-		}
+	var payload string
+	switch authType {
+	case constants.AuthTypePublicAPIKey:
+		apiKey, _ := keyByHeader(r, constants.HeaderAPIKey)
+		payload = fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:apikey:%s:appid:%s", authType, protocol, r.Method, endpoint, apiKey, appID)
+	case constants.AuthTypePublicAuth:
+		tokenKey, _ := keyByHeader(r, constants.HeaderToken)
+		payload = fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:token:%s:appid:%s", authType, protocol, r.Method, endpoint, tokenKey, appID)
+	default:
+		ip, _ := keyByHeader(r, constants.HeaderIP)
+		userAgent, _ := keyByHeader(r, constants.HeaderUserAgent)
+		payload = fmt.Sprintf("zone:%s:protocol:%s:method:%s:ip:%s:endpoint:%s:useragent:%s:appid:%s", constants.AuthTypePublic, protocol, r.Method, ip, endpoint, userAgent, appID)
 	}
-	return cryptoutil.Signature(signature, fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:token:%s:appid:%s", zone, protocol, r.Method, endpoint, tokenKey, appID))
+
+	return cryptoutil.Signature(signature, payload)
 }
 
 // RateKeyInjector injects a rate key into the request header based on the authentication type.
 func rateKeyInjector(signature string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.Header.Get(constants.HeaderAuthType) {
-			case constants.AuthTypePublic:
-				key := buildRateKeyPublic(r, constants.AuthTypePublic, signature)
-				r.Header.Set(constants.HeaderRateKey, key)
-			case constants.AuthTypePublicAPIKey:
-				key := buildRateKeyPublicAPIKey(r, constants.AuthTypePublicAPIKey, signature)
-				r.Header.Set(constants.HeaderRateKey, key)
-			case constants.AuthTypePublicAuth:
-				key := buildRateKeyPublicAuth(r, constants.AuthTypePublicAuth, signature)
-				r.Header.Set(constants.HeaderRateKey, key)
-			default:
-				key := buildRateKeyPublic(r, constants.AuthTypePublic, signature)
-				r.Header.Set(constants.HeaderRateKey, key)
-			}
+			authType := r.Header.Get(constants.HeaderAuthType)
+			r.Header.Set(constants.HeaderRateKey, buildRateKey(r, authType, signature))
 			next.ServeHTTP(w, r)
 		})
 	}

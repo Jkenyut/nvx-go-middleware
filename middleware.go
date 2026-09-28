@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"runtime/debug"
@@ -603,9 +604,29 @@ func (m *Manager) MaxBodySize(opts ...BodySizeOption) func(http.Handler) http.Ha
 			}
 
 			// Validate Content-Type
+			mediaType, _, err := mime.ParseMediaType(contentType)
+			if err != nil {
+				// Fallback to trimming before semicolon if parse fails
+				mediaType = strings.TrimSpace(strings.Split(contentType, ";")[0])
+			}
+			mediaType = strings.ToLower(mediaType)
+
 			isAllowed := false
 			for _, allowed := range cfg.AllowedTypes {
-				if strings.Contains(contentType, allowed) {
+				allowedClean := strings.ToLower(strings.TrimSpace(strings.Split(allowed, ";")[0]))
+				if allowedClean == "*" || allowedClean == "*/*" {
+					isAllowed = true
+					break
+				}
+				if strings.HasSuffix(allowedClean, "/*") {
+					prefix := strings.TrimSuffix(allowedClean, "*")
+					if strings.HasPrefix(mediaType, prefix) {
+						isAllowed = true
+						break
+					}
+				}
+				// Exact match (e.g. application/json, multipart/form-data)
+				if mediaType == allowedClean {
 					isAllowed = true
 					break
 				}
@@ -675,16 +696,26 @@ func (m *Manager) CORS(
 		}
 
 		allowed := false
+		isWildcard := false
 		for _, o := range allowedOrigins {
-			if o == "*" || o == origin {
+			if o == "*" {
+				allowed = true
+				isWildcard = true
+				break
+			} else if o == origin {
 				allowed = true
 				break
 			}
 		}
 
 		if allowed {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			if isWildcard {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+				// Per W3C CORS spec: Access-Control-Allow-Credentials cannot be true with wildcard origin "*"
+			} else {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
 			w.Header().Add("Vary", "Origin")
 		}
 
