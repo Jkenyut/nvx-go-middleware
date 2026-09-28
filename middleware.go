@@ -275,6 +275,12 @@ func (w *headerCleanerResponseWriter) WriteHeader(statusCode int) {
 // communication are present and that the request signature is valid.
 func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.cfg.Security.PrivateKeySignature == "" {
+			m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName).Msg("private key signature is not configured")
+			response.WriteJSONResponse(w, response.InternalError(r.Context()))
+			return
+		}
+
 		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredInternalHeaders) {
 			return
 		}
@@ -303,6 +309,12 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 // It checks header presence, timestamp validity, and request signature.
 func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.cfg.Security.PublicKeySignature == "" {
+			m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName).Msg("public key signature is not configured")
+			response.WriteJSONResponse(w, response.InternalError(r.Context()))
+			return
+		}
+
 		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicAuthHeaders) {
 			return
 		}
@@ -326,6 +338,12 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 // It checks header presence, timestamp validity, and request signature.
 func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.cfg.Security.PublicKeySignature == "" {
+			m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName).Msg("public key signature is not configured")
+			response.WriteJSONResponse(w, response.InternalError(r.Context()))
+			return
+		}
+
 		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicHeaders) {
 			return
 		}
@@ -349,6 +367,12 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 // It checks header presence, timestamp validity, and request signature.
 func (m *Manager) EnsurePublicAPIKey(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.cfg.Security.PublicKeySignature == "" {
+			m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName).Msg("public key signature is not configured")
+			response.WriteJSONResponse(w, response.InternalError(r.Context()))
+			return
+		}
+
 		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicAPIKeyHeaders) {
 			return
 		}
@@ -555,8 +579,19 @@ func isMultipart(contentType string) bool {
 // It also restricts the allowed Content-Types based on the configuration.
 // MaxBodySize returns a middleware that limits the size of the request body.
 // It supports different limits for file uploads (multipart) vs regular requests.
-// It also enforces allowed content types.
-func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
+// It also enforces allowed content types. Optional BodySizeOption can override default limits per route.
+func (m *Manager) MaxBodySize(opts ...BodySizeOption) func(http.Handler) http.Handler {
+	cfg := BodySizeConfig{
+		BodyLimit:    m.cfg.Limits.RequestBodyLimitSize,
+		NonFileLimit: m.cfg.Limits.RequestBodyNonFileLimitSize,
+		AllowedTypes: m.cfg.Security.AllowedContentTypes,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			contentType := r.Header.Get("Content-Type")
@@ -569,7 +604,7 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 
 			// Validate Content-Type
 			isAllowed := false
-			for _, allowed := range m.cfg.Security.AllowedContentTypes {
+			for _, allowed := range cfg.AllowedTypes {
 				if strings.Contains(contentType, allowed) {
 					isAllowed = true
 					break
@@ -582,24 +617,46 @@ func (m *Manager) MaxBodySize() func(http.Handler) http.Handler {
 
 			// File upload: apply overall limit only
 			if isMultipart(contentType) {
-				if r.ContentLength > m.cfg.Limits.RequestBodyLimitSize {
+				if r.ContentLength > cfg.BodyLimit {
 					response.WriteJSONResponse(w, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
 					return
 				}
-				r.Body = http.MaxBytesReader(w, r.Body, m.cfg.Limits.RequestBodyLimitSize)
+				r.Body = http.MaxBytesReader(w, r.Body, cfg.BodyLimit)
 				next.ServeHTTP(w, r)
 				return
 			}
 
 			// Non-file: apply tighter non-file limit
-			if r.ContentLength > m.cfg.Limits.RequestBodyNonFileLimitSize {
+			if r.ContentLength > cfg.NonFileLimit {
 				response.WriteJSONResponse(w, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, m.cfg.Limits.RequestBodyNonFileLimitSize)
+			r.Body = http.MaxBytesReader(w, r.Body, cfg.NonFileLimit)
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// RouteCORS returns a CORS middleware configured with optional CORSOption.
+// If no options are provided, the Manager's configured AllowedOrigins and AllowedHeaders are used.
+func (m *Manager) RouteCORS(opts ...CORSOption) func(http.Handler) http.Handler {
+	cfg := CORSConfig{
+		AllowedOrigins: m.cfg.Security.AllowedOrigins,
+		AllowedHeaders: m.cfg.Security.AllowedHeaders,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	return func(next http.Handler) http.Handler {
+		return m.CORS(next, cfg.AllowedOrigins, cfg.AllowedHeaders)
+	}
+}
+
+// DefaultCORS returns a CORS middleware using the Manager's configured origins and headers.
+func (m *Manager) DefaultCORS() func(http.Handler) http.Handler {
+	return m.RouteCORS()
 }
 
 // CORS sets Cross-Origin Resource Sharing response headers.
@@ -719,6 +776,12 @@ func ResolveBodyToken(contentType string, body []byte) string {
 // generation are present.
 func (m *Manager) EnsurePreSignHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.cfg.Security.PublicKeySignature == "" {
+			m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName).Msg("public key signature is not configured")
+			response.WriteJSONResponse(w, response.InternalError(r.Context()))
+			return
+		}
+
 		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredSignaturePublicHeaders) {
 			return
 		}
@@ -729,10 +792,16 @@ func (m *Manager) EnsurePreSignHeaders(next http.Handler) http.Handler {
 // PreSignHandler creates a POST endpoint that generates a presigned signature
 // for a described request. The caller supplies method, URI, and body hash;
 // the handler returns the HMAC signature the caller should include as Signature.
-func (m *Manager) PreSignHandler(cfg *ChainConfig) http.Handler {
-	return m.MethodOnly("POST", m.PreSignChain(cfg)(
+func (m *Manager) PreSignHandler(opts ...ChainOption) http.Handler {
+	return m.MethodOnly("POST", m.PreSignChain(opts...)(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
+
+			if m.cfg.Security.PublicKeySignature == "" {
+				m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName).Msg("public key signature is not configured")
+				response.WriteJSONResponse(w, response.InternalError(r.Context()))
+				return
+			}
 
 			var req model.PresignRequest
 			if err := sonic.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {

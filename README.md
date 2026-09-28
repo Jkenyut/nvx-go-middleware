@@ -35,34 +35,29 @@ import (
 )
 
 func main() {
-	// 1. Create middleware manager safely
-	mgr, err := mw.NewWithError(mw.Config{
-		ServiceName:         "my-service",
-		PublicKeySignature:  "your-rsa-public-key",
-		PrivateKeySignature: "your-rsa-private-key",
-		AllowedOrigins:      []string{"https://example.com"},
-		TrustedProxies:      []string{"10.0.0.0/8"}, // Vital for accurate Anti-Spoofing!
-	})
+	// 1. Create middleware manager using functional options
+	mgr, err := mw.New(
+		mw.WithServiceName("my-service"),
+		mw.WithEnv("production"),
+		mw.WithAllowedOrigins("https://example.com"),
+		mw.WithTrustedProxies("10.0.0.0/8"), // Vital for accurate Anti-Spoofing!
+		mw.WithSecurityKeys("your-public-key", "your-private-key"), // optional if route needs signature
+	)
 	if err != nil {
 		log.Fatalf("Failed to init middleware: %v", err)
 	}
 	defer mgr.Close() // Gracefully close background loggers to prevent log loss on shutdown
 
-	// 2. Load default chain behavior
-	chainCfg := mw.DefaultChainConfig()
-	chainCfg.UseChiRateLimitPublic = true // Enable Anti-DDoS
+	// 2. Public Route (Rate Limited, Validated, IP Verified)
+	// Zero-boilerplate: PublicChain() applies safe defaults out-of-the-box!
+	mux.Handle("/api/v1/register", mgr.PublicChain(
+		mw.WithRateLimitPublic(true),
+	)(mgr.MethodOnly("POST", http.HandlerFunc(registerHandler))))
 
-	mux := http.NewServeMux()
-
-	// 3. Public Route (Rate Limited, Validated, IP Verified)
-	mux.Handle("/api/v1/register", mgr.PublicChain(chainCfg)(
-		mgr.MethodOnly("POST", http.HandlerFunc(registerHandler)),
-	))
-
-	// 4. Authenticated Route (JWT + Signature)
-	mux.Handle("/api/v1/profile", mgr.PublicAuthChain(chainCfg)(
-		mgr.MethodOnly("GET", http.HandlerFunc(profileHandler)),
-	))
+	// 3. Authenticated Route (JWT + Signature)
+	mux.Handle("/api/v1/profile", mgr.PublicAuthChain(
+		mw.WithRateLimitAuth(true),
+	)(mgr.MethodOnly("GET", http.HandlerFunc(profileHandler))))
 
 	log.Println("Server running on :8080")
 	http.ListenAndServe(":8080", mux)
@@ -108,6 +103,8 @@ NVX Go Middleware uses a mathematically structured chain to protect your applica
 5. **Inner Layer (`Logger`)**: Logs the request. *(Because it sits inside the rate limiter, DDoS floods will NEVER pollute your database logs!)*
 6. **App Layer**: Your business logic.
 
+> 📖 **For complete sequence diagrams, internal architecture, and options reference:** See the [Architecture & Technical Reference Documentation](docs/ARCHITECTURE.md).
+
 ## 🔗 Pre-Built Middleware Chains
 
 Depending on your endpoint's purpose, use one of our optimized chains:
@@ -133,9 +130,8 @@ grpcServer := mgr.NewGRPCServer()
 
 **GraphQL (With AST Depth Limiter & Telemetry):**
 ```go
-maxDepth := 10 // Prevent deep recursive queries
-// Safely wrapped with OTel Metrics and TrustProxy
-mux.Handle("/graphql", mgr.GraphQLChain(maxDepth)(graphqlHandler))
+// Safely wrapped with OTel Metrics, TrustProxy, and Depth Limiting
+mux.Handle("/graphql", mgr.GraphQLChain(mw.WithGraphQLMaxDepth(10))(graphqlHandler))
 ```
 
 **WebSockets (With Per-Connection Auth & Telemetry):**
@@ -145,7 +141,7 @@ authCheck := func(r *http.Request) bool {
 	return r.URL.Query().Get("token") != ""
 }
 // Safely wrapped with OTel Metrics and TrustProxy
-mux.Handle("/ws", mgr.WebSocketChain(authCheck)(wsHandler))
+mux.Handle("/ws", mgr.WebSocketChain(mw.WithWSAuthenticator(authCheck))(wsHandler))
 ```
 
 ## 📊 Custom Audit Storage
@@ -160,9 +156,9 @@ func (d *DatabaseStore) Save(ctx context.Context, entry *model.AuditLog) error {
 	return err
 }
 
-mgr, _ := mw.NewWithError(mw.Config{
-	LogStore: &DatabaseStore{db: myDB},
-})
+mgr, _ := mw.New(
+	mw.WithLogStore(&DatabaseStore{db: myDB}),
+)
 ```
 
 ## 📄 License

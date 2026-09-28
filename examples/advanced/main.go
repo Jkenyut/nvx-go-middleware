@@ -11,40 +11,24 @@ import (
 )
 
 func main() {
-	// Create middleware manager
-	mgr, err := mw.NewWithError(&mw.Config{
-		Security: mw.ConfigSecurity{
-			PublicKeySignature:  "your-rsa-public-key-here",
-			PrivateKeySignature: "your-rsa-private-key-here",
-			AllowedOrigins:      []string{"https://example.com"},
-			TrustedProxies:      []string{"10.0.0.0/8"},
-		},
-		Limits: mw.ConfigLimits{
-			RequestTimeout:       30,
-			RequestBodyLimitSize: 5 * 1024 * 1024, // 5MB
-		},
-		Core: mw.ConfigCore{
-			Env: "production",
-		},
-	})
+	// Create middleware manager using functional options
+	mgr, err := mw.New(
+		mw.WithSecurityKeys("your-rsa-public-key-here", "your-rsa-private-key-here"),
+		mw.WithAllowedOrigins("https://example.com"),
+		mw.WithTrustedProxies("10.0.0.0/8"),
+		mw.WithRequestTimeout(30),
+		mw.WithRequestBodyLimitSize(5*1024*1024),
+		mw.WithEnv("production"),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Custom chain config for production
-	chainCfg := mw.ChainConfig{
-		Features: mw.ChainFeatures{
-			UseChiCompress:     true,
-			UseChiTimeout:      false, // Use custom timeout
-			UseChiThrottle:     true,
-			UseChiStripSlashes: true,
-		},
-		Compression: mw.ChainCompression{
-			CompressionLevel: 9, // Max compression
-		},
-		Throttle: mw.ChainThrottle{
-			ThrottleLimit: 50,
-		},
+	// Chain options for production
+	prodChainOpts := []mw.ChainOption{
+		mw.WithChiCompress(true, 9), // Max compression
+		mw.WithChiThrottle(true, 50, 100, 30),
+		mw.WithChiStripSlashes(true),
 	}
 
 	mux := http.NewServeMux()
@@ -53,11 +37,11 @@ func main() {
 	// PUBLIC ROUTES
 	// ========================================
 
-	mux.Handle("/api/v1/register", mgr.PublicChain(&chainCfg)(
+	mux.Handle("/api/v1/register", mgr.PublicChain(prodChainOpts...)(
 		mgr.MethodOnly("POST", http.HandlerFunc(registerHandler)),
 	))
 
-	mux.Handle("/api/v1/login", mgr.PublicChain(&chainCfg)(
+	mux.Handle("/api/v1/login", mgr.PublicChain(prodChainOpts...)(
 		mgr.MethodOnly("POST", http.HandlerFunc(loginHandler)),
 	))
 
@@ -65,19 +49,19 @@ func main() {
 	// AUTHENTICATED ROUTES
 	// ========================================
 
-	mux.Handle("/api/v1/profile", mgr.PublicAuthChain(&chainCfg)(
+	mux.Handle("/api/v1/profile", mgr.PublicAuthChain(prodChainOpts...)(
 		mgr.MethodOnly("GET", http.HandlerFunc(profileHandler)),
 	))
 
-	mux.Handle("/api/v1/profile/update", mgr.PublicAuthChain(&chainCfg)(
+	mux.Handle("/api/v1/profile/update", mgr.PublicAuthChain(prodChainOpts...)(
 		mgr.MethodOnly("PUT", http.HandlerFunc(updateProfileHandler)),
 	))
 
-	mux.Handle("/api/v1/posts", mgr.PublicAuthChain(&chainCfg)(
+	mux.Handle("/api/v1/posts", mgr.PublicAuthChain(prodChainOpts...)(
 		mgr.MethodOnly("POST", http.HandlerFunc(createPostHandler)),
 	))
 
-	mux.Handle("/api/v1/posts/list", mgr.PublicAuthChain(&chainCfg)(
+	mux.Handle("/api/v1/posts/list", mgr.PublicAuthChain(prodChainOpts...)(
 		mgr.MethodOnly("GET", http.HandlerFunc(listPostsHandler)),
 	))
 
@@ -85,7 +69,7 @@ func main() {
 	// WEBHOOK ROUTES
 	// ========================================
 
-	mux.Handle("/webhooks/payment", mgr.WebhookChain(&chainCfg)(
+	mux.Handle("/webhooks/payment", mgr.WebhookChain(prodChainOpts...)(
 		mgr.MethodOnly("POST", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("Webhook received"))

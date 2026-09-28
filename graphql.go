@@ -37,8 +37,16 @@ type graphqlRequestBody struct {
 //
 // Usage:
 //
-//	router.Handle("/graphql", mgr.GraphQLChain(20)(graphqlHandler))
-func (m *Manager) GraphQLChain(maxDepth int) func(http.Handler) http.Handler {
+//	router.Handle("/graphql", mgr.GraphQLChain(WithGraphQLMaxDepth(20))(graphqlHandler))
+func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Handler {
+	var cfg GraphQLConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	maxDepth := cfg.MaxDepth
+
 	return func(next http.Handler) http.Handler {
 		coreHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// ── Context injection ─────────────────────────────────────

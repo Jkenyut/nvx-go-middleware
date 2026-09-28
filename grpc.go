@@ -52,7 +52,6 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		// Enrich context
 		ctx = activity.WithTransactionID(ctx, transactionID)
 		ctx = activity.WithRequestID(ctx, get(m.cfg.Headers.Keys.RequestID))
-		ctx = activity.WithAPIKey(ctx, get(m.cfg.Headers.Keys.APIKey))
 		ctx = activity.WithUserID(ctx, get(m.cfg.Headers.Keys.UserID))
 		ctx = activity.WithUserIP(ctx, get(m.cfg.Headers.Keys.IP))
 		ctx = activity.WithUserIPOrigin(ctx, get(m.cfg.Headers.Keys.IPOrigin))
@@ -197,7 +196,6 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 
 		ctx = activity.WithTransactionID(ctx, transactionID)
 		ctx = activity.WithRequestID(ctx, get(m.cfg.Headers.Keys.RequestID))
-		ctx = activity.WithAPIKey(ctx, get(m.cfg.Headers.Keys.APIKey))
 		ctx = activity.WithUserID(ctx, get(m.cfg.Headers.Keys.UserID))
 		ctx = activity.WithUserIP(ctx, get(m.cfg.Headers.Keys.IP))
 		ctx = activity.WithUserIPOrigin(ctx, get(m.cfg.Headers.Keys.IPOrigin))

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -11,6 +12,10 @@ import (
 	"github.com/rs/zerolog/diode"
 )
 
+func init() {
+	zerolog.TimeFieldFormat = time.RFC3339
+}
+
 // Manager holds the middleware configuration and provides middleware methods.
 // It is the central entry point for creating and managing middleware chains.
 type Manager struct {
@@ -18,15 +23,33 @@ type Manager struct {
 	logCloser io.Closer
 }
 
-// NewWithError creates a new Middleware Manager, returning an error instead of panicking
-// if the configuration is invalid. Prefer this over New for production use.
+// New creates a new Middleware Manager using functional options.
+// Safe defaults are applied for any unconfigured fields.
+func New(opts ...Option) (*Manager, error) {
+	var m Manager
+	for _, opt := range opts {
+		if opt != nil {
+			if err := opt(&m); err != nil {
+				return nil, err
+			}
+		}
+	}
+	closer := applyDefaults(&m.cfg)
+	m.logCloser = closer
+	return &m, nil
+}
+
+// NewWithError creates a new Middleware Manager from a Config struct.
+// It validates that required fields (like HMAC signature keys) are set.
 func NewWithError(cfg *Config) (*Manager, error) {
+	if cfg == nil {
+		return nil, errors.New("config cannot be nil")
+	}
 	// Validate required fields BEFORE applying defaults that might mask missing values.
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	closer := applyDefaults(cfg)
-	return &Manager{cfg: *cfg, logCloser: closer}, nil
+	return New(WithConfig(*cfg))
 }
 
 // applyDefaults fills in all missing Config fields with safe defaults.
@@ -51,8 +74,6 @@ func applyDefaults(cfg *Config) io.Closer {
 			}
 		}
 
-		// Use RFC3339 seconds internally, but display in human format via ConsoleWriter
-		zerolog.TimeFieldFormat = time.RFC3339
 
 		// Respect LOG_LEVEL environment variable if set
 		if levelStr := os.Getenv("LOG_LEVEL"); levelStr != "" {

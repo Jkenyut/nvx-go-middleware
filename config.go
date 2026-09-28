@@ -100,7 +100,6 @@ func WithActivityContext(r *http.Request, keys HeaderKeys) *http.Request {
 	h := r.Header
 	ctx := r.Context()
 	ctx = activity.WithTransactionID(ctx, h.Get(keys.TransactionID))
-	ctx = activity.WithAPIKey(ctx, h.Get(keys.APIKey))
 	ctx = activity.WithUserID(ctx, h.Get(keys.UserID))
 	ctx = activity.WithUserIP(ctx, h.Get(keys.IP))
 	ctx = activity.WithRequestID(ctx, h.Get(keys.RequestID))

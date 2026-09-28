@@ -10,40 +10,28 @@ import (
 )
 
 func main() {
-	// Create middleware manager with configuration
-	mgr, err := mw.NewWithError(&mw.Config{
-		Security: mw.ConfigSecurity{
-			PublicKeySignature:        "your-rsa-public-key-here",
-			PrivateKeySignature:       "your-rsa-private-key-here",
-			AllowedOrigins:            []string{"https://example.com", "http://localhost:3000"},
-			TrustedProxies:            []string{"10.0.0.0/8", "172.16.0.0/12"},
-			HeadersToRemove:           []string{},
-			AllowedContentTypes:       []string{"application/json", "text/plain", "multipart/form-data", "form-data"},
-			SignatureTimestampExpired: 6000000,
-		},
-		Limits: mw.ConfigLimits{
-			RequestTimeout:       60,
-			RequestBodyLimitSize: 3 * 1024 * 1024, // 3MB
-		},
-		Core: mw.ConfigCore{
-			Env: "development",
-		},
-		Logging: mw.ConfigLogging{
-			LogRequestBodies:  true,
-			LogResponseBodies: true,
-		},
-	})
+	// Create middleware manager using functional options
+	mgr, err := mw.New(
+		mw.WithSecurityKeys("your-rsa-public-key-here", "your-rsa-private-key-here"),
+		mw.WithAllowedOrigins("https://example.com", "http://localhost:3000"),
+		mw.WithTrustedProxies("10.0.0.0/8", "172.16.0.0/12"),
+		mw.WithAllowedContentTypes("application/json", "text/plain", "multipart/form-data", "form-data"),
+		mw.WithSignatureTimestampExpired(6000000),
+		mw.WithRequestTimeout(60),
+		mw.WithRequestBodyLimitSize(3*1024*1024),
+		mw.WithEnv("development"),
+		mw.WithBodyLogging(true, true),
+	)
 	if err != nil {
 		log.Fatalf("Failed to initialize middleware manager: %v", err)
 	}
 
-	// Create chain config
-	chainCfg := mw.ChainConfig{}
-	chainCfg.ApplyDefaults()
-	chainCfg.Limiter.RateLimitRequests = 5
-	chainCfg.Limiter.RateLimitWindow = 10
-	chainCfg.Features.UseChiRateLimitAuth = true
-	chainCfg.Features.UseChiRateLimitPublic = true
+	// Chain rate limiting options
+	rateLimitOpts := []mw.ChainOption{
+		mw.WithRateLimitConfig(5, 10),
+		mw.WithRateLimitAuth(true),
+		mw.WithRateLimitPublic(true),
+	}
 
 	// Create HTTP mux
 	mux := http.NewServeMux()
@@ -52,14 +40,14 @@ func main() {
 	// GLOBAL ROUTES (device validation only)
 	// ========================================
 
-	mux.Handle("/api/register", mgr.PublicChain(&chainCfg)(
+	mux.Handle("/api/register", mgr.PublicChain(rateLimitOpts...)(
 		mgr.MethodOnly("POST", http.HandlerFunc(registerHandler)),
 	))
 
 	// ========================================
 	// PUBLIC ROUTES (device validation only)
 	// ========================================
-	mux.Handle("/api/login", mgr.PublicChain(&chainCfg)(
+	mux.Handle("/api/login", mgr.PublicChain(rateLimitOpts...)(
 		mgr.MethodOnly("POST", http.HandlerFunc(loginHandler)),
 	))
 
@@ -67,11 +55,11 @@ func main() {
 	// AUTHENTICATED ROUTES
 	// ========================================
 
-	mux.Handle("/api/profile", mgr.PublicAuthChain(&chainCfg)(
+	mux.Handle("/api/profile", mgr.PublicAuthChain(rateLimitOpts...)(
 		mgr.MethodOnly("GET", http.HandlerFunc(profileHandler)),
 	))
 
-	mux.Handle("/api/posts", mgr.PublicAuthChain(&chainCfg)(
+	mux.Handle("/api/posts", mgr.PublicAuthChain(rateLimitOpts...)(
 		mgr.MethodOnly("POST", http.HandlerFunc(createPostHandler)),
 	))
 
@@ -88,7 +76,7 @@ func main() {
 	// ========================================
 	// PRESIGN ROUTES (device validation only)
 	// ========================================
-	mux.Handle("/api/presign", mgr.PreSignHandler(&chainCfg))
+	mux.Handle("/api/presign", mgr.PreSignHandler(rateLimitOpts...))
 
 	mux.Handle("/ping", mw.Heartbeat("/ping")(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})))
 

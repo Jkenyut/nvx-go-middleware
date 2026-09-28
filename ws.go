@@ -45,8 +45,16 @@ func (w *wsResponseWriter) WriteHeader(code int) {
 // The authenticator receives the request before the upgrade. Return false to
 // reject the connection (a 401 response is written automatically).
 func (m *Manager) WebSocketChain(
-	authenticator func(r *http.Request) bool,
+	opts ...WebSocketOption,
 ) func(http.Handler) http.Handler {
+	var cfg WebSocketConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	authenticator := cfg.Authenticator
+
 	return func(next http.Handler) http.Handler {
 		coreHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Must be a WebSocket upgrade request
