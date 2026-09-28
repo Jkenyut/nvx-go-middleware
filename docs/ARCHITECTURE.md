@@ -75,7 +75,7 @@ sequenceDiagram
 | | `WithBodyLogging(req, resp bool)` | Toggles request and response body capture. |
 | | `WithMaskKeywords(keywords ...string)` | Sensitive keywords to mask automatically (`*`). |
 | | `WithResponseBodyLogLimit(size int64)` | Maximum bytes of response body captured in logs. |
-| **Limits** | `WithRequestTimeout(sec int)` | Maximum request context deadline in seconds. |
+| **Limits** | `WithRequestTimeoutMs(ms int64)` | Maximum request context deadline in milliseconds (default 60,000ms). |
 | | `WithRequestBodyLimitSize(size int64)` | Overall maximum request body size (default 2GB for uploads). |
 | | `WithRequestBodyNonFileLimitSize(size int64)` | Maximum non-multipart request body size (default 3MB). |
 | **Security** | `WithSecurityKeys(pub, priv string)` | Public & Private HMAC keys for signature verification. |
@@ -83,7 +83,7 @@ sequenceDiagram
 | | `WithAllowedOrigins(origins ...string)` | Permitted origins for Cross-Origin Resource Sharing. |
 | | `WithAllowedContentTypes(types ...string)` | Permitted HTTP Content-Type headers. |
 | | `WithHeadersToRemove(headers ...string)` | Response headers to strip (e.g., `Server`, `X-Powered-By`). |
-| | `WithSignatureTimestampExpired(sec int64)` | Permissible timestamp drift for signatures (default 600s). |
+| | `WithSignatureTimestampExpiredMs(ms int64)` | Permissible timestamp drift for signatures (default 600,000ms). |
 | **Headers & Struct** | `WithHeaderKeys(keys HeaderKeys)` | Custom HTTP header mappings (e.g. `X-Request-Id`). |
 | | `WithContextInjector(fn func(*http.Request)*http.Request)` | Hook to inject custom values into request context. |
 | | `WithConfig(cfg Config)` | Loads entire configuration from YAML/JSON config struct. |
@@ -114,11 +114,11 @@ classDiagram
         <<function>>
         WithChiCompress()
         WithChiTimeout()
-        WithChiThrottle()
+        WithChiThrottleMs()
         WithChiStripSlashes()
         WithRateLimitPublic()
         WithRateLimitAuth()
-        WithRateLimitConfig()
+        WithRateLimitConfigMs()
     }
 
     Manager ..> ChainOption : configured via
@@ -141,6 +141,32 @@ classDiagram
 5. **`WebhookChain(opts ...ChainOption)`**
    - **Target:** High-throughput third-party callback/webhook ingestion.
    - **Pipeline:** `TrustProxy` ➔ `MaxBodySize` ➔ `Logger` ➔ `Handler`.
+
+### Route Pattern Rate Limiting (`WithRoutePattern`)
+
+By default, rate limiting keys against the request's exact URI (`httprate.KeyByEndpoint`). On parameterized routes (e.g. `/users/123`, `/users/456`), this can fragment rate-limit counters across individual ID paths instead of grouping them together under `/users/{id}`.
+
+Use `WithRoutePattern` to inject the normalized route template into the request context:
+
+```go
+// Inject route pattern into context before/inside route handler
+r = r.WithContext(mw.WithRoutePattern(r.Context(), "/api/v1/users/{id}"))
+
+// Or inject cleanly via WithContextInjector or routing adapters:
+mgr, _ := mw.New(
+    mw.WithContextInjector(func(r *http.Request) *http.Request {
+        if pattern := chi.RouteContext(r.Context()).RoutePattern(); pattern != "" {
+            return r.WithContext(mw.WithRoutePattern(r.Context(), pattern))
+        }
+        return r
+    }),
+)
+```
+
+When present in the request context:
+- `resolveEndpoint(r)` uses the injected pattern (`/api/v1/users/{id}`) for the rate limit key.
+- If not present, it safely falls back to standard URI path (`httprate.KeyByEndpoint`).
+- Can also be read back with `RoutePatternFromContext(ctx)`.
 
 ---
 
@@ -231,7 +257,7 @@ func main() {
 
 	// 4. Authenticated Route with Custom Rate Limiting
 	mux.Handle("/api/v1/orders", mgr.PublicAuthChain(
-		mw.WithRateLimitConfig(20, 1), // 20 requests per minute
+		mw.WithRateLimitConfigMs(20, 60000), // 20 requests per minute (60,000ms)
 		mw.WithRateLimitAuth(true),
 	)(mgr.MethodOnly("POST", http.HandlerFunc(createOrderHandler))))
 

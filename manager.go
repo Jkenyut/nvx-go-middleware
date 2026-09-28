@@ -110,8 +110,8 @@ func applyDefaults(cfg *Config) io.Closer {
 		cfg.LogStore = &ConsoleStore{logger: cfg.Logger}
 	}
 
-	if cfg.Limits.RequestTimeout == 0 {
-		cfg.Limits.RequestTimeout = constants.RequestTimeout
+	if cfg.Limits.RequestTimeoutMs == 0 {
+		cfg.Limits.RequestTimeoutMs = constants.RequestTimeoutMs
 	}
 	if cfg.Limits.RequestBodyLimitSize == 0 {
 		cfg.Limits.RequestBodyLimitSize = constants.RequestBodyLimitSize
@@ -189,8 +189,8 @@ func applyDefaults(cfg *Config) io.Closer {
 	if len(cfg.Security.HeadersToRemove) == 0 {
 		cfg.Security.HeadersToRemove = []string{}
 	}
-	if cfg.Security.SignatureTimestampExpired == 0 {
-		cfg.Security.SignatureTimestampExpired = constants.TimestampExpired
+	if cfg.Security.SignatureTimestampExpiredMs == 0 {
+		cfg.Security.SignatureTimestampExpiredMs = constants.TimestampExpiredMs
 	}
 
 	if len(cfg.Logging.LogHeaders) == 0 {

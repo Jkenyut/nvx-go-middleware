@@ -10,7 +10,7 @@ A high-performance, modular, and secure HTTP middleware library for Go. Designed
 - ✅ **Secure IP Resolution (`TrustProxy`)** - Anti-spoofing mechanism for `X-Forwarded-For`, totally immune to arbitrary header injection.
 - ✅ **OpenTelemetry Tracing** - Built-in context propagation with auto-injected `trace_id` and `span_id`.
 - ✅ **GraphQL Specific Protections** - Native AST depth-limiting and introspection blocking to prevent recursive query explosion.
-- ✅ **Rate Limiting** - Dynamic per-route throttling based on verified IP or Auth Tokens.
+- ✅ **Rate Limiting & Route Patterns** - Dynamic per-route throttling based on verified IP or Auth Tokens, with `WithRoutePattern` support to avoid key fragmentation on parameterized paths (`/users/{id}`).
 - ✅ **Panic Recovery** - Graceful recovery across HTTP, gRPC, and WebSockets that logs the stack trace securely.
 - ✅ **Multi-Protocol Support** - Native wrappers for **HTTP**, **gRPC** (Unary & Stream), **GraphQL**, and **WebSockets**.
 - ✅ **Multi-Auth Pipelines** - Pre-built chains for Public, Auth, API Key, Internal, and Webhook endpoints.
@@ -42,6 +42,7 @@ func main() {
 		mw.WithAllowedOrigins("https://example.com"),
 		mw.WithTrustedProxies("10.0.0.0/8"), // Vital for accurate Anti-Spoofing!
 		mw.WithSecurityKeys("your-public-key", "your-private-key"), // optional if route needs signature
+		mw.WithRequestTimeoutMs(60000),                             // 60 seconds context timeout in milliseconds
 	)
 	if err != nil {
 		log.Fatalf("Failed to init middleware: %v", err)
@@ -51,6 +52,7 @@ func main() {
 	// 2. Public Route (Rate Limited, Validated, IP Verified)
 	// Zero-boilerplate: PublicChain() applies safe defaults out-of-the-box!
 	mux.Handle("/api/v1/register", mgr.PublicChain(
+		mw.WithRateLimitConfigMs(100, 60000), // 100 requests per 60,000ms window
 		mw.WithRateLimitPublic(true),
 	)(mgr.MethodOnly("POST", http.HandlerFunc(registerHandler))))
 
@@ -90,6 +92,25 @@ mgr, _ := mw.NewWithError(mw.Config{
 		LogHeaders: []string{"Trace-Id", "X-Tx-Id", "X-User-Id", "X-Custom-Header"},
 	},
 })
+```
+
+## 🎯 Route Pattern Rate Limiting (`WithRoutePattern`)
+
+Prevent rate-limiting counter fragmentation across parameterized URLs (`/users/1`, `/users/2`):
+
+```go
+// Inject route template into context:
+r = r.WithContext(mw.WithRoutePattern(r.Context(), "/api/v1/users/{id}"))
+
+// Or cleanly via WithContextInjector:
+mgr, _ := mw.New(
+    mw.WithContextInjector(func(r *http.Request) *http.Request {
+        if pattern := chi.RouteContext(r.Context()).RoutePattern(); pattern != "" {
+            return r.WithContext(mw.WithRoutePattern(r.Context(), pattern))
+        }
+        return r
+    }),
+)
 ```
 
 ## 🛡️ Smart Architecture (Execution Order)

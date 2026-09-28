@@ -18,7 +18,7 @@ type ConfigCore struct {
 
 // ConfigLimits holds timeout and limit configurations.
 type ConfigLimits struct {
-	RequestTimeout              int   `yaml:"requestTimeout" default:"30"`                   // seconds
+	RequestTimeoutMs            int64 `yaml:"requestTimeoutMs" default:"60000"`              // milliseconds
 	RequestBodyLimitSize        int64 `yaml:"requestBodyLimitSize" default:"2147483648"`     // 2GB
 	RequestBodyNonFileLimitSize int64 `yaml:"requestBodyNonFileLimitSize" default:"3145728"` // 3MB
 }
@@ -34,14 +34,14 @@ type ConfigLogging struct {
 
 // ConfigSecurity holds security-related configurations.
 type ConfigSecurity struct {
-	PublicKeySignature        string   `yaml:"publicKeySignature"`
-	PrivateKeySignature       string   `yaml:"privateKeySignature"`
-	TrustedProxies            []string `yaml:"trustedProxies" default:"[]"`
-	AllowedOrigins            []string `yaml:"allowedOrigins" default:"[]"`
-	AllowedContentTypes       []string `yaml:"allowedContentTypes" default:"[]"`
-	AllowedHeaders            []string `yaml:"allowedHeaders" default:"[]"`
-	HeadersToRemove           []string `yaml:"headersToRemove" default:"[]"`
-	SignatureTimestampExpired int64    `yaml:"signatureTimestampExpired" default:"600"`
+	PublicKeySignature          string   `yaml:"publicKeySignature"`
+	PrivateKeySignature         string   `yaml:"privateKeySignature"`
+	TrustedProxies              []string `yaml:"trustedProxies" default:"[]"`
+	AllowedOrigins              []string `yaml:"allowedOrigins" default:"[]"`
+	AllowedContentTypes         []string `yaml:"allowedContentTypes" default:"[]"`
+	AllowedHeaders              []string `yaml:"allowedHeaders" default:"[]"`
+	HeadersToRemove             []string `yaml:"headersToRemove" default:"[]"`
+	SignatureTimestampExpiredMs int64    `yaml:"signatureTimestampExpiredMs" default:"600000"` // milliseconds
 }
 
 // HeaderKeys defines the names of headers to be extracted into the context.

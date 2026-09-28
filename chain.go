@@ -30,9 +30,9 @@ type ChainCompression struct {
 
 // ChainThrottle configures concurrent request throttling.
 type ChainThrottle struct {
-	ThrottleLimit   int `yaml:"throttleLimit" default:"100"`
-	ThrottleTimeout int `yaml:"throttleTimeout" default:"30"` // seconds
-	ThrottleBacklog int `yaml:"throttleBacklog" default:"100"`
+	ThrottleLimit     int   `yaml:"throttleLimit" default:"100"`
+	ThrottleTimeoutMs int64 `yaml:"throttleTimeoutMs" default:"30000"` // milliseconds
+	ThrottleBacklog   int   `yaml:"throttleBacklog" default:"100"`
 }
 
 // ChainConfig holds the configuration for the middleware chain.
@@ -53,8 +53,8 @@ func (c *ChainConfig) ApplyDefaults() {
 	if c.Throttle.ThrottleLimit == 0 {
 		c.Throttle.ThrottleLimit = constants.DefaultThrottleLimit
 	}
-	if c.Throttle.ThrottleTimeout == 0 {
-		c.Throttle.ThrottleTimeout = constants.DefaultThrottleTimeout
+	if c.Throttle.ThrottleTimeoutMs == 0 {
+		c.Throttle.ThrottleTimeoutMs = constants.DefaultThrottleTimeoutMs
 	}
 	if c.Throttle.ThrottleBacklog == 0 {
 		c.Throttle.ThrottleBacklog = constants.DefaultThrottleBacklog
@@ -62,8 +62,8 @@ func (c *ChainConfig) ApplyDefaults() {
 	if c.Limiter.RateLimitRequests == 0 {
 		c.Limiter.RateLimitRequests = constants.DefaultRateLimitRequests
 	}
-	if c.Limiter.RateLimitWindow == 0 {
-		c.Limiter.RateLimitWindow = constants.DefaultRateLimitWindow
+	if c.Limiter.RateLimitWindowMs == 0 {
+		c.Limiter.RateLimitWindowMs = constants.DefaultRateLimitWindowMs
 	}
 	if c.Limiter.PreRequestOnBeforeLimiter == nil {
 		c.Limiter.PreRequestOnBeforeLimiter = func(_ http.ResponseWriter, _ *http.Request) bool {
@@ -130,10 +130,10 @@ func (m *Manager) buildOuterChain(cfg *ChainConfig, handler http.Handler) http.H
 	}
 
 	if cfg.Features.UseChiTimeout {
-		handler = m.ChiTimeout(time.Duration(m.cfg.Limits.RequestTimeout) * time.Second)(handler)
+		handler = m.ChiTimeout(time.Duration(m.cfg.Limits.RequestTimeoutMs) * time.Millisecond)(handler)
 	}
 	if cfg.Features.UseChiThrottle {
-		handler = m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, time.Duration(cfg.Throttle.ThrottleTimeout)*time.Second)(handler)
+		handler = m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, time.Duration(cfg.Throttle.ThrottleTimeoutMs)*time.Millisecond)(handler)
 	}
 
 	handler = m.Recoverer(handler)
@@ -163,7 +163,7 @@ func (m *Manager) BaseChain(cfg *ChainConfig, setupRoute func(r chi.Router)) fun
 		r.Use(m.Recoverer)
 
 		if cfg.Features.UseChiTimeout {
-			r.Use(chimiddleware.Timeout(time.Duration(m.cfg.Limits.RequestTimeout) * time.Second))
+			r.Use(chimiddleware.Timeout(time.Duration(m.cfg.Limits.RequestTimeoutMs) * time.Millisecond))
 		}
 
 		if cfg.Features.UseChiCompress {
@@ -171,7 +171,7 @@ func (m *Manager) BaseChain(cfg *ChainConfig, setupRoute func(r chi.Router)) fun
 		}
 
 		if cfg.Features.UseChiThrottle {
-			r.Use(m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, time.Duration(cfg.Throttle.ThrottleTimeout)*time.Second))
+			r.Use(m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, time.Duration(cfg.Throttle.ThrottleTimeoutMs)*time.Millisecond))
 		}
 
 		// structured logging

@@ -318,7 +318,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicAuthHeaders) {
 			return
 		}
-		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
+		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpiredMs); err != nil {
 			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
@@ -347,7 +347,7 @@ func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
 		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicHeaders) {
 			return
 		}
-		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
+		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpiredMs); err != nil {
 			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
@@ -376,7 +376,7 @@ func (m *Manager) EnsurePublicAPIKey(next http.Handler) http.Handler {
 		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicAPIKeyHeaders) {
 			return
 		}
-		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
+		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpiredMs); err != nil {
 			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
@@ -814,7 +814,7 @@ func (m *Manager) PreSignHandler(opts ...ChainOption) http.Handler {
 				return
 			}
 
-			if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpired); err != nil {
+			if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpiredMs); err != nil {
 				response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 				return
 			}
@@ -833,14 +833,14 @@ func (m *Manager) PreSignHandler(opts ...ChainOption) http.Handler {
 }
 
 // checkTimestamp validates that the given Unix timestamp string is within
-// ±allowedSkewSec of the current UTC time.
-func checkTimestamp(timestampStr string, allowedSkewSec int64) error {
+// ±allowedSkewMs of the current UTC time.
+func checkTimestamp(timestampStr string, allowedSkewMs int64) error {
 	ts := format.StringToUnixOrZero(timestampStr)
 	if ts.IsZero() {
 		return errors.New(constants.ErrMsgInvalidSignature)
 	}
 	now := format.NowUTC()
-	skew := time.Duration(allowedSkewSec) * time.Second
+	skew := time.Duration(allowedSkewMs) * time.Millisecond
 	if ts.Before(now.Add(-skew)) || ts.After(now.Add(skew)) {
 		return errors.New(constants.ErrMsgInvalidSignature)
 	}

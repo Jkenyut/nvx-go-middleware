@@ -16,7 +16,7 @@ func main() {
 		mw.WithSecurityKeys("your-rsa-public-key-here", "your-rsa-private-key-here"),
 		mw.WithAllowedOrigins("https://example.com"),
 		mw.WithTrustedProxies("10.0.0.0/8"),
-		mw.WithRequestTimeout(30),
+		mw.WithRequestTimeoutMs(30000), // 30 seconds
 		mw.WithRequestBodyLimitSize(5*1024*1024),
 		mw.WithEnv("production"),
 	)
@@ -27,7 +27,7 @@ func main() {
 	// Chain options for production
 	prodChainOpts := []mw.ChainOption{
 		mw.WithChiCompress(true, 9), // Max compression
-		mw.WithChiThrottle(true, 50, 100, 30),
+		mw.WithChiThrottleMs(true, 50, 100, 30000),
 		mw.WithChiStripSlashes(true),
 	}
 

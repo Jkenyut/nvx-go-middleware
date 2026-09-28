@@ -36,7 +36,7 @@ func TestNew_WithOptions(t *testing.T) {
 		WithTelemetry(true),
 		WithLogStore(store),
 		WithSecurityKeys("pub-123", "priv-456"),
-		WithRequestTimeout(45),
+		WithRequestTimeoutMs(45000),
 		WithRequestBodyLimitSize(10<<20),
 		WithRequestBodyNonFileLimitSize(2<<20),
 		WithTrustedProxies("10.0.0.1"),
@@ -44,7 +44,7 @@ func TestNew_WithOptions(t *testing.T) {
 		WithAllowedContentTypes("application/json"),
 		WithAllowedHeaders("X-Custom-Header"),
 		WithHeadersToRemove("Server"),
-		WithSignatureTimestampExpired(300),
+		WithSignatureTimestampExpiredMs(300000),
 		WithBodyLogging(true, true),
 		WithMaskKeywords("secret", "token"),
 		WithResponseBodyLogLimit(1024),
@@ -68,8 +68,8 @@ func TestNew_WithOptions(t *testing.T) {
 	if cfg.Security.PublicKeySignature != "pub-123" || cfg.Security.PrivateKeySignature != "priv-456" {
 		t.Errorf("security keys mismatch: got pub=%s, priv=%s", cfg.Security.PublicKeySignature, cfg.Security.PrivateKeySignature)
 	}
-	if cfg.Limits.RequestTimeout != 45 {
-		t.Errorf("expected RequestTimeout 45, got %d", cfg.Limits.RequestTimeout)
+	if cfg.Limits.RequestTimeoutMs != 45000 {
+		t.Errorf("expected RequestTimeoutMs 45000, got %d", cfg.Limits.RequestTimeoutMs)
 	}
 	if cfg.Limits.RequestBodyLimitSize != 10<<20 {
 		t.Errorf("expected RequestBodyLimitSize 10MB, got %d", cfg.Limits.RequestBodyLimitSize)
@@ -92,8 +92,8 @@ func TestNew_WithOptions(t *testing.T) {
 	if cfg.Logging.ResponseBodyLogLimitSize != 1024 {
 		t.Errorf("expected ResponseBodyLogLimitSize 1024, got %d", cfg.Logging.ResponseBodyLogLimitSize)
 	}
-	if cfg.Security.SignatureTimestampExpired != 300 {
-		t.Errorf("expected SignatureTimestampExpired 300, got %d", cfg.Security.SignatureTimestampExpired)
+	if cfg.Security.SignatureTimestampExpiredMs != 300000 {
+		t.Errorf("expected SignatureTimestampExpiredMs 300000, got %d", cfg.Security.SignatureTimestampExpiredMs)
 	}
 }
 
@@ -234,6 +234,19 @@ func TestChainOptions(t *testing.T) {
 
 		if w.Code != http.StatusBadRequest && w.Code != http.StatusUnauthorized {
 			t.Errorf("expected 400/401, got %d", w.Code)
+		}
+	})
+
+	t.Run("Chain options with millisecond settings", func(t *testing.T) {
+		cfg := DefaultChainConfig()
+		WithChiThrottleMs(true, 50, 20, 15000)(&cfg)
+		WithRateLimitConfigMs(200, 30000)(&cfg)
+
+		if cfg.Throttle.ThrottleTimeoutMs != 15000 {
+			t.Errorf("expected ThrottleTimeoutMs 15000, got %d", cfg.Throttle.ThrottleTimeoutMs)
+		}
+		if cfg.Limiter.RateLimitWindowMs != 30000 {
+			t.Errorf("expected RateLimitWindowMs 30000, got %d", cfg.Limiter.RateLimitWindowMs)
 		}
 	})
 }

@@ -52,19 +52,19 @@ const (
 	DefaultCompressionLevel = 5
 	// DefaultThrottleLimit is the default concurrent request limit
 	DefaultThrottleLimit = 100
-	// DefaultThrottleTimeout is the default concurrent request timeout
-	DefaultThrottleTimeout = 30
+	// DefaultThrottleTimeoutMs is the default concurrent request timeout in milliseconds
+	DefaultThrottleTimeoutMs = 30000
 	// DefaultThrottleBacklog is the default concurrent request backlog
 	DefaultThrottleBacklog = 100
 	// DefaultRateLimitRequests is the default rate limit requests
 	DefaultRateLimitRequests = 100
-	// DefaultRateLimitWindow is the default rate limit window
-	DefaultRateLimitWindow = 1
+	// DefaultRateLimitWindowMs is the default rate limit window in milliseconds
+	DefaultRateLimitWindowMs = 60000
 
 	// MaxHeaderSize is the maximum size for header values
-	MaxHeaderSize    = 8192
-	TimestampExpired = 600 // seconds
-	RequestTimeout   = 60  // seconds
+	MaxHeaderSize      = 8192
+	TimestampExpiredMs = 600000 // milliseconds (10 minutes)
+	RequestTimeoutMs   = 60000  // milliseconds (60 seconds)
 )
 
 // Required headers for different request types

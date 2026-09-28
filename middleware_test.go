@@ -628,6 +628,49 @@ func TestValidateOptionalUUIDHeaders(t *testing.T) {
 	}
 }
 
+// ─── Route Pattern Context & Endpoint Resolution ─────────────────────────────
+
+func TestWithRoutePattern(t *testing.T) {
+	ctx := context.Background()
+	pattern := "/api/v1/users/{id}"
+
+	// Before injection
+	got, ok := RoutePatternFromContext(ctx)
+	if ok || got != "" {
+		t.Fatalf("expected empty route pattern, got %q (ok=%v)", got, ok)
+	}
+
+	// After injection
+	ctx = WithRoutePattern(ctx, pattern)
+	got, ok = RoutePatternFromContext(ctx)
+	if !ok || got != pattern {
+		t.Fatalf("expected pattern %q, got %q (ok=%v)", pattern, got, ok)
+	}
+
+	// Nil context safety
+	gotNil, okNil := RoutePatternFromContext(nil)
+	if okNil || gotNil != "" {
+		t.Fatalf("expected empty route pattern on nil context, got %q (ok=%v)", gotNil, okNil)
+	}
+}
+
+func TestResolveEndpoint(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/users/123", nil)
+
+	// Default fallback to httprate endpoint (URL Path when no chi route context)
+	gotDefault := resolveEndpoint(req)
+	if gotDefault != "/api/v1/users/123" {
+		t.Errorf("expected fallback to path %q, got %q", "/api/v1/users/123", gotDefault)
+	}
+
+	// When injected with custom route pattern
+	reqWithPattern := req.WithContext(WithRoutePattern(req.Context(), "/api/v1/users/{id}"))
+	gotInjected := resolveEndpoint(reqWithPattern)
+	if gotInjected != "/api/v1/users/{id}" {
+		t.Errorf("expected injected pattern %q, got %q", "/api/v1/users/{id}", gotInjected)
+	}
+}
+
 // ─── Benchmarks ──────────────────────────────────────────────────────────────
 
 func BenchmarkLogger(b *testing.B) {

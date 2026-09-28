@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -77,8 +78,8 @@ func (m *Manager) ChiThrottleBacklog(limit, backlog int, backlogTimeout time.Dur
 type ConfigLimiter struct {
 	// RateLimitRequests is the number of requests allowed per window.
 	RateLimitRequests int `yaml:"rateLimitRequests" default:"100"`
-	// RateLimitWindow is the duration of the rate limit window.
-	RateLimitWindow int `yaml:"rateLimitWindow" default:"1"` // minutes
+	// RateLimitWindowMs is the duration of the rate limit window in milliseconds.
+	RateLimitWindowMs int64 `yaml:"rateLimitWindowMs" default:"60000"` // milliseconds
 	// Counter is the backend storage for the rate limiter limits (e.g., memory, redis).
 	Counter httprate.LimitCounter `yaml:"-"`
 	// PreRequestOnBeforeLimiter is a hook executed before the rate limiter check.
@@ -123,7 +124,7 @@ func RateLimit(
 		opts = append(opts, httprate.WithLimitCounter(cfg.Counter))
 	}
 
-	limiter := httprate.LimitBy(cfg.RateLimitRequests, time.Duration(cfg.RateLimitWindow)*time.Minute, keyByHeaderAuthType, opts...)
+	limiter := httprate.LimitBy(cfg.RateLimitRequests, time.Duration(cfg.RateLimitWindowMs)*time.Millisecond, keyByHeaderAuthType, opts...)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -207,9 +208,35 @@ func detectProtocol(r *http.Request) string {
 	return "rest"
 }
 
+type routePatternContextKey struct{}
+
+// WithRoutePattern injects a route pattern into the request context for rate limiter keying.
+// Example: r = r.WithContext(mw.WithRoutePattern(r.Context(), route.Path))
+func WithRoutePattern(ctx context.Context, pattern string) context.Context {
+	return context.WithValue(ctx, routePatternContextKey{}, pattern)
+}
+
+// RoutePatternFromContext retrieves the route pattern from context if injected.
+func RoutePatternFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	val, ok := ctx.Value(routePatternContextKey{}).(string)
+	return val, ok
+}
+
+// resolveEndpoint resolves endpoint from context pattern first, falling back to httprate.KeyByEndpoint.
+func resolveEndpoint(r *http.Request) string {
+	if pattern, ok := RoutePatternFromContext(r.Context()); ok && pattern != "" {
+		return pattern
+	}
+	endpoint, _ := httprate.KeyByEndpoint(r)
+	return endpoint
+}
+
 func buildRateKeyPublic(r *http.Request, zone, signature string) string {
 	ip, _ := keyByHeader(r, constants.HeaderIP)
-	endpoint, _ := httprate.KeyByEndpoint(r)
+	endpoint := resolveEndpoint(r)
 	userAgent, _ := keyByHeader(r, constants.HeaderUserAgent)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
 	protocol := detectProtocol(r)
@@ -222,7 +249,7 @@ func buildRateKeyPublic(r *http.Request, zone, signature string) string {
 }
 
 func buildRateKeyPublicAPIKey(r *http.Request, zone, signature string) string {
-	endpoint, _ := httprate.KeyByEndpoint(r)
+	endpoint := resolveEndpoint(r)
 	apiKey, _ := keyByHeader(r, constants.HeaderAPIKey)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
 	protocol := detectProtocol(r)
@@ -235,7 +262,7 @@ func buildRateKeyPublicAPIKey(r *http.Request, zone, signature string) string {
 }
 
 func buildRateKeyPublicAuth(r *http.Request, zone, signature string) string {
-	endpoint, _ := httprate.KeyByEndpoint(r)
+	endpoint := resolveEndpoint(r)
 	tokenKey, _ := keyByHeader(r, constants.HeaderToken)
 	appID, _ := keyByHeader(r, constants.HeaderAppID)
 	protocol := detectProtocol(r)

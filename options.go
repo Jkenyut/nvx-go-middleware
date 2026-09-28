@@ -96,12 +96,18 @@ func WithLogging(logging ConfigLogging) Option {
 	}
 }
 
-// WithRequestTimeout sets request timeout in seconds.
-func WithRequestTimeout(seconds int) Option {
+// WithRequestTimeoutMs sets request timeout in milliseconds.
+func WithRequestTimeoutMs(ms int64) Option {
 	return func(m *Manager) error {
-		m.cfg.Limits.RequestTimeout = seconds
+		m.cfg.Limits.RequestTimeoutMs = ms
 		return nil
 	}
+}
+
+// WithRequestTimeout sets request timeout in seconds.
+// Deprecated: Use WithRequestTimeoutMs instead.
+func WithRequestTimeout(seconds int) Option {
+	return WithRequestTimeoutMs(int64(seconds) * 1000)
 }
 
 // WithRequestBodyLimitSize sets maximum overall request body size (e.g. for multipart).
@@ -177,12 +183,18 @@ func WithHeadersToRemove(headers ...string) Option {
 	}
 }
 
-// WithSignatureTimestampExpired sets timestamp skew expiration for signatures in seconds.
-func WithSignatureTimestampExpired(seconds int64) Option {
+// WithSignatureTimestampExpiredMs sets timestamp skew expiration for signatures in milliseconds.
+func WithSignatureTimestampExpiredMs(ms int64) Option {
 	return func(m *Manager) error {
-		m.cfg.Security.SignatureTimestampExpired = seconds
+		m.cfg.Security.SignatureTimestampExpiredMs = ms
 		return nil
 	}
+}
+
+// WithSignatureTimestampExpired sets timestamp skew expiration for signatures in seconds.
+// Deprecated: Use WithSignatureTimestampExpiredMs instead.
+func WithSignatureTimestampExpired(seconds int64) Option {
+	return WithSignatureTimestampExpiredMs(seconds * 1000)
 }
 
 // WithSecurity sets the entire Security config.
@@ -257,8 +269,8 @@ func WithChiTimeout(enable bool) ChainOption {
 	}
 }
 
-// WithChiThrottle enables or disables Chi throttle middleware.
-func WithChiThrottle(enable bool, limit, backlog, timeoutSec int) ChainOption {
+// WithChiThrottleMs enables or disables Chi throttle middleware with timeout in milliseconds.
+func WithChiThrottleMs(enable bool, limit, backlog int, timeoutMs int64) ChainOption {
 	return func(c *ChainConfig) {
 		c.Features.UseChiThrottle = enable
 		if limit > 0 {
@@ -267,10 +279,16 @@ func WithChiThrottle(enable bool, limit, backlog, timeoutSec int) ChainOption {
 		if backlog > 0 {
 			c.Throttle.ThrottleBacklog = backlog
 		}
-		if timeoutSec > 0 {
-			c.Throttle.ThrottleTimeout = timeoutSec
+		if timeoutMs > 0 {
+			c.Throttle.ThrottleTimeoutMs = timeoutMs
 		}
 	}
+}
+
+// WithChiThrottle enables or disables Chi throttle middleware with timeout in seconds.
+// Deprecated: Use WithChiThrottleMs instead.
+func WithChiThrottle(enable bool, limit, backlog, timeoutSec int) ChainOption {
+	return WithChiThrottleMs(enable, limit, backlog, int64(timeoutSec)*1000)
 }
 
 // WithChiStripSlashes enables or disables Chi strip slashes middleware.
@@ -294,16 +312,22 @@ func WithRateLimitAuth(enable bool) ChainOption {
 	}
 }
 
-// WithRateLimitConfig configures rate limiting thresholds (requests per window minutes).
-func WithRateLimitConfig(requests, windowMinutes int) ChainOption {
+// WithRateLimitConfigMs configures rate limiting thresholds (requests per window milliseconds).
+func WithRateLimitConfigMs(requests int, windowMs int64) ChainOption {
 	return func(c *ChainConfig) {
 		if requests > 0 {
 			c.Limiter.RateLimitRequests = requests
 		}
-		if windowMinutes > 0 {
-			c.Limiter.RateLimitWindow = windowMinutes
+		if windowMs > 0 {
+			c.Limiter.RateLimitWindowMs = windowMs
 		}
 	}
+}
+
+// WithRateLimitConfig configures rate limiting thresholds (requests per window minutes).
+// Deprecated: Use WithRateLimitConfigMs instead.
+func WithRateLimitConfig(requests, windowMinutes int) ChainOption {
+	return WithRateLimitConfigMs(requests, int64(windowMinutes)*60*1000)
 }
 
 // WithLimiter sets the entire ConfigLimiter for the chain.

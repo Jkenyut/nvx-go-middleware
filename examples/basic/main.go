@@ -16,8 +16,8 @@ func main() {
 		mw.WithAllowedOrigins("https://example.com", "http://localhost:3000"),
 		mw.WithTrustedProxies("10.0.0.0/8", "172.16.0.0/12"),
 		mw.WithAllowedContentTypes("application/json", "text/plain", "multipart/form-data", "form-data"),
-		mw.WithSignatureTimestampExpired(6000000),
-		mw.WithRequestTimeout(60),
+		mw.WithSignatureTimestampExpiredMs(600000), // 10 minutes
+		mw.WithRequestTimeoutMs(60000),             // 60 seconds
 		mw.WithRequestBodyLimitSize(3*1024*1024),
 		mw.WithEnv("development"),
 		mw.WithBodyLogging(true, true),
@@ -28,7 +28,7 @@ func main() {
 
 	// Chain rate limiting options
 	rateLimitOpts := []mw.ChainOption{
-		mw.WithRateLimitConfig(5, 10),
+		mw.WithRateLimitConfigMs(5, 600000), // 5 requests per 10 minutes (600,000 ms)
 		mw.WithRateLimitAuth(true),
 		mw.WithRateLimitPublic(true),
 	}
