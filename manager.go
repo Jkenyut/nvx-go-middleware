@@ -203,38 +203,57 @@ func applyDefaults(cfg *Config) io.Closer {
 		}
 	}
 
+	defaultMaskKeywords := []string{
+		// Authentication & Base Secrets
+		"password", "password_cbo", "passphrase", "secret", "client_secret", "client_secret_encrypted",
+		"token", "access_token", "refresh_token", "id_token", "jwt",
+		"apikey", "api_key", "x-api-key", "client_id", "authorization",
+
+		// Session & OTP
+		"session_id", "session_token", "auth_code", "verification_code", "otp",
+
+		// PIN & Pass Numbers
+		"pin", "mpin", "transaction_pin", "encrypted_pin_number",
+		"pass_number", "pass_number_cbo", "encrypted_pass_number", "encrypted_pass_number_cbo",
+		"pass_number_of_account", "encrypted_pass_number_of_account",
+
+		// Signatures & Hashes
+		"hash", "checksum", "signature", "signature_hash", "private_key", "tls_key", "certificate_key",
+
+		// Accounts & Cards
+		"account_number_encrypted", "account_number_cbo", "account_number_encrypted_cbo",
+		"card_number", "card_number_cbo", "encrypted_card_number", "encrypted_card_number_cbo",
+		"credit_card_number", "credit_card_number_cbo", "encrypted_credit_card_number", "encrypted_credit_card_number_cbo",
+		"cvv", "cvc", "cvv2", "cvc2",
+
+		// PII & Identification
+		"nik", "ktp", "ssn", "national_id", "id_card_number", "npwp", "tax_id",
+		"mother_maiden_name", "dob", "date_of_birth",
+		"phone", "phone_number", "mobile_number", "email", "email_address",
+
+		// General Encrypted Data
+		"encrypted_data",
+	}
+
 	if len(cfg.Logging.MaskKeywords) == 0 {
-		cfg.Logging.MaskKeywords = []string{
-			// Authentication & Base Secrets
-			"password", "password_cbo", "passphrase", "secret", "client_secret", "client_secret_encrypted",
-			"token", "access_token", "refresh_token", "id_token", "jwt",
-			"apikey", "api_key", "x-api-key", "client_id", "authorization",
+		cfg.Logging.MaskKeywords = defaultMaskKeywords
+	} else {
+		seen := make(map[string]struct{}, len(cfg.Logging.MaskKeywords)+len(defaultMaskKeywords))
+		merged := make([]string, 0, len(cfg.Logging.MaskKeywords)+len(defaultMaskKeywords))
 
-			// Session & OTP
-			"session_id", "session_token", "auth_code", "verification_code", "otp",
-
-			// PIN & Pass Numbers
-			"pin", "mpin", "transaction_pin", "encrypted_pin_number",
-			"pass_number", "pass_number_cbo", "encrypted_pass_number", "encrypted_pass_number_cbo",
-			"pass_number_of_account", "encrypted_pass_number_of_account",
-
-			// Signatures & Hashes
-			"hash", "checksum", "signature", "signature_hash", "private_key", "tls_key", "certificate_key",
-
-			// Accounts & Cards
-			"account_number_encrypted", "account_number_cbo", "account_number_encrypted_cbo",
-			"card_number", "card_number_cbo", "encrypted_card_number", "encrypted_card_number_cbo",
-			"credit_card_number", "credit_card_number_cbo", "encrypted_credit_card_number", "encrypted_credit_card_number_cbo",
-			"cvv", "cvc", "cvv2", "cvc2",
-
-			// PII & Identification
-			"nik", "ktp", "ssn", "national_id", "id_card_number", "npwp", "tax_id",
-			"mother_maiden_name", "dob", "date_of_birth",
-			"phone", "phone_number", "mobile_number", "email", "email_address",
-
-			// General Encrypted Data
-			"encrypted_data",
+		for _, kw := range defaultMaskKeywords {
+			if _, exists := seen[kw]; !exists {
+				seen[kw] = struct{}{}
+				merged = append(merged, kw)
+			}
 		}
+		for _, kw := range cfg.Logging.MaskKeywords {
+			if _, exists := seen[kw]; !exists {
+				seen[kw] = struct{}{}
+				merged = append(merged, kw)
+			}
+		}
+		cfg.Logging.MaskKeywords = merged
 	}
 
 	return logCloser
