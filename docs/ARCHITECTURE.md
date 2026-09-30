@@ -84,7 +84,7 @@ sequenceDiagram
 | | `WithAllowedContentTypes(types ...string)` | Permitted HTTP Content-Type headers. |
 | | `WithHeadersToRemove(headers ...string)` | Response headers to strip (e.g., `Server`, `X-Powered-By`). |
 | | `WithSignatureTimestampExpiredMs(ms int64)` | Permissible timestamp drift for signatures (default 600,000ms). |
-| **Headers & Struct** | `WithHeaderKeys(keys HeaderKeys)` | Custom HTTP header mappings (e.g. `X-Request-Id`). |
+| **Headers & Struct** | `WithHeaderKeys(keys HeaderKeys)` | Custom HTTP header mappings (e.g. `X-Request-Id`, `X-Correlation-Id`). |
 | | `WithContextInjector(fn func(*http.Request)*http.Request)` | Hook to inject custom values into request context. |
 | | `WithConfig(cfg Config)` | Loads entire configuration from YAML/JSON config struct. |
 

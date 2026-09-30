@@ -75,7 +75,7 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 
 ## 🎛️ Dynamic Headers (Pluggable)
 
-NVX Go Middleware allows you to fully customize or disable mandatory headers like `X-Request-Id`, `X-Transaction-Id`, etc., and dynamically configure which headers are logged without changing any code.
+NVX Go Middleware allows you to fully customize or disable mandatory headers like `X-Request-Id`, `X-Correlation-Id`, etc., and dynamically configure which headers are logged without changing any code.
 
 ```go
 mgr, _ := mw.NewWithError(mw.Config{
@@ -83,13 +83,13 @@ mgr, _ := mw.NewWithError(mw.Config{
 		// Customize default header names
 		Keys: mw.HeaderKeys{
 			RequestID:     "Trace-Id", // Rename X-Request-Id to Trace-Id
-			TransactionID: "X-Tx-Id",
+			CorrelationID: "X-Correlation-Id",
 			UserID:        "X-User-Id",
 		},
 	},
 	Logging: mw.ConfigLogging{
 		// Dynamically plug/unplug headers from the logger
-		LogHeaders: []string{"Trace-Id", "X-Tx-Id", "X-User-Id", "X-Custom-Header"},
+		LogHeaders: []string{"Trace-Id", "X-Correlation-Id", "X-User-Id", "X-Custom-Header"},
 	},
 })
 ```
