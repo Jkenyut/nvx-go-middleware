@@ -29,7 +29,7 @@ func (c *ConsoleStore) Save(_ context.Context, entry *model.AuditLog) error {
 		Interface("latency_ms", entry.LatencyMS).
 		Str("client_ip", entry.IP).
 		Str("ip_origin", entry.IPOrigin).
-		Str("transaction_id", entry.TransactionID).
+		Str("correlation_id", entry.CorrelationID).
 		Interface("created_by", entry.CreatedBy).
 		Interface("created_at", entry.CreatedAt).
 		Interface("request_headers", entry.RequestHeaders).

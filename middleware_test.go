@@ -151,8 +151,8 @@ func TestLogger(t *testing.T) {
 	if logEntry.StatusCode != http.StatusOK {
 		t.Errorf("expected status to be 200, got %d", logEntry.StatusCode)
 	}
-	if logEntry.TransactionID == "" {
-		t.Error("TransactionID should be set")
+	if logEntry.CorrelationID == "" {
+		t.Error("CorrelationID should be set")
 	}
 }
 

@@ -25,8 +25,8 @@ type AuditLog struct {
 	IPOrigin string `json:"ip_origin"`
 	// Request ID is the unique request identifier.
 	RequestID string `json:"request_id"`
-	// Transaction ID is the unique transaction identifier used for tracing.
-	TransactionID string `json:"transaction_id"`
+	// Correlation ID is the unique correlation identifier used for cross-service tracing.
+	CorrelationID string `json:"correlation_id"`
 	// Request Headers captures the headers sent in the request.
 	RequestHeaders json.RawMessage `json:"request_headers"`
 	// Response Headers captures the headers sent in the response.

@@ -22,7 +22,7 @@ import (
 )
 
 // GRPCUnaryInterceptor returns a gRPC unary server interceptor that provides:
-//   - Transaction ID generation / propagation from incoming metadata
+//   - Correlation ID generation / propagation from incoming metadata
 //   - Context enrichment (user ID, API key, IP, etc.)
 //   - Panic recovery with structured logging
 //   - Request/response latency logging
@@ -43,14 +43,14 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 			return ""
 		}
 
-		// Propagate / generate transaction ID
-		transactionID := get(m.cfg.Headers.Keys.TransactionID)
-		if transactionID == "" {
-			transactionID = cryptoutil.V7()
+		// Propagate / generate correlation ID
+		correlationID := get(m.cfg.Headers.Keys.CorrelationID)
+		if correlationID == "" {
+			correlationID = cryptoutil.V7()
 		}
 
 		// Enrich context
-		ctx = activity.WithTransactionID(ctx, transactionID)
+		ctx = activity.WithCorrelationID(ctx, correlationID)
 		ctx = activity.WithRequestID(ctx, get(m.cfg.Headers.Keys.RequestID))
 		ctx = activity.WithUserID(ctx, get(m.cfg.Headers.Keys.UserID))
 		ctx = activity.WithUserIP(ctx, get(m.cfg.Headers.Keys.IP))
@@ -63,7 +63,7 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 			} else {
 				span.SetAttributes(
 					attribute.String("service", m.cfg.Core.ServiceName),
-					attribute.String("transaction_id", transactionID),
+					attribute.String("correlation_id", correlationID),
 					attribute.String("request_id", get(m.cfg.Headers.Keys.RequestID)),
 					attribute.String("ip", get(m.cfg.Headers.Keys.IP)),
 					attribute.String("user_id", get(m.cfg.Headers.Keys.UserID)),
@@ -97,7 +97,7 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 			RequestID:       get(m.cfg.Headers.Keys.RequestID),
 			CreatedBy:       format.ToInt64(get(m.cfg.Headers.Keys.UserID)),
 			CreatedAt:       format.NowUTC(),
-			TransactionID:   transactionID,
+			CorrelationID:   correlationID,
 			RequestHeaders:  reqHeadersBytes,
 			ResponseHeaders: nil,
 			RequestBody:     bodyRequest,
@@ -131,7 +131,7 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 
 			if saveErr := m.cfg.LogStore.Save(reqCtx, &entry); saveErr != nil {
 				m.cfg.Logger.Error().
-					Str("transaction_id", transactionID).
+					Str("correlation_id", correlationID).
 					Err(saveErr).
 					Msg("failed to save grpc audit log")
 			}
@@ -148,7 +148,7 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 				stack := string(debug.Stack())
 				m.cfg.Logger.Error().
 					Str("service", m.cfg.Core.ServiceName).
-					Str("transaction_id", transactionID).
+					Str("correlation_id", correlationID).
 					Str("method", info.FullMethod).
 					Str("request_id", get(m.cfg.Headers.Keys.RequestID)).
 					Str("ip", get(m.cfg.Headers.Keys.IP)).
@@ -168,7 +168,7 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 }
 
 // GRPCStreamInterceptor returns a gRPC stream server interceptor that provides:
-//   - Transaction ID generation / propagation from incoming metadata
+//   - Correlation ID generation / propagation from incoming metadata
 //   - Context enrichment (user ID, API key, IP, etc.)
 //   - Panic recovery with structured logging
 //   - Stream open/close latency logging
@@ -189,12 +189,12 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			return ""
 		}
 
-		transactionID := get(m.cfg.Headers.Keys.TransactionID)
-		if transactionID == "" {
-			transactionID = cryptoutil.V7()
+		correlationID := get(m.cfg.Headers.Keys.CorrelationID)
+		if correlationID == "" {
+			correlationID = cryptoutil.V7()
 		}
 
-		ctx = activity.WithTransactionID(ctx, transactionID)
+		ctx = activity.WithCorrelationID(ctx, correlationID)
 		ctx = activity.WithRequestID(ctx, get(m.cfg.Headers.Keys.RequestID))
 		ctx = activity.WithUserID(ctx, get(m.cfg.Headers.Keys.UserID))
 		ctx = activity.WithUserIP(ctx, get(m.cfg.Headers.Keys.IP))
@@ -207,7 +207,7 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			} else {
 				span.SetAttributes(
 					attribute.String("service", m.cfg.Core.ServiceName),
-					attribute.String("transaction_id", transactionID),
+					attribute.String("correlation_id", correlationID),
 					attribute.String("request_id", get(m.cfg.Headers.Keys.RequestID)),
 					attribute.String("ip", get(m.cfg.Headers.Keys.IP)),
 					attribute.String("ip_origin", get(m.cfg.Headers.Keys.IPOrigin)),
@@ -236,7 +236,7 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			RequestID:       get(m.cfg.Headers.Keys.RequestID),
 			CreatedBy:       format.ToInt64(get(m.cfg.Headers.Keys.UserID)),
 			CreatedAt:       format.NowUTC(),
-			TransactionID:   transactionID,
+			CorrelationID:   correlationID,
 			RequestHeaders:  reqHeadersBytes,
 			ResponseHeaders: nil,
 			RequestBody:     nil,
@@ -265,7 +265,7 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 
 			if saveErr := m.cfg.LogStore.Save(reqCtx, &entry); saveErr != nil {
 				m.cfg.Logger.Error().
-					Str("transaction_id", transactionID).
+					Str("correlation_id", correlationID).
 					Err(saveErr).
 					Msg("failed to save grpc stream audit log")
 			}
@@ -281,7 +281,7 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 				stack := string(debug.Stack())
 				m.cfg.Logger.Error().
 					Str("service", m.cfg.Core.ServiceName).
-					Str("transaction_id", transactionID).
+					Str("correlation_id", correlationID).
 					Str("method", info.FullMethod).
 					Interface("panic", rec).
 					Msgf("gRPC stream panic:\n%s", stack)

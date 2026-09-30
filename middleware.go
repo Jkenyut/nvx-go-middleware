@@ -90,19 +90,19 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 
 		IDAuditLog := cryptoutil.V7()
 
-		// Generate or propagate Transaction ID
-		transactionID := r.Header.Get(m.cfg.Headers.Keys.TransactionID)
-		if transactionID == "" {
-			transactionID = cryptoutil.V7()
-			rw.Header().Set(m.cfg.Headers.Keys.TransactionID, transactionID)
-			r.Header.Set(m.cfg.Headers.Keys.TransactionID, transactionID)
+		// Generate or propagate Correlation ID
+		correlationID := r.Header.Get(m.cfg.Headers.Keys.CorrelationID)
+		if correlationID == "" {
+			correlationID = cryptoutil.V7()
+			rw.Header().Set(m.cfg.Headers.Keys.CorrelationID, correlationID)
+			r.Header.Set(m.cfg.Headers.Keys.CorrelationID, correlationID)
 		}
 
 		if m.cfg.Core.EnableTelemetry {
 			span := trace.SpanFromContext(r.Context())
 			span.SetAttributes(
 				attribute.String("service", m.cfg.Core.ServiceName),
-				attribute.String("transaction_id", transactionID),
+				attribute.String("correlation_id", correlationID),
 				attribute.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
 				attribute.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
 				attribute.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
@@ -130,7 +130,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			if err != nil {
 				event := m.cfg.Logger.Error().
 					Str("service", m.cfg.Core.ServiceName).
-					Str("transaction_id", transactionID).
+					Str("correlation_id", correlationID).
 					Str("method", r.Method).
 					Str("path", r.URL.Path).
 					Str("user_agent", r.UserAgent()).
@@ -170,7 +170,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				RequestID:       r.Header.Get(m.cfg.Headers.Keys.RequestID),
 				CreatedBy:       format.ToInt64(r.Header.Get(m.cfg.Headers.Keys.UserID)),
 				CreatedAt:       format.NowUTC(),
-				TransactionID:   transactionID,
+				CorrelationID:   correlationID,
 				RequestHeaders:  requestHeadersBytes,
 				ResponseHeaders: normalizeHeadersJSON(rw.Header(), m.cfg.Logging.MaskKeywords),
 				RequestBody:     reqBodyBytes,
@@ -184,7 +184,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 			if err := m.cfg.LogStore.Save(r.Context(), &entry); err != nil {
 				event := m.cfg.Logger.Error().
 					Str("service", m.cfg.Core.ServiceName).
-					Str("transaction_id", transactionID).
+					Str("correlation_id", correlationID).
 					Str("method", r.Method).
 					Str("path", r.URL.Path).
 					Str("user_agent", r.UserAgent()).

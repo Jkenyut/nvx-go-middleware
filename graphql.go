@@ -52,12 +52,12 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 			// ── Context injection ─────────────────────────────────────
 			r = WithActivityContext(r, m.cfg.Headers.Keys)
 
-			transactionID := r.Header.Get(m.cfg.Headers.Keys.TransactionID)
-			if transactionID == "" {
-				transactionID = cryptoutil.V7()
+			correlationID := r.Header.Get(m.cfg.Headers.Keys.CorrelationID)
+			if correlationID == "" {
+				correlationID = cryptoutil.V7()
 			}
-			r.Header.Set(m.cfg.Headers.Keys.TransactionID, transactionID)
-			r = r.WithContext(activity.WithTransactionID(r.Context(), transactionID))
+			r.Header.Set(m.cfg.Headers.Keys.CorrelationID, correlationID)
+			r = r.WithContext(activity.WithCorrelationID(r.Context(), correlationID))
 
 			var rw *responseRecorder
 
@@ -73,7 +73,7 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 					}
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.Core.ServiceName).
-						Str("transaction_id", transactionID).
+						Str("correlation_id", correlationID).
 						Str("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)).
 						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
 						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
@@ -125,7 +125,7 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 					span.SetName("GraphQL " + operationName)
 					span.SetAttributes(
 						attribute.String("service", m.cfg.Core.ServiceName),
-						attribute.String("transaction_id", transactionID),
+						attribute.String("correlation_id", correlationID),
 						attribute.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
 						attribute.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
 						attribute.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
@@ -154,7 +154,7 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 				RequestID:       r.Header.Get(m.cfg.Headers.Keys.RequestID),
 				CreatedBy:       format.ToInt64(r.Header.Get(m.cfg.Headers.Keys.UserID)),
 				CreatedAt:       format.NowUTC(),
-				TransactionID:   transactionID,
+				CorrelationID:   correlationID,
 				RequestHeaders:  normalizeHeadersJSON(r.Header, m.cfg.Logging.MaskKeywords),
 				ResponseHeaders: nil,
 				RequestBody:     gqlBody,
@@ -187,7 +187,7 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 
 				if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {
 					m.cfg.Logger.Error().
-						Str("transaction_id", transactionID).
+						Str("correlation_id", correlationID).
 						Err(err).
 						Msg("failed to save graphql audit log")
 				}

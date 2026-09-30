@@ -66,20 +66,20 @@ func (m *Manager) WebSocketChain(
 			// Inject context values
 			r = WithActivityContext(r, m.cfg.Headers.Keys)
 
-			// Generate / propagate transaction ID
-			transactionID := r.Header.Get(m.cfg.Headers.Keys.TransactionID)
-			if transactionID == "" {
-				transactionID = cryptoutil.V7()
-				r.Header.Set(m.cfg.Headers.Keys.TransactionID, transactionID)
+			// Generate / propagate correlation ID
+			correlationID := r.Header.Get(m.cfg.Headers.Keys.CorrelationID)
+			if correlationID == "" {
+				correlationID = cryptoutil.V7()
+				r.Header.Set(m.cfg.Headers.Keys.CorrelationID, correlationID)
 			}
-			r = r.WithContext(activity.WithTransactionID(r.Context(), transactionID))
+			r = r.WithContext(activity.WithCorrelationID(r.Context(), correlationID))
 
 			if m.cfg.Core.EnableTelemetry {
 				span := trace.SpanFromContext(r.Context())
 				if span.SpanContext().IsValid() {
 					span.SetName("WebSocket Upgrade")
 					span.SetAttributes(
-						attribute.String("transaction_id", transactionID),
+						attribute.String("correlation_id", correlationID),
 						attribute.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
 						attribute.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
 						attribute.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
@@ -119,7 +119,7 @@ func (m *Manager) WebSocketChain(
 					}
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.Core.ServiceName).
-						Str("transaction_id", transactionID).
+						Str("correlation_id", correlationID).
 						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
 						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
 						Str("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)).
@@ -151,7 +151,7 @@ func (m *Manager) WebSocketChain(
 				RequestID:       r.Header.Get(m.cfg.Headers.Keys.RequestID),
 				CreatedBy:       format.ToInt64(r.Header.Get(m.cfg.Headers.Keys.UserID)),
 				CreatedAt:       format.NowUTC(),
-				TransactionID:   transactionID,
+				CorrelationID:   correlationID,
 				RequestHeaders:  normalizeHeadersJSON(r.Header, m.cfg.Logging.MaskKeywords),
 				ResponseHeaders: nil,
 				RequestBody:     nil, // WebSockets upgrade requests have no body
@@ -183,7 +183,7 @@ func (m *Manager) WebSocketChain(
 				if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.Core.ServiceName).
-						Str("transaction_id", transactionID).
+						Str("correlation_id", correlationID).
 						Str("ip", r.Header.Get(m.cfg.Headers.Keys.IP)).
 						Str("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)).
 						Str("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)).

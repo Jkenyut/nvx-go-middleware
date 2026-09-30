@@ -168,8 +168,8 @@ func applyDefaults(cfg *Config) io.Closer {
 	if cfg.Headers.Keys.RequestID == "" {
 		cfg.Headers.Keys.RequestID = constants.HeaderRequestID
 	}
-	if cfg.Headers.Keys.TransactionID == "" {
-		cfg.Headers.Keys.TransactionID = constants.HeaderTransactionID
+	if cfg.Headers.Keys.CorrelationID == "" {
+		cfg.Headers.Keys.CorrelationID = constants.HeaderCorrelationID
 	}
 	if cfg.Headers.Keys.IP == "" {
 		cfg.Headers.Keys.IP = constants.HeaderIP
@@ -196,7 +196,7 @@ func applyDefaults(cfg *Config) io.Closer {
 	if len(cfg.Logging.LogHeaders) == 0 {
 		cfg.Logging.LogHeaders = []string{
 			cfg.Headers.Keys.RequestID,
-			cfg.Headers.Keys.TransactionID,
+			cfg.Headers.Keys.CorrelationID,
 			cfg.Headers.Keys.IP,
 			cfg.Headers.Keys.IPOrigin,
 			cfg.Headers.Keys.UserID,

@@ -29,7 +29,7 @@ type ConfigLogging struct {
 	LogResponseBodies        bool     `yaml:"logResponseBodies" default:"false"`
 	ResponseBodyLogLimitSize int64    `yaml:"responseBodyLogLimitSize" default:"5242880"` // 5MB
 	MaskKeywords             []string `yaml:"maskKeywords" default:"[]"`
-	LogHeaders               []string `yaml:"logHeaders" default:"[\"X-Request-Id\", \"X-Transaction-Id\", \"X-Forwarded-For\", \"X-Ip-Origin\", \"X-User-Id\"]"`
+	LogHeaders               []string `yaml:"logHeaders" default:"[\"X-Request-Id\", \"X-Correlation-Id\", \"X-Forwarded-For\", \"X-Ip-Origin\", \"X-User-Id\"]"`
 }
 
 // ConfigSecurity holds security-related configurations.
@@ -47,7 +47,7 @@ type ConfigSecurity struct {
 // HeaderKeys defines the names of headers to be extracted into the context.
 type HeaderKeys struct {
 	RequestID     string `yaml:"requestID" default:"X-Request-Id"`
-	TransactionID string `yaml:"transactionID" default:"X-Transaction-Id"`
+	CorrelationID string `yaml:"correlationID" default:"X-Correlation-Id"`
 	IP            string `yaml:"ip" default:"X-Forwarded-For"`
 	IPOrigin      string `yaml:"ipOrigin" default:"X-Ip-Origin"`
 	UserID        string `yaml:"userID" default:"X-User-Id"`
@@ -99,7 +99,7 @@ var (
 func WithActivityContext(r *http.Request, keys HeaderKeys) *http.Request {
 	h := r.Header
 	ctx := r.Context()
-	ctx = activity.WithTransactionID(ctx, h.Get(keys.TransactionID))
+	ctx = activity.WithCorrelationID(ctx, h.Get(keys.CorrelationID))
 	ctx = activity.WithUserID(ctx, h.Get(keys.UserID))
 	ctx = activity.WithUserIP(ctx, h.Get(keys.IP))
 	ctx = activity.WithRequestID(ctx, h.Get(keys.RequestID))

@@ -44,3 +44,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260921155816-b14227669459 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
+
+replace github.com/Jkenyut/nvx-go-helper => ../nvx-go-helper

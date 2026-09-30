@@ -4,7 +4,7 @@ package constants
 // Header constants
 // Header constants define the standard headers used across the NVX middleware.
 const (
-	HeaderTransactionID  = "X-Transaction-Id"
+	HeaderCorrelationID  = "X-Correlation-Id"
 	HeaderRequestID      = "X-Request-Id"
 	HeaderAPIKey         = "X-Api-Key"
 	HeaderUserID         = "X-User-Id"
