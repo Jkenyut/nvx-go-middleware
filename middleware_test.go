@@ -720,3 +720,21 @@ func BenchmarkResolveBodyToken(b *testing.B) {
 		ResolveBodyToken("application/json", body)
 	}
 }
+
+func BenchmarkRateLimit(b *testing.B) {
+	cfg := ConfigLimiter{
+		RateLimitRequests: 1000000,
+		RateLimitWindowMs: 60000,
+	}
+	handler := RateLimit(cfg, "test-secret")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set(constants.HeaderAppID, "app-1")
+	req.Header.Set(constants.HeaderIP, "192.168.1.1")
+
+	b.ReportAllocs()
+	for b.Loop() {
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	}
+}

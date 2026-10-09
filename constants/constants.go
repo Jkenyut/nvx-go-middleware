@@ -11,6 +11,7 @@ const (
 	HeaderIP             = "X-Forwarded-For"
 	HeaderIPOrigin       = "X-Ip-Origin"
 	HeaderToken          = "X-Token"
+	HeaderSessionID      = "X-Session-ID"
 	HeaderTimestamp      = "X-Timestamp"
 	HeaderSignature      = "X-Signature"
 	HeaderPlatform       = "X-Platform"
@@ -38,8 +39,9 @@ const (
 	ErrMsgInvalidTimestamp       = "invalid timestamp format"
 	ErrMsgUnsupportedContentType = "unsupported content type"
 	ErrMsgInvalidRequest         = "Invalid request"
-	ErrMsgSignatureInvalid       = "Signature invalid"
-	ErrMsgInvalidUUID            = "invalid UUID format"
+	// Deprecated: Use ErrMsgInvalidSignature instead.
+	ErrMsgSignatureInvalid = ErrMsgInvalidSignature
+	ErrMsgInvalidUUID      = "invalid UUID format"
 )
 
 // Configuration defaults and limits.
@@ -61,8 +63,6 @@ const (
 	// DefaultRateLimitWindowMs is the default rate limit window in milliseconds
 	DefaultRateLimitWindowMs = 60000
 
-	// MaxHeaderSize is the maximum size for header values
-	MaxHeaderSize      = 8192
 	TimestampExpiredMs = 600000 // milliseconds (10 minutes)
 	RequestTimeoutMs   = 60000  // milliseconds (60 seconds)
 )

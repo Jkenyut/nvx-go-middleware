@@ -52,16 +52,6 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	return r.WrapResponseWriter.Write(b)
 }
 
-// Status returns the status code
-func (r *responseRecorder) Status() int {
-	return r.WrapResponseWriter.Status()
-}
-
-// BytesWritten returns the number of bytes written to the body
-func (r *responseRecorder) BytesWritten() int {
-	return r.WrapResponseWriter.BytesWritten()
-}
-
 // Body returns the bytes buffered in the response recorder.
 func (r *responseRecorder) Body() []byte {
 	if r.body != nil {

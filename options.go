@@ -105,6 +105,7 @@ func WithRequestTimeoutMs(ms int64) Option {
 }
 
 // WithRequestTimeout sets request timeout in seconds.
+//
 // Deprecated: Use WithRequestTimeoutMs instead.
 func WithRequestTimeout(seconds int) Option {
 	return WithRequestTimeoutMs(int64(seconds) * 1000)
@@ -192,6 +193,7 @@ func WithSignatureTimestampExpiredMs(ms int64) Option {
 }
 
 // WithSignatureTimestampExpired sets timestamp skew expiration for signatures in seconds.
+//
 // Deprecated: Use WithSignatureTimestampExpiredMs instead.
 func WithSignatureTimestampExpired(seconds int64) Option {
 	return WithSignatureTimestampExpiredMs(seconds * 1000)
@@ -286,6 +288,7 @@ func WithChiThrottleMs(enable bool, limit, backlog int, timeoutMs int64) ChainOp
 }
 
 // WithChiThrottle enables or disables Chi throttle middleware with timeout in seconds.
+//
 // Deprecated: Use WithChiThrottleMs instead.
 func WithChiThrottle(enable bool, limit, backlog, timeoutSec int) ChainOption {
 	return WithChiThrottleMs(enable, limit, backlog, int64(timeoutSec)*1000)
@@ -325,6 +328,7 @@ func WithRateLimitConfigMs(requests int, windowMs int64) ChainOption {
 }
 
 // WithRateLimitConfig configures rate limiting thresholds (requests per window minutes).
+//
 // Deprecated: Use WithRateLimitConfigMs instead.
 func WithRateLimitConfig(requests, windowMinutes int) ChainOption {
 	return WithRateLimitConfigMs(requests, int64(windowMinutes)*60*1000)
@@ -370,9 +374,9 @@ func WithCORSHeaders(headers ...string) CORSOption {
 
 // BodySizeConfig holds custom limits for MaxBodySize middleware.
 type BodySizeConfig struct {
-	BodyLimit        int64
-	NonFileLimit     int64
-	AllowedTypes     []string
+	BodyLimit    int64
+	NonFileLimit int64
+	AllowedTypes []string
 }
 
 // BodySizeOption configures MaxBodySize middleware.

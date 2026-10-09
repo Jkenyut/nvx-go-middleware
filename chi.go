@@ -127,55 +127,42 @@ func RateLimit(
 	limiter := httprate.LimitBy(cfg.RateLimitRequests, time.Duration(cfg.RateLimitWindowMs)*time.Millisecond, keyByHeaderAuthType, opts...)
 
 	return func(next http.Handler) http.Handler {
+		// LAYER 2: After Limiter Hook wrapping next handler
+		handlerLayer2 := http.HandlerFunc(func(w2 http.ResponseWriter, r2 *http.Request) {
+			if cfg.PreRequestOnAfterLimiter != nil {
+				if !cfg.PreRequestOnAfterLimiter(w2, r2) {
+					return
+				}
+			}
+			next.ServeHTTP(w2, r2)
+		})
+
+		// LAYER 3: Rate Limiter wrapping Layer 2
+		var handlerLayer3 http.Handler
+		if cfg.LimiterHook != nil {
+			handlerLayer3 = cfg.LimiterHook(handlerLayer2)
+		} else {
+			handlerLayer3 = limiter(handlerLayer2)
+		}
+
+		// LAYER 4: Rate Key Injector wrapping Layer 3
+		handlerLayer4 := rateKeyInjector(signatureSecret)(handlerLayer3)
+
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// ========================================
 			// LAYER 6 (OUTERMOST): OPTIONS Check
-			// ========================================
 			if r.Method == http.MethodOptions {
-				next.ServeHTTP(w, r) // Bypass
+				next.ServeHTTP(w, r)
 				return
 			}
 
-			// ========================================
 			// LAYER 5: Before Limiter Hook
-			// ========================================
 			if cfg.PreRequestOnBeforeLimiter != nil {
 				if !cfg.PreRequestOnBeforeLimiter(w, r) {
-					return // Stop
+					return
 				}
 			}
 
-			// ========================================
-			// BUILD NESTED HANDLERS (Inside to Outside)
-			// ========================================
-
-			// LAYER 1 (INNERMOST): Your Handler
-			handlerLayer1 := next
-
-			// LAYER 2: After Limiter Hook
-			handlerLayer2 := http.HandlerFunc(func(w2 http.ResponseWriter, r2 *http.Request) {
-				if cfg.PreRequestOnAfterLimiter != nil {
-					if !cfg.PreRequestOnAfterLimiter(w2, r2) {
-						return // Stop
-					}
-				}
-				handlerLayer1.ServeHTTP(w2, r2) // Call Layer 1
-			})
-
-			var handlerLayer3 http.Handler
-			// LAYER 3: Rate Limiter
-			if cfg.LimiterHook != nil {
-				handlerLayer3 = cfg.LimiterHook(handlerLayer2) // Limiter wraps Layer 2
-			} else {
-				handlerLayer3 = limiter(handlerLayer2)
-			}
-
-			// LAYER 4: Rate Key Injector
-			handlerLayer4 := rateKeyInjector(signatureSecret)(handlerLayer3) // Inject wraps Layer 3
-
-			// ========================================
 			// EXECUTE LAYER 4 (which calls 3 → 2 → 1)
-			// ========================================
 			handlerLayer4.ServeHTTP(w, r)
 		})
 	}
@@ -196,7 +183,7 @@ func keyByHeader(r *http.Request, header string) (string, error) {
 }
 
 func detectProtocol(r *http.Request) string {
-	if r.Header.Get("Upgrade") == "websocket" {
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		return "websocket"
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
@@ -255,8 +242,13 @@ func buildRateKey(r *http.Request, authType, signature string) string {
 		apiKey, _ := keyByHeader(r, constants.HeaderAPIKey)
 		payload = fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:apikey:%s:appid:%s", authType, protocol, r.Method, endpoint, apiKey, appID)
 	case constants.AuthTypePublicAuth:
-		tokenKey, _ := keyByHeader(r, constants.HeaderToken)
-		payload = fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:token:%s:appid:%s", authType, protocol, r.Method, endpoint, tokenKey, appID)
+		sessionIdKey, _ := keyByHeader(r, constants.HeaderSessionID)
+		if sessionIdKey != "" {
+			payload = fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:sessionid:%s:appid:%s", authType, protocol, r.Method, endpoint, sessionIdKey, appID)
+		} else {
+			tokenKey, _ := keyByHeader(r, constants.HeaderToken)
+			payload = fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:token:%s:appid:%s", authType, protocol, r.Method, endpoint, tokenKey, appID)
+		}
 	default:
 		ip, _ := keyByHeader(r, constants.HeaderIP)
 		userAgent, _ := keyByHeader(r, constants.HeaderUserAgent)

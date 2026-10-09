@@ -105,9 +105,15 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 				}
 			}
 
-			operationName := ResolveGraphQLOperation(r)
-			if operationName == "anonymous" && gqlBody.OperationName != "" {
+			operationName := r.Header.Get("X-GraphQL-Operation")
+			if operationName == "" && r.Method == http.MethodGet {
+				operationName = r.URL.Query().Get("operationName")
+			}
+			if operationName == "" && gqlBody.OperationName != "" {
 				operationName = gqlBody.OperationName
+			}
+			if operationName == "" {
+				operationName = "anonymous"
 			}
 			r.Header.Set("X-GraphQL-Operation", operationName)
 
@@ -281,12 +287,13 @@ func graphqlQueryDepth(query string) int {
 		}
 
 		// Count field nesting braces
-		if ch == '{' {
+		switch ch {
+		case '{':
 			curDepth++
 			if curDepth > maxDepth {
 				maxDepth = curDepth
 			}
-		} else if ch == '}' {
+		case '}':
 			if curDepth > 0 {
 				curDepth--
 			}

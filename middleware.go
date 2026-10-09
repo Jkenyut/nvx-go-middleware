@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -181,7 +183,8 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				ErrorMessage:    "",
 			}
 
-			if err := m.cfg.LogStore.Save(r.Context(), &entry); err != nil {
+			reqCtx := context.WithoutCancel(r.Context())
+			if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {
 				event := m.cfg.Logger.Error().
 					Str("service", m.cfg.Core.ServiceName).
 					Str("correlation_id", correlationID).
@@ -214,13 +217,14 @@ func normalizeBodyRaw(raw []byte, keywordList []string) any {
 	// MaskSensitiveDataHelper mask keywords
 	str = format.MaskAfterKeywords(str, keywordList, "*")
 
-	if sonic.ConfigDefault.Valid([]byte(str)) {
+	strBytes := []byte(str)
+	if sonic.ConfigDefault.Valid(strBytes) {
 		var v any
-		if err := sonic.ConfigDefault.Unmarshal([]byte(str), &v); err == nil {
+		if err := sonic.ConfigDefault.Unmarshal(strBytes, &v); err == nil {
 			return v
 		}
 	}
-	return string(str)
+	return str
 }
 
 // normalizeHeadersJSON serializes HTTP headers to a JSON object.
@@ -286,12 +290,6 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 			return
 		}
 
-		tokenString := r.Header.Get(constants.HeaderToken)
-		if tokenString == "" {
-			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), constants.ErrMsgInvalidToken))
-			return
-		}
-
 		if validSignature, signatureServer := m.validateSignatureInternalHeaders(r); !validSignature {
 			errMsg := constants.ErrMsgInvalidSignature
 			if !m.envProd() {
@@ -305,10 +303,7 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 	})
 }
 
-// EnsurePublicAuth validates headers required for authenticated public requests
-// (e.g., a logged-in user calling a mobile app endpoint).
-// It checks header presence, timestamp validity, and request signature.
-func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
+func (m *Manager) ensurePublic(next http.Handler, requiredHeaders []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m.cfg.Security.PublicKeySignature == "" {
 			m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName).Msg("public key signature is not configured")
@@ -316,7 +311,7 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicAuthHeaders) {
+		if !m.validateHeaders(w, r, requiredHeaders) {
 			return
 		}
 		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpiredMs); err != nil {
@@ -324,73 +319,34 @@ func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
 			return
 		}
 		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
-			errMsg := constants.ErrMsgSignatureInvalid
+			errMsg := constants.ErrMsgInvalidSignature
 			if !m.envProd() {
-				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgSignatureInvalid, signatureServer)
+				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgInvalidSignature, signatureServer)
 			}
 			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), errMsg))
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// EnsurePublicAuth validates headers required for authenticated public requests
+// (e.g., a logged-in user calling a mobile app endpoint).
+// It checks header presence, timestamp validity, and request signature.
+func (m *Manager) EnsurePublicAuth(next http.Handler) http.Handler {
+	return m.ensurePublic(next, m.cfg.Headers.RequiredPublicAuthHeaders)
 }
 
 // EnsurePublic validates headers required for unauthenticated public requests.
 // It checks header presence, timestamp validity, and request signature.
 func (m *Manager) EnsurePublic(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if m.cfg.Security.PublicKeySignature == "" {
-			m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName).Msg("public key signature is not configured")
-			response.WriteJSONResponse(w, response.InternalError(r.Context()))
-			return
-		}
-
-		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicHeaders) {
-			return
-		}
-		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpiredMs); err != nil {
-			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
-			return
-		}
-		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
-			errMsg := constants.ErrMsgSignatureInvalid
-			if !m.envProd() {
-				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgSignatureInvalid, signatureServer)
-			}
-			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), errMsg))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	return m.ensurePublic(next, m.cfg.Headers.RequiredPublicHeaders)
 }
 
 // EnsurePublicAPIKey validates headers required for API-key authenticated public requests.
 // It checks header presence, timestamp validity, and request signature.
 func (m *Manager) EnsurePublicAPIKey(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if m.cfg.Security.PublicKeySignature == "" {
-			m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName).Msg("public key signature is not configured")
-			response.WriteJSONResponse(w, response.InternalError(r.Context()))
-			return
-		}
-
-		if !m.validateHeaders(w, r, m.cfg.Headers.RequiredPublicAPIKeyHeaders) {
-			return
-		}
-		if err := checkTimestamp(r.Header.Get(constants.HeaderTimestamp), m.cfg.Security.SignatureTimestampExpiredMs); err != nil {
-			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
-			return
-		}
-		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
-			errMsg := constants.ErrMsgSignatureInvalid
-			if !m.envProd() {
-				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgSignatureInvalid, signatureServer)
-			}
-			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), errMsg))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	return m.ensurePublic(next, m.cfg.Headers.RequiredPublicAPIKeyHeaders)
 }
 
 // validateHeaders checks that all required headers are non-empty.
@@ -422,18 +378,9 @@ func (m *Manager) validateHeaders(w http.ResponseWriter, r *http.Request, header
 
 	// Validate platform
 	platform := r.Header.Get(constants.HeaderPlatform)
-	if platform != "" {
-		valid := false
-		for _, v := range constants.CheckPlatform {
-			if platform == v {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidPlatform))
-			return false
-		}
+	if platform != "" && !slices.Contains(constants.CheckPlatform, platform) {
+		response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidPlatform))
+		return false
 	}
 
 	return true

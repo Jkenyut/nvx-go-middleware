@@ -74,7 +74,6 @@ func applyDefaults(cfg *Config) io.Closer {
 			}
 		}
 
-
 		// Respect LOG_LEVEL environment variable if set
 		if levelStr := os.Getenv("LOG_LEVEL"); levelStr != "" {
 			if level, err := zerolog.ParseLevel(levelStr); err == nil {

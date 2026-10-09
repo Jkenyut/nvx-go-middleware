@@ -51,6 +51,7 @@ linters:
         - experimental
       disabled-checks:
         - wrapperFunc
+        - hugeParam
 
 formatters:
   enable:
@@ -59,4 +60,4 @@ formatters:
     - goimports
   settings:
     gofumpt:
-      extra-rules: true
+      extra.group-params: true
