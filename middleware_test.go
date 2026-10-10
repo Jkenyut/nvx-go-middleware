@@ -738,3 +738,49 @@ func BenchmarkRateLimit(b *testing.B) {
 		handler.ServeHTTP(httptest.NewRecorder(), req)
 	}
 }
+
+func BenchmarkCORS(b *testing.B) {
+	mgr := newTestManager()
+	handler := mgr.CORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}), []string{"https://example.com"}, []string{"Content-Type", "Authorization", "X-Request-Id"})
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Origin", "https://example.com")
+
+	b.ReportAllocs()
+	for b.Loop() {
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	}
+}
+
+func BenchmarkTrustProxy(b *testing.B) {
+	mgr := newTestManager(func(c *Config) {
+		c.Security.TrustedProxies = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
+	})
+	handler := mgr.TrustProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "10.0.1.2:12345"
+	req.Header.Set("X-Forwarded-For", "203.0.113.195, 10.0.1.2")
+
+	b.ReportAllocs()
+	for b.Loop() {
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	}
+}
+
+func BenchmarkMaxBodySize(b *testing.B) {
+	mgr := newTestManager()
+	handler := mgr.MaxBodySize()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest("POST", "/test", bytes.NewReader([]byte(`{"hello":"world"}`)))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.ContentLength = 17
+
+	b.ReportAllocs()
+	for b.Loop() {
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	}
+}

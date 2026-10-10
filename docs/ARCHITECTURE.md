@@ -131,7 +131,7 @@ classDiagram
    - **Pipeline:** `TrustProxy` ➔ `EnsurePublic` (Device validation) ➔ `RateLimit` (IP-based) ➔ `Logger` ➔ `Handler`.
 2. **`PublicAuthChain(opts ...ChainOption)`**
    - **Target:** Authenticated user endpoints (e.g., `/profile`, `/checkout`).
-   - **Pipeline:** `TrustProxy` ➔ `EnsurePublicAuth` (User token + Signature) ➔ `RateLimit` (User/Token-based) ➔ `Logger` ➔ `Handler`.
+   - **Pipeline:** `TrustProxy` ➔ `EnsurePublicAuth` (`X-Session-ID` / `X-Token` + Signature) ➔ `RateLimit` (Session/Token-based) ➔ `Logger` ➔ `Handler`.
 3. **`PublicAPIKeyChain(opts ...ChainOption)`**
    - **Target:** External third-party integrations using API keys.
    - **Pipeline:** `TrustProxy` ➔ `EnsurePublicAPIKey` (X-Api-Key) ➔ `RateLimit` ➔ `Logger` ➔ `Handler`.
@@ -172,12 +172,14 @@ When present in the request context:
 
 ## 4. IP Anti-Spoofing Algorithm (`TrustProxy`)
 
-The `X-Forwarded-For` header is vulnerable to client tampering and spoofing. `TrustProxy` resolves the legitimate client IP using a secure **right-to-left** traversal:
+The `X-Forwarded-For` header is vulnerable to client tampering and spoofing. `TrustProxy` resolves the legitimate client IP using a secure **right-to-left** traversal.
+
+> **Zero-Allocation Optimization:** `TrustedProxies` are pre-parsed once at `Manager` initialization into an exact IP hash map (`trustedIPs`) and CIDR network slices (`trustedNets []*net.IPNet`). This eliminates all runtime `net.ParseCIDR` string parsing and allocations on hot paths.
 
 ```mermaid
 flowchart TD
     Start[Incoming Request] --> GetRemote[Extract r.RemoteAddr]
-    GetRemote --> CheckTrust{Is RemoteAddr in TrustedProxies or Private/Docker CIDR?}
+    GetRemote --> CheckTrust{Is RemoteAddr in pre-parsed TrustedProxies or Private/Docker CIDR?}
     
     CheckTrust -- No --> Untrusted[Use RemoteAddr directly. Ignore XFF and X-Real-Ip!]
     CheckTrust -- Yes --> CheckCF{Is CF-Connecting-IP present?}
@@ -203,7 +205,7 @@ flowchart TD
 ### A. gRPC (`NewGRPCServer`)
 Builds a production-ready `grpc.Server` automatically configured with:
 - **Telemetry Handler:** OpenTelemetry `otelgrpc.NewServerHandler()`.
-- **Unary Interceptor:** `transaction_id` propagation, audit log capture, and panic recovery.
+- **Unary Interceptor:** `correlation_id` propagation, audit log capture, and panic recovery.
 - **Stream Interceptor:** Trace span recording and stream lifecycle logging.
 
 ### B. GraphQL (`GraphQLChain`)

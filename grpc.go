@@ -76,9 +76,7 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		start := time.Now()
 
 		IDAuditLog := cryptoutil.V7()
-		b, _ := sonic.ConfigDefault.Marshal(md)
-		str := format.MaskAfterKeywords(string(b), m.cfg.Logging.MaskKeywords, "*")
-		reqHeadersBytes := []byte(str)
+		reqHeadersBytes := maskMetadataJSON(md, m.cfg.Logging.MaskKeywords)
 
 		var bodyRequest any
 		if m.cfg.Logging.LogRequestBodies && req != nil {
@@ -221,9 +219,7 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 		start := time.Now()
 
 		IDAuditLog := cryptoutil.V7()
-		b, _ := sonic.ConfigDefault.Marshal(md)
-		str := format.MaskAfterKeywords(string(b), m.cfg.Logging.MaskKeywords, "*")
-		reqHeadersBytes := []byte(str)
+		reqHeadersBytes := maskMetadataJSON(md, m.cfg.Logging.MaskKeywords)
 
 		entry := model.AuditLog{
 			ID:              IDAuditLog,
@@ -320,4 +316,13 @@ func (m *Manager) NewGRPCServer(opts ...grpc.ServerOption) *grpc.Server {
 	)
 
 	return grpc.NewServer(append(defaultOpts, opts...)...)
+}
+
+func maskMetadataJSON(md metadata.MD, maskKeywords []string) []byte {
+	b, _ := sonic.ConfigDefault.Marshal(md)
+	if len(maskKeywords) == 0 {
+		return b
+	}
+	str := format.MaskAfterKeywords(string(b), maskKeywords, "*")
+	return []byte(str)
 }

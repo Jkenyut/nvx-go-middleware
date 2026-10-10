@@ -64,11 +64,6 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 					m.addLogHeaders(event, r).Msg("response already written, cannot recover")
 					return
 				}
-				if rw, ok := w.(*responseRecorder); ok && rw.Status() != 0 {
-					event := m.cfg.Logger.Error().Str("service", m.cfg.Core.ServiceName)
-					m.addLogHeaders(event, r).Msg("response already written, cannot recover")
-					return
-				}
 
 				response.WriteJSONResponse(w, response.InternalError(r.Context()))
 			}
@@ -212,19 +207,25 @@ func normalizeBodyRaw(raw []byte, keywordList []string) any {
 		return nil
 	}
 
-	str := string(raw)
+	if len(keywordList) > 0 {
+		str := format.MaskAfterKeywords(string(raw), keywordList, "*")
+		strBytes := []byte(str)
+		if sonic.ConfigDefault.Valid(strBytes) {
+			var v any
+			if err := sonic.ConfigDefault.Unmarshal(strBytes, &v); err == nil {
+				return v
+			}
+		}
+		return str
+	}
 
-	// MaskSensitiveDataHelper mask keywords
-	str = format.MaskAfterKeywords(str, keywordList, "*")
-
-	strBytes := []byte(str)
-	if sonic.ConfigDefault.Valid(strBytes) {
+	if sonic.ConfigDefault.Valid(raw) {
 		var v any
-		if err := sonic.ConfigDefault.Unmarshal(strBytes, &v); err == nil {
+		if err := sonic.ConfigDefault.Unmarshal(raw, &v); err == nil {
 			return v
 		}
 	}
-	return str
+	return string(raw)
 }
 
 // normalizeHeadersJSON serializes HTTP headers to a JSON object.
@@ -239,6 +240,9 @@ func normalizeHeadersJSON(h http.Header, keywordList []string) []byte {
 		}
 	}
 	b, _ := sonic.ConfigDefault.Marshal(out)
+	if len(keywordList) == 0 {
+		return b
+	}
 	str := format.MaskAfterKeywords(string(b), keywordList, "*")
 	return []byte(str)
 }
@@ -445,13 +449,26 @@ func (m *Manager) isTrustedIP(ipStr string) bool {
 	if ip != nil && isPrivateIP(ip) {
 		return true
 	}
-	for _, proxy := range m.cfg.Security.TrustedProxies {
-		if proxy == ipStr {
+	if len(m.trustedIPs) > 0 {
+		if _, ok := m.trustedIPs[ipStr]; ok {
 			return true
 		}
-		if _, ipNet, err := net.ParseCIDR(proxy); err == nil {
-			if ip != nil && ipNet.Contains(ip) {
+	}
+	for _, ipNet := range m.trustedNets {
+		if ip != nil && ipNet.Contains(ip) {
+			return true
+		}
+	}
+	// Fallback if Manager was initialized without New (e.g. tests or uninitialized struct)
+	if len(m.trustedIPs) == 0 && len(m.trustedNets) == 0 {
+		for _, proxy := range m.cfg.Security.TrustedProxies {
+			if proxy == ipStr {
 				return true
+			}
+			if _, ipNet, err := net.ParseCIDR(proxy); err == nil {
+				if ip != nil && ipNet.Contains(ip) {
+					return true
+				}
 			}
 		}
 	}
@@ -540,6 +557,12 @@ func (m *Manager) MaxBodySize(opts ...BodySizeOption) func(http.Handler) http.Ha
 		}
 	}
 
+	cleanedTypes := make([]string, len(cfg.AllowedTypes))
+	for i, allowed := range cfg.AllowedTypes {
+		before, _, _ := strings.Cut(allowed, ";")
+		cleanedTypes[i] = strings.ToLower(strings.TrimSpace(before))
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			contentType := r.Header.Get("Content-Type")
@@ -551,16 +574,20 @@ func (m *Manager) MaxBodySize(opts ...BodySizeOption) func(http.Handler) http.Ha
 			}
 
 			// Validate Content-Type
-			mediaType, _, err := mime.ParseMediaType(contentType)
-			if err != nil {
-				// Fallback to trimming before semicolon if parse fails
-				mediaType = strings.TrimSpace(strings.Split(contentType, ";")[0])
+			var mediaType string
+			if !strings.Contains(contentType, ";") {
+				mediaType = strings.ToLower(strings.TrimSpace(contentType))
+			} else {
+				parsed, _, err := mime.ParseMediaType(contentType)
+				if err != nil {
+					before, _, _ := strings.Cut(contentType, ";")
+					parsed = before
+				}
+				mediaType = strings.ToLower(strings.TrimSpace(parsed))
 			}
-			mediaType = strings.ToLower(mediaType)
 
 			isAllowed := false
-			for _, allowed := range cfg.AllowedTypes {
-				allowedClean := strings.ToLower(strings.TrimSpace(strings.Split(allowed, ";")[0]))
+			for _, allowedClean := range cleanedTypes {
 				if allowedClean == "*" || allowedClean == "*/*" {
 					isAllowed = true
 					break
@@ -635,6 +662,9 @@ func (m *Manager) CORS(
 	allowedOrigins []string,
 	allowedHeaders []string,
 ) http.Handler {
+	joinedAllowedHeaders := strings.Join(allowedHeaders, ", ")
+	hasWildcard := slices.Contains(allowedOrigins, "*")
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin == "" {
@@ -642,21 +672,9 @@ func (m *Manager) CORS(
 			return
 		}
 
-		allowed := false
-		isWildcard := false
-		for _, o := range allowedOrigins {
-			if o == "*" {
-				allowed = true
-				isWildcard = true
-				break
-			} else if o == origin {
-				allowed = true
-				break
-			}
-		}
-
+		allowed := hasWildcard || slices.Contains(allowedOrigins, origin)
 		if allowed {
-			if isWildcard {
+			if hasWildcard {
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 				// Per W3C CORS spec: Access-Control-Allow-Credentials cannot be true with wildcard origin "*"
 			} else {
@@ -667,7 +685,7 @@ func (m *Manager) CORS(
 		}
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
+		w.Header().Set("Access-Control-Allow-Headers", joinedAllowedHeaders)
 		w.Header().Set("Access-Control-Max-Age", "3600")
 
 		if r.Method == http.MethodOptions {
@@ -692,8 +710,10 @@ func FullURL(r *http.Request) string {
 	host := r.Host
 	if xfHost := r.Header.Get("X-Forwarded-Host"); xfHost != "" {
 		// Use only the first host to guard against header injection
-		host = strings.SplitN(xfHost, ",", 2)[0]
-		host = strings.TrimSpace(host)
+		if idx := strings.IndexByte(xfHost, ','); idx != -1 {
+			xfHost = xfHost[:idx]
+		}
+		host = strings.TrimSpace(xfHost)
 	}
 
 	return scheme + "://" + host + r.RequestURI

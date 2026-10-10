@@ -221,9 +221,9 @@ func resolveEndpoint(r *http.Request) string {
 	return endpoint
 }
 
-func resolveRateEndpoint(r *http.Request) string {
+func resolveRateEndpoint(r *http.Request, protocol string) string {
 	endpoint := resolveEndpoint(r)
-	if detectProtocol(r) == "graphql" {
+	if protocol == "graphql" {
 		if op := ResolveGraphQLOperation(r); op != "anonymous" {
 			endpoint = endpoint + ":" + op
 		}
@@ -232,9 +232,9 @@ func resolveRateEndpoint(r *http.Request) string {
 }
 
 func buildRateKey(r *http.Request, authType, signature string) string {
-	endpoint := resolveRateEndpoint(r)
-	appID, _ := keyByHeader(r, constants.HeaderAppID)
 	protocol := detectProtocol(r)
+	endpoint := resolveRateEndpoint(r, protocol)
+	appID, _ := keyByHeader(r, constants.HeaderAppID)
 
 	var payload string
 	switch authType {

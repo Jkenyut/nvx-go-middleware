@@ -5,16 +5,17 @@ A high-performance, modular, and secure HTTP middleware library for Go. Designed
 ## 🚀 Features
 
 - ✅ **High-Performance JSON** - Powered by `bytedance/sonic` for ultra-fast request/response parsing with JIT assembly.
-- ✅ **Zero Allocation & Memory Safe** - Extensive `sync.Pool` usage and strictly bounded synchronous logging prevents OOM and Goroutine Leaks.
+- ✅ **Zero Allocation & Memory Safe** - Extensive `sync.Pool` usage, pre-compiled CIDR lookups, pre-joined CORS headers, and strictly bounded synchronous logging prevents OOM and Goroutine Leaks.
 - ✅ **Smart Execution Chain** - DDoS & Bad Auth requests are blocked *before* hitting the logger or application, saving CPU & DB I/O.
-- ✅ **Secure IP Resolution (`TrustProxy`)** - Anti-spoofing mechanism for `X-Forwarded-For`, totally immune to arbitrary header injection.
+- ✅ **Secure IP Resolution (`TrustProxy`)** - Anti-spoofing mechanism for `X-Forwarded-For` with pre-parsed CIDR masks, totally immune to arbitrary header injection.
+- ✅ **Resilient Audit Logging** - Context-detached background dispatching via `context.WithoutCancel` guarantees audit logs are persisted even under client disconnections or timeouts.
 - ✅ **OpenTelemetry Tracing** - Built-in context propagation with auto-injected `trace_id` and `span_id`.
-- ✅ **GraphQL Specific Protections** - Native AST depth-limiting and introspection blocking to prevent recursive query explosion.
-- ✅ **Rate Limiting & Route Patterns** - Dynamic per-route throttling based on verified IP or Auth Tokens, with `WithRoutePattern` support to avoid key fragmentation on parameterized paths (`/users/{id}`).
+- ✅ **GraphQL Specific Protections** - Native AST depth-limiting and introspection blocking to prevent recursive query explosion, with zero duplicate body reads.
+- ✅ **Rate Limiting & Route Patterns** - Dynamic per-route throttling based on verified IP or Session/Auth Tokens, with `WithRoutePattern` support to avoid key fragmentation on parameterized paths (`/users/{id}`).
 - ✅ **Panic Recovery** - Graceful recovery across HTTP, gRPC, and WebSockets that logs the stack trace securely.
 - ✅ **Multi-Protocol Support** - Native wrappers for **HTTP**, **gRPC** (Unary & Stream), **GraphQL**, and **WebSockets**.
-- ✅ **Multi-Auth Pipelines** - Pre-built chains for Public, Auth, API Key, Internal, and Webhook endpoints.
-- ✅ **Dynamic Pluggable Headers** - Fully configurable header extraction (`X-Request-Id`, `X-User-Id`, etc.) and dynamic log injection.
+- ✅ **Multi-Auth Pipelines** - Pre-built chains for Public, Auth (`X-Session-ID`), API Key (`X-Api-Key`), Internal, and Webhook endpoints.
+- ✅ **Dynamic Pluggable Headers** - Fully configurable header extraction (`X-Request-Id`, `X-Correlation-Id`, `X-User-Id`, etc.) and dynamic log injection.
 
 ## 📦 Installation
 
@@ -49,6 +50,8 @@ func main() {
 	}
 	defer mgr.Close() // Gracefully close background loggers to prevent log loss on shutdown
 
+	mux := http.NewServeMux()
+
 	// 2. Public Route (Rate Limited, Validated, IP Verified)
 	// Zero-boilerplate: PublicChain() applies safe defaults out-of-the-box!
 	mux.Handle("/api/v1/register", mgr.PublicChain(
@@ -56,7 +59,7 @@ func main() {
 		mw.WithRateLimitPublic(true),
 	)(mgr.MethodOnly("POST", http.HandlerFunc(registerHandler))))
 
-	// 3. Authenticated Route (JWT + Signature)
+	// 3. Authenticated Route (Session ID + Signature)
 	mux.Handle("/api/v1/profile", mgr.PublicAuthChain(
 		mw.WithRateLimitAuth(true),
 	)(mgr.MethodOnly("GET", http.HandlerFunc(profileHandler))))
@@ -131,7 +134,7 @@ NVX Go Middleware uses a mathematically structured chain to protect your applica
 Depending on your endpoint's purpose, use one of our optimized chains:
 
 - `mgr.PublicChain()`: Unauthenticated users (Device validation & IP Rate limits).
-- `mgr.PublicAuthChain()`: Authenticated users (Requires JWT/Tokens).
+- `mgr.PublicAuthChain()`: Authenticated users (Requires Session ID / Token & Signature).
 - `mgr.PublicAPIKeyChain()`: Server-to-Server external (Requires API Key).
 - `mgr.InternalChain()`: Internal microservices (Bypasses rate limits, requires strict internal keys).
 - `mgr.WebhookChain()`: Stripped down chain optimized for massive payload ingestion.
@@ -181,6 +184,20 @@ mgr, _ := mw.New(
 	mw.WithLogStore(&DatabaseStore{db: myDB}),
 )
 ```
+
+## ⚡ Performance Benchmarks
+
+Executed on Apple Silicon M4 (`go test -bench=. -benchmem`):
+
+| Benchmark | Ops/sec | Latency | Memory | Allocs | Focus Area |
+|:---|:---:|:---:|:---:|:---:|:---|
+| `BenchmarkRecoverer` | ~8.7M | 137.9 ns/op | 576 B/op | 6 allocs/op | Panic guard & recovery |
+| `BenchmarkTrustProxy` | ~6.4M | 192.4 ns/op | 256 B/op | 7 allocs/op | Pre-parsed CIDR anti-spoofing |
+| `BenchmarkMaxBodySize` | ~2.8M | 437.5 ns/op | 608 B/op | 7 allocs/op | Fast-path media type check |
+| `BenchmarkCORS` | ~2.4M | 503.6 ns/op | 1104 B/op | 13 allocs/op | Pre-joined header preflight |
+| `BenchmarkRateLimit` | ~920K | 1275 ns/op | 2249 B/op | 36 allocs/op | Pipeline-hoisted rate limiter |
+| `BenchmarkResolveBodyToken` | ~900K | 1318 ns/op | 128 B/op | 2 allocs/op | Sonic JIT token parsing |
+| `BenchmarkLogger` | ~52K | 21724 ns/op | 6435 B/op | 43 allocs/op | Full audit capture & diodewriter |
 
 ## 📄 License
 

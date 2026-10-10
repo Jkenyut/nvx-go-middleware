@@ -3,6 +3,7 @@ package middleware
 import (
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -19,8 +20,10 @@ func init() {
 // Manager holds the middleware configuration and provides middleware methods.
 // It is the central entry point for creating and managing middleware chains.
 type Manager struct {
-	cfg       Config
-	logCloser io.Closer
+	cfg         Config
+	logCloser   io.Closer
+	trustedIPs  map[string]struct{}
+	trustedNets []*net.IPNet
 }
 
 // New creates a new Middleware Manager using functional options.
@@ -36,6 +39,7 @@ func New(opts ...Option) (*Manager, error) {
 	}
 	closer := applyDefaults(&m.cfg)
 	m.logCloser = closer
+	m.initTrustedProxies()
 	return &m, nil
 }
 
@@ -276,9 +280,28 @@ func (m *Manager) envProd() bool {
 	return m.cfg.Core.Env == "prod" || m.cfg.Core.Env == "production"
 }
 
+func (m *Manager) initTrustedProxies() {
+	if len(m.cfg.Security.TrustedProxies) == 0 {
+		return
+	}
+	m.trustedIPs = make(map[string]struct{}, len(m.cfg.Security.TrustedProxies))
+	m.trustedNets = make([]*net.IPNet, 0, len(m.cfg.Security.TrustedProxies))
+	for _, proxy := range m.cfg.Security.TrustedProxies {
+		if _, ipNet, err := net.ParseCIDR(proxy); err == nil {
+			m.trustedNets = append(m.trustedNets, ipNet)
+		} else {
+			m.trustedIPs[proxy] = struct{}{}
+		}
+	}
+}
+
 func uniqueStrings(items ...[]string) []string {
-	seen := make(map[string]struct{})
-	out := make([]string, 0)
+	total := 0
+	for _, list := range items {
+		total += len(list)
+	}
+	seen := make(map[string]struct{}, total)
+	out := make([]string, 0, total)
 	for _, list := range items {
 		for _, v := range list {
 			if _, ok := seen[v]; !ok {
