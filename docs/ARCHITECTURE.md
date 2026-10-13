@@ -70,7 +70,7 @@ sequenceDiagram
 | | `WithTelemetry(enable bool)` | Enables or disables OpenTelemetry tracing & span injection. |
 | | `WithCore(core ConfigCore)` | Configures the entire `ConfigCore` struct in a single call. |
 | **Logging & Store** | `WithLogger(l Logger)` | Sets a custom logger implementation (slog, zap, logrus). |
-| | `WithLogStore(s LogStore)` | Sets the audit storage backend (e.g. PostgreSQL, ClickHouse). |
+| | `WithLogStore(s LogStore)` | Sets the audit storage backend (e.g. PostgreSQL, ClickHouse, RabbitMQ). Supports `MultiLogStore`. |
 | | `WithLogStoreTimeout(timeout time.Duration)` | Maximum timeout duration for audit log persistence (default 5s). |
 | | `WithLogHeaders(headers ...string)` | HTTP headers to record in structured log events. |
 | | `WithBodyLogging(req, resp bool)` | Toggles request and response body capture. |
