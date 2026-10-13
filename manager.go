@@ -125,6 +125,9 @@ func applyDefaults(cfg *Config) io.Closer {
 	if cfg.Logging.ResponseBodyLogLimitSize == 0 {
 		cfg.Logging.ResponseBodyLogLimitSize = constants.ResponseBodyLogLimitSize
 	}
+	if cfg.Logging.LogStoreTimeoutMs == 0 {
+		cfg.Logging.LogStoreTimeoutMs = constants.DefaultLogStoreTimeoutMs
+	}
 	if cfg.Core.ServiceName == "" {
 		cfg.Core.ServiceName = "unknown-service"
 	}

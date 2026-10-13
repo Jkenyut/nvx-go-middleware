@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"time"
 )
 
 // Option defines a functional option for configuring a Manager.
@@ -51,6 +52,14 @@ func WithLogger(l Logger) Option {
 func WithLogStore(store LogStore) Option {
 	return func(m *Manager) error {
 		m.cfg.LogStore = store
+		return nil
+	}
+}
+
+// WithLogStoreTimeout sets the maximum timeout duration for persisting an audit log entry.
+func WithLogStoreTimeout(timeout time.Duration) Option {
+	return func(m *Manager) error {
+		m.cfg.Logging.LogStoreTimeoutMs = timeout.Milliseconds()
 		return nil
 	}
 }

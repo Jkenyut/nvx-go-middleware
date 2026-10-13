@@ -9,6 +9,7 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/activity"
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/format"
+	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
 	"github.com/bytedance/sonic"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -127,7 +128,14 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 				entry.ResponseBody = normalizeBodyRaw(respBytes, m.cfg.Logging.MaskKeywords)
 			}
 
-			if saveErr := m.cfg.LogStore.Save(reqCtx, &entry); saveErr != nil {
+			timeoutMs := m.cfg.Logging.LogStoreTimeoutMs
+			if timeoutMs <= 0 {
+				timeoutMs = constants.DefaultLogStoreTimeoutMs
+			}
+			saveCtx, cancel := context.WithTimeout(reqCtx, time.Duration(timeoutMs)*time.Millisecond)
+			defer cancel()
+
+			if saveErr := m.cfg.LogStore.Save(saveCtx, &entry); saveErr != nil {
 				m.cfg.Logger.Error().
 					Str("correlation_id", correlationID).
 					Err(saveErr).
@@ -259,7 +267,14 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 			entry.StatusCode = statusCode
 			entry.LatencyMS = time.Since(start).Milliseconds()
 
-			if saveErr := m.cfg.LogStore.Save(reqCtx, &entry); saveErr != nil {
+			timeoutMs := m.cfg.Logging.LogStoreTimeoutMs
+			if timeoutMs <= 0 {
+				timeoutMs = constants.DefaultLogStoreTimeoutMs
+			}
+			saveCtx, cancel := context.WithTimeout(reqCtx, time.Duration(timeoutMs)*time.Millisecond)
+			defer cancel()
+
+			if saveErr := m.cfg.LogStore.Save(saveCtx, &entry); saveErr != nil {
 				m.cfg.Logger.Error().
 					Str("correlation_id", correlationID).
 					Err(saveErr).

@@ -28,6 +28,7 @@ type ConfigLogging struct {
 	LogRequestBodies         bool     `yaml:"logRequestBodies" default:"false"`
 	LogResponseBodies        bool     `yaml:"logResponseBodies" default:"false"`
 	ResponseBodyLogLimitSize int64    `yaml:"responseBodyLogLimitSize" default:"5242880"` // 5MB
+	LogStoreTimeoutMs        int64    `yaml:"logStoreTimeoutMs" default:"5000"`           // 5 seconds
 	MaskKeywords             []string `yaml:"maskKeywords" default:"[]"`
 	LogHeaders               []string `yaml:"logHeaders" default:"[\"X-Request-Id\", \"X-Correlation-Id\", \"X-Forwarded-For\", \"X-Ip-Origin\", \"X-User-Id\"]"`
 }

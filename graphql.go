@@ -11,6 +11,7 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/format"
 	"github.com/Jkenyut/nvx-go-helper/response"
+	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
 	"github.com/bytedance/sonic"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -191,7 +192,14 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 					entry.ResponseBody = normalizeBodyRaw(rw.Body(), m.cfg.Logging.MaskKeywords)
 				}
 
-				if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {
+				timeoutMs := m.cfg.Logging.LogStoreTimeoutMs
+				if timeoutMs <= 0 {
+					timeoutMs = constants.DefaultLogStoreTimeoutMs
+				}
+				saveCtx, cancel := context.WithTimeout(reqCtx, time.Duration(timeoutMs)*time.Millisecond)
+				defer cancel()
+
+				if err := m.cfg.LogStore.Save(saveCtx, &entry); err != nil {
 					m.cfg.Logger.Error().
 						Str("correlation_id", correlationID).
 						Err(err).

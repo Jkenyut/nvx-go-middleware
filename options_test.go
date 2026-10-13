@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNew_Defaults(t *testing.T) {
@@ -50,6 +51,7 @@ func TestNew_WithOptions(t *testing.T) {
 		WithMaskKeywords("secret", "token"),
 		WithResponseBodyLogLimit(1024),
 		WithLogHeaders("X-Trace-Id"),
+		WithLogStoreTimeout(3*time.Second),
 	)
 	if err != nil {
 		t.Fatalf("expected New() to succeed, got %v", err)
@@ -95,6 +97,9 @@ func TestNew_WithOptions(t *testing.T) {
 	}
 	if cfg.Security.SignatureTimestampExpiredMs != 300000 {
 		t.Errorf("expected SignatureTimestampExpiredMs 300000, got %d", cfg.Security.SignatureTimestampExpiredMs)
+	}
+	if cfg.Logging.LogStoreTimeoutMs != 3000 {
+		t.Errorf("expected LogStoreTimeoutMs 3000, got %d", cfg.Logging.LogStoreTimeoutMs)
 	}
 }
 

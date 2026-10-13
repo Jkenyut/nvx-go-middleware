@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Jkenyut/nvx-go-middleware/model"
 )
@@ -19,8 +20,16 @@ type ConsoleStore struct {
 	logger Logger
 }
 
+// NewConsoleStore creates a new ConsoleStore with the specified logger.
+func NewConsoleStore(logger Logger) *ConsoleStore {
+	return &ConsoleStore{logger: logger}
+}
+
 // Save writes the audit log entry to the configured logger.
 func (c *ConsoleStore) Save(_ context.Context, entry *model.AuditLog) error {
+	if c == nil || c.logger == nil || entry == nil {
+		return nil
+	}
 	c.logger.Info().
 		Str("service_name", entry.ServiceName).
 		Str("method", entry.Method).
@@ -41,5 +50,51 @@ func (c *ConsoleStore) Save(_ context.Context, entry *model.AuditLog) error {
 		Str("error_message", entry.ErrorMessage).
 		Str("request_id", entry.RequestID).
 		Msg("Audit Log")
+	return nil
+}
+
+// multiLogStore wraps multiple LogStore implementations into one.
+type multiLogStore struct {
+	stores []LogStore
+}
+
+// MultiLogStore combines multiple LogStore instances into a single LogStore.
+// It filters out any nil stores, flattens nested MultiLogStore instances,
+// and returns the store directly if only one valid store is provided.
+func MultiLogStore(stores ...LogStore) LogStore {
+	valid := make([]LogStore, 0, len(stores))
+	for _, s := range stores {
+		if s == nil {
+			continue
+		}
+		if multi, ok := s.(*multiLogStore); ok {
+			valid = append(valid, multi.stores...)
+		} else {
+			valid = append(valid, s)
+		}
+	}
+	if len(valid) == 0 {
+		return &multiLogStore{}
+	}
+	if len(valid) == 1 {
+		return valid[0]
+	}
+	return &multiLogStore{stores: valid}
+}
+
+// Save broadcasts the audit log entry to all configured stores sequentially.
+func (m *multiLogStore) Save(ctx context.Context, entry *model.AuditLog) error {
+	if m == nil || len(m.stores) == 0 || entry == nil {
+		return nil
+	}
+	var errs []error
+	for _, s := range m.stores {
+		if err := s.Save(ctx, entry); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
 	return nil
 }

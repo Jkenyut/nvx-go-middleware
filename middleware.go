@@ -178,8 +178,14 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 				ErrorMessage:    "",
 			}
 
-			reqCtx := context.WithoutCancel(r.Context())
-			if err := m.cfg.LogStore.Save(reqCtx, &entry); err != nil {
+			timeoutMs := m.cfg.Logging.LogStoreTimeoutMs
+			if timeoutMs <= 0 {
+				timeoutMs = constants.DefaultLogStoreTimeoutMs
+			}
+			saveCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), time.Duration(timeoutMs)*time.Millisecond)
+			defer cancel()
+
+			if err := m.cfg.LogStore.Save(saveCtx, &entry); err != nil {
 				event := m.cfg.Logger.Error().
 					Str("service", m.cfg.Core.ServiceName).
 					Str("correlation_id", correlationID).

@@ -63,8 +63,9 @@ const (
 	// DefaultRateLimitWindowMs is the default rate limit window in milliseconds
 	DefaultRateLimitWindowMs = 60000
 
-	TimestampExpiredMs = 600000 // milliseconds (10 minutes)
-	RequestTimeoutMs   = 60000  // milliseconds (60 seconds)
+	TimestampExpiredMs       = 600000 // milliseconds (10 minutes)
+	RequestTimeoutMs         = 60000  // milliseconds (60 seconds)
+	DefaultLogStoreTimeoutMs = 5000   // milliseconds (5 seconds)
 )
 
 // Required headers for different request types

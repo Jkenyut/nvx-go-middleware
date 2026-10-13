@@ -170,19 +170,37 @@ mux.Handle("/ws", mgr.WebSocketChain(mw.WithWSAuthenticator(authCheck))(wsHandle
 
 ## 📊 Custom Audit Storage
 
-Inject your own database logger natively. The `Save` method is called synchronously by the middleware to prevent `goroutine` memory leaks under heavy load. If you require asynchronous batching, implement it safely within your `LogStore` using Kafka, Channels, or Batch queues.
+Audit log entries are persisted through the `LogStore` interface (`Save(ctx context.Context, entry *model.AuditLog) error`). By default, the middleware writes structured logs to stdout using `ConsoleStore`.
+
+### 1. Dual Logging (Console + Database)
+When providing a custom `LogStore`, `ConsoleStore` is replaced. Use `MultiLogStore` and `NewConsoleStore` if you want to keep console output while storing audit trails in an external database or message broker:
 
 ```go
-type DatabaseStore struct { db *sql.DB }
+mgr, err := mw.New(
+	mw.WithLogStore(mw.MultiLogStore(
+		mw.NewConsoleStore(cfg.Logger), // Retain stdout logs
+		&DatabaseStore{db: myDB},       // Persist to database
+	)),
+	mw.WithLogStoreTimeout(3 * time.Second), // Optional safety timeout (default 5s)
+)
+```
 
-func (d *DatabaseStore) Save(ctx context.Context, entry *model.AuditLog) error {
-	_, err := d.db.ExecContext(ctx, "INSERT INTO audit_logs ...")
-	return err
+### 2. High-Throughput Production Pattern
+`Save` is invoked synchronously within a safety timeout (`LogStoreTimeoutMs`, default 5s) to prevent uncontrolled goroutine spawning and memory leaks under heavy spikes. For high-throughput services, decouple database I/O using a buffered channel or worker queue:
+
+```go
+type AsyncLogStore struct {
+	queue chan *model.AuditLog
 }
 
-mgr, _ := mw.New(
-	mw.WithLogStore(&DatabaseStore{db: myDB}),
-)
+func (s *AsyncLogStore) Save(ctx context.Context, entry *model.AuditLog) error {
+	select {
+	case s.queue <- entry:
+		return nil
+	default:
+		return errors.New("audit log queue saturated; dropping entry to preserve handler latency")
+	}
+}
 ```
 
 ## ⚡ Performance Benchmarks
