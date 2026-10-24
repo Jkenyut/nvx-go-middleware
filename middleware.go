@@ -54,8 +54,10 @@ func (m *Manager) Recoverer(next http.Handler) http.Handler {
 
 				if m.cfg.Core.EnableTelemetry {
 					span := trace.SpanFromContext(r.Context())
-					span.RecordError(fmt.Errorf("panic: %v", rec))
-					span.SetStatus(codes.Error, "panic recovered")
+					if span != nil && span.IsRecording() {
+						span.RecordError(fmt.Errorf("panic: %v", rec))
+						span.SetStatus(codes.Error, "panic recovered")
+					}
 				}
 
 				// Abort if response already started
@@ -81,6 +83,9 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 		var rw *responseRecorder
 		if existingRw, ok := w.(*responseRecorder); ok {
 			rw = existingRw
+			if rw.maxBodySize < int(m.cfg.Logging.ResponseBodyLogLimitSize) {
+				rw.maxBodySize = int(m.cfg.Logging.ResponseBodyLogLimitSize)
+			}
 		} else {
 			rw = wrapResponseWriter(w, r, int(m.cfg.Logging.ResponseBodyLogLimitSize))
 		}
@@ -97,18 +102,20 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 
 		if m.cfg.Core.EnableTelemetry {
 			span := trace.SpanFromContext(r.Context())
-			span.SetAttributes(
-				attribute.String("service", m.cfg.Core.ServiceName),
-				attribute.String("correlation_id", correlationID),
-				attribute.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
-				attribute.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
-				attribute.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
-				attribute.String("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)),
-				attribute.String("user_agent", r.UserAgent()),
-				attribute.String("path", r.URL.Path),
-				attribute.String("protocol", "HTTP "+r.Proto),
-				attribute.String("header_auth_type", r.Header.Get(m.cfg.Headers.Keys.AuthType)),
-			)
+			if span != nil && span.IsRecording() {
+				span.SetAttributes(
+					attribute.String("service", m.cfg.Core.ServiceName),
+					attribute.String("correlation_id", correlationID),
+					attribute.String("request_id", r.Header.Get(m.cfg.Headers.Keys.RequestID)),
+					attribute.String("ip", r.Header.Get(m.cfg.Headers.Keys.IP)),
+					attribute.String("ip_origin", r.Header.Get(m.cfg.Headers.Keys.IPOrigin)),
+					attribute.String("user_id", r.Header.Get(m.cfg.Headers.Keys.UserID)),
+					attribute.String("user_agent", r.UserAgent()),
+					attribute.String("path", r.URL.Path),
+					attribute.String("protocol", "HTTP "+r.Proto),
+					attribute.String("header_auth_type", r.Header.Get(m.cfg.Headers.Keys.AuthType)),
+				)
+			}
 		}
 
 		// Context injection
@@ -133,7 +140,7 @@ func (m *Manager) Logger(next http.Handler) http.Handler {
 					Str("user_agent", r.UserAgent()).
 					Err(err)
 				m.addLogHeaders(event, r).Msg("failed to read request body")
-				response.WriteJSONResponse(rw, response.BadRequest(r.Context(), constants.ErrMsgUnsupportedContentType))
+				response.WriteJSONResponse(rw, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
 				if rw != nil {
 					rw.Free()
 				}
@@ -286,6 +293,16 @@ func (w *headerCleanerResponseWriter) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
+func (w *headerCleanerResponseWriter) Write(b []byte) (int, error) {
+	if !w.cleaned {
+		for _, h := range w.headersToRemove {
+			w.ResponseWriter.Header().Del(h)
+		}
+		w.cleaned = true
+	}
+	return w.ResponseWriter.Write(b)
+}
+
 // EnsureInternal validates that headers required for internal service-to-service
 // communication are present and that the request signature is valid.
 func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
@@ -300,12 +317,8 @@ func (m *Manager) EnsureInternal(next http.Handler) http.Handler {
 			return
 		}
 
-		if validSignature, signatureServer := m.validateSignatureInternalHeaders(r); !validSignature {
-			errMsg := constants.ErrMsgInvalidSignature
-			if !m.envProd() {
-				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgInvalidSignature, signatureServer)
-			}
-			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), errMsg))
+		if validSignature, _ := m.validateSignatureInternalHeaders(r); !validSignature {
+			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
 
@@ -328,12 +341,8 @@ func (m *Manager) ensurePublic(next http.Handler, requiredHeaders []string) http
 			response.WriteJSONResponse(w, response.BadRequest(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
-		if validSignature, signatureServer := m.validateSignaturePublicHeaders(r); !validSignature {
-			errMsg := constants.ErrMsgInvalidSignature
-			if !m.envProd() {
-				errMsg = fmt.Sprintf("%s - expected: %s", constants.ErrMsgInvalidSignature, signatureServer)
-			}
-			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), errMsg))
+		if validSignature, _ := m.validateSignaturePublicHeaders(r); !validSignature {
+			response.WriteJSONResponse(w, response.Unauthorized(r.Context(), constants.ErrMsgInvalidSignature))
 			return
 		}
 		next.ServeHTTP(w, r)

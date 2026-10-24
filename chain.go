@@ -127,6 +127,9 @@ func (m *Manager) buildOuterChain(cfg *ChainConfig, handler http.Handler) http.H
 
 	if m.cfg.Core.EnableTelemetry {
 		handler = otelhttp.NewMiddleware(m.cfg.Core.ServiceName)(handler)
+		if m.serverMetrics != nil {
+			handler = m.serverMetrics.Middleware(handler)
+		}
 	}
 
 	if cfg.Features.UseChiTimeout {
@@ -152,6 +155,9 @@ func (m *Manager) BaseChain(cfg *ChainConfig, setupRoute func(r chi.Router)) fun
 
 		if m.cfg.Core.EnableTelemetry {
 			r.Use(otelhttp.NewMiddleware(m.cfg.Core.ServiceName))
+			if m.serverMetrics != nil {
+				r.Use(m.serverMetrics.Middleware)
+			}
 		}
 
 		if cfg.Features.UseChiStripSlashes {

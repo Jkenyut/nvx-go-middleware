@@ -60,11 +60,16 @@ func (r *responseRecorder) Body() []byte {
 	return nil
 }
 
+const maxPooledBufferSize = 64 * 1024 // 64 KB
+
 // Free returns the buffer to the sync.Pool to prevent memory leaks.
 // It should be called after the response body is no longer needed.
 func (r *responseRecorder) Free() {
 	if r.body != nil {
-		responseBufferPool.Put(r.body)
+		if r.body.Cap() <= maxPooledBufferSize {
+			r.body.Reset()
+			responseBufferPool.Put(r.body)
+		}
 		r.body = nil
 	}
 }

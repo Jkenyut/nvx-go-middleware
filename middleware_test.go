@@ -687,6 +687,125 @@ func TestResolveEndpoint(t *testing.T) {
 	}
 }
 
+// ─── Security & Regression Verification Tests ─────────────────────────────────
+
+func TestHeaderCleaner_DirectWrite(t *testing.T) {
+	mgr := newTestManager(func(c *Config) {
+		c.Security.HeadersToRemove = []string{"X-Secret-Header"}
+	})
+
+	handler := mgr.RemoveHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Secret-Header", "sensitive-value")
+		w.Header().Set("Content-Type", "text/plain")
+		// Directly call Write without WriteHeader
+		_, _ = w.Write([]byte("hello"))
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if got := w.Header().Get("X-Secret-Header"); got != "" {
+		t.Errorf("X-Secret-Header should be removed on direct Write, got %q", got)
+	}
+	if got := w.Body.String(); got != "hello" {
+		t.Errorf("expected body 'hello', got %q", got)
+	}
+}
+
+func TestRateLimitKey_SessionVsToken(t *testing.T) {
+	secret := "test-secret"
+
+	// Request with Token only (no Session ID)
+	req1 := httptest.NewRequest("GET", "/api/data", nil)
+	req1.Header.Set(constants.HeaderToken, "token-user-A")
+	key1 := buildRateKey(req1, constants.AuthTypePublicAuth, secret)
+
+	req2 := httptest.NewRequest("GET", "/api/data", nil)
+	req2.Header.Set(constants.HeaderToken, "token-user-B")
+	key2 := buildRateKey(req2, constants.AuthTypePublicAuth, secret)
+
+	if key1 == key2 {
+		t.Fatalf("different tokens produced identical rate limit keys: %q vs %q", key1, key2)
+	}
+
+	// Request with Session ID
+	req3 := httptest.NewRequest("GET", "/api/data", nil)
+	req3.Header.Set(constants.HeaderSessionID, "sess-123")
+	key3 := buildRateKey(req3, constants.AuthTypePublicAuth, secret)
+
+	if key3 == key1 || key3 == key2 {
+		t.Fatalf("session key collided with token key: %q", key3)
+	}
+}
+
+func TestWebSocket_OriginCheck(t *testing.T) {
+	mgr := newTestManager(func(c *Config) {
+		c.Security.AllowedOrigins = []string{"https://app.example.com"}
+	})
+
+	wsChain := mgr.WebSocketChain()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+
+	// 1. Forbidden Origin
+	reqBad := httptest.NewRequest("GET", "/ws", nil)
+	reqBad.Header.Set("Upgrade", "websocket")
+	reqBad.Header.Set("Connection", "Upgrade")
+	reqBad.Header.Set("Origin", "https://attacker.com")
+	wBad := httptest.NewRecorder()
+	wsChain.ServeHTTP(wBad, reqBad)
+
+	if wBad.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for bad origin, got %d", wBad.Code)
+	}
+
+	// 2. Allowed Origin
+	reqGood := httptest.NewRequest("GET", "/ws", nil)
+	reqGood.Header.Set("Upgrade", "websocket")
+	reqGood.Header.Set("Connection", "Upgrade")
+	reqGood.Header.Set("Origin", "https://app.example.com")
+	wGood := httptest.NewRecorder()
+	wsChain.ServeHTTP(wGood, reqGood)
+
+	if wGood.Code != http.StatusSwitchingProtocols {
+		t.Errorf("expected 101 Switching Protocols for allowed origin, got %d", wGood.Code)
+	}
+}
+
+func TestLogger_ExistingRecorderCapacityExpanded(t *testing.T) {
+	store := &MockLogStore{}
+	mgr := newTestManager(func(c *Config) {
+		c.LogStore = store
+		c.Logging.LogResponseBodies = true
+		c.Logging.ResponseBodyLogLimitSize = 1024
+	})
+
+	// Simulate Metrics middleware creating responseRecorder with limit = 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rw0 := wrapResponseWriter(w, r, 0)
+		defer rw0.Free()
+
+		// Next in chain is Logger
+		mgr.Logger(http.HandlerFunc(func(w2 http.ResponseWriter, r2 *http.Request) {
+			w2.WriteHeader(http.StatusOK)
+			_, _ = w2.Write([]byte(`{"result":"captured"}`))
+		})).ServeHTTP(rw0, r)
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	logs := store.GetLogs()
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 audit log entry, got %d", len(logs))
+	}
+	if logs[0].ResponseBody == nil {
+		t.Fatal("expected response body to be captured, got nil")
+	}
+}
+
 // ─── Benchmarks ──────────────────────────────────────────────────────────────
 
 func BenchmarkLogger(b *testing.B) {

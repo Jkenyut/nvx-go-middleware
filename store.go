@@ -82,14 +82,20 @@ func MultiLogStore(stores ...LogStore) LogStore {
 	return &multiLogStore{stores: valid}
 }
 
-// Save broadcasts the audit log entry to all configured stores sequentially.
+// Save broadcasts the audit log entry to all configured stores concurrently.
 func (m *multiLogStore) Save(ctx context.Context, entry *model.AuditLog) error {
 	if m == nil || len(m.stores) == 0 || entry == nil {
 		return nil
 	}
-	var errs []error
+	errCh := make(chan error, len(m.stores))
 	for _, s := range m.stores {
-		if err := s.Save(ctx, entry); err != nil {
+		go func(store LogStore) {
+			errCh <- store.Save(ctx, entry)
+		}(s)
+	}
+	var errs []error
+	for range m.stores {
+		if err := <-errCh; err != nil {
 			errs = append(errs, err)
 		}
 	}
