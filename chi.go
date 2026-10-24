@@ -242,9 +242,8 @@ func buildRateKey(r *http.Request, authType, signature string) string {
 		apiKey, _ := keyByHeader(r, constants.HeaderAPIKey)
 		payload = fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:apikey:%s:appid:%s", authType, protocol, r.Method, endpoint, apiKey, appID)
 	case constants.AuthTypePublicAuth:
-		sessionIdKey, _ := keyByHeader(r, constants.HeaderSessionID)
-		if sessionIdKey != "" {
-			payload = fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:sessionid:%s:appid:%s", authType, protocol, r.Method, endpoint, sessionIdKey, appID)
+		if rawSession := r.Header.Get(constants.HeaderSessionID); rawSession != "" {
+			payload = fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:sessionid:%s:appid:%s", authType, protocol, r.Method, endpoint, rawSession, appID)
 		} else {
 			tokenKey, _ := keyByHeader(r, constants.HeaderToken)
 			payload = fmt.Sprintf("zone:%s:protocol:%s:method:%s:endpoint:%s:token:%s:appid:%s", authType, protocol, r.Method, endpoint, tokenKey, appID)

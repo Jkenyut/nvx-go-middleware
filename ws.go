@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -61,6 +62,15 @@ func (m *Manager) WebSocketChain(
 			if !isWebSocketUpgrade(r) {
 				http.Error(w, "expected WebSocket upgrade", http.StatusBadRequest)
 				return
+			}
+
+			// Validate Origin header against allowed origins to prevent CSWSH
+			origin := r.Header.Get("Origin")
+			if origin != "" && len(m.cfg.Security.AllowedOrigins) > 0 && !slices.Contains(m.cfg.Security.AllowedOrigins, "*") {
+				if !slices.Contains(m.cfg.Security.AllowedOrigins, origin) {
+					http.Error(w, "cross-origin websocket forbidden", http.StatusForbidden)
+					return
+				}
 			}
 
 			// Inject context values
