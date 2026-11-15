@@ -102,12 +102,13 @@ func (m *Manager) buildInnerChain(cfg *ChainConfig, next http.Handler) http.Hand
 	}
 	handler = m.RemoveHeaders(handler)
 
+	// Logger only records requests that survived Outer layers (DDoS, Bad Auth)
+	// and sits inside ChiCompress so it captures plain (uncompressed) response bodies.
+	handler = m.Logger(handler)
+
 	if cfg.Features.UseChiCompress {
 		handler = m.ChiCompress(cfg.Compression.CompressionLevel)(handler)
 	}
-
-	// Logger only records requests that survived Outer layers (DDoS, Bad Auth)
-	handler = m.Logger(handler)
 
 	return handler
 }

@@ -3,6 +3,7 @@ package middleware
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"net"
@@ -1042,5 +1043,59 @@ func BenchmarkMaxBodySize(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		handler.ServeHTTP(httptest.NewRecorder(), req)
+	}
+}
+
+func TestBaseChain_CompressOutsideLogger(t *testing.T) {
+	store := &MockLogStore{}
+	mgr := newTestManager(func(c *Config) {
+		c.Logging.LogResponseBodies = true
+		c.LogStore = store
+	})
+
+	chainCfg := DefaultChainConfig()
+	chainCfg.Features.UseChiCompress = true
+
+	const payload = `{"status":"ok","message":"hello compression"}`
+	handler := mgr.BaseChain(&chainCfg, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(payload))
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("expected gzip Content-Encoding for client, got %q", got)
+	}
+
+	gr, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatalf("expected valid gzip body, got err: %v", err)
+	}
+	decompressed, err := io.ReadAll(gr)
+	_ = gr.Close()
+	if err != nil {
+		t.Fatalf("failed reading gzip body: %v", err)
+	}
+	if string(decompressed) != payload {
+		t.Errorf("expected decompressed client body %q, got %q", payload, string(decompressed))
+	}
+
+	if len(store.Logs) != 1 {
+		t.Fatalf("expected 1 audit log, got %d", len(store.Logs))
+	}
+	loggedBody, ok := store.Logs[0].ResponseBody.(map[string]any)
+	if !ok {
+		t.Fatalf("expected plain parsed JSON map in ResponseBody, got %T (%v)", store.Logs[0].ResponseBody, store.Logs[0].ResponseBody)
+	}
+	if loggedBody["status"] != "ok" || loggedBody["message"] != "hello compression" {
+		t.Errorf("unexpected logged ResponseBody: %v", loggedBody)
 	}
 }
