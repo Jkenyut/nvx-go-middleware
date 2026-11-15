@@ -15,6 +15,7 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/sliceutil"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
+	"github.com/Jkenyut/nvx-go-telemetry/telemetry"
 )
 
 // Manager holds the middleware configuration and provides middleware methods.
@@ -190,6 +191,8 @@ func (m *Manager) saveAuditLog(ctx context.Context, entry *model.AuditLog) error
 	if m.cfg.LogStore == nil || entry == nil {
 		return nil
 	}
+	entry.TraceID = cmp.Or(entry.TraceID, telemetry.TraceID(ctx))
+	entry.SpanID = cmp.Or(entry.SpanID, telemetry.SpanID(ctx))
 	timeoutMs := m.cfg.Logging.LogStoreTimeoutMs
 	if timeoutMs <= 0 {
 		timeoutMs = constants.DefaultLogStoreTimeoutMs

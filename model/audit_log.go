@@ -46,4 +46,8 @@ type AuditLog struct {
 	UserAgent string `json:"user_agent"`
 	// ErrorMessage captures explicit error messages or panics (if any).
 	ErrorMessage string `json:"error_message,omitempty"`
+	// TraceID is the OpenTelemetry trace ID associated with the request.
+	TraceID string `json:"trace_id,omitempty"`
+	// SpanID is the OpenTelemetry span ID associated with the request.
+	SpanID string `json:"span_id,omitempty"`
 }

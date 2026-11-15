@@ -1,11 +1,15 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/Jkenyut/nvx-go-middleware/model"
+	"github.com/rs/zerolog"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type recordingStore struct {
@@ -120,4 +124,87 @@ func TestMultiLogStore_Empty(t *testing.T) {
 	if err := multi.Save(context.Background(), entry); err != nil {
 		t.Errorf("expected nil error for empty MultiLogStore, got %v", err)
 	}
+}
+
+func TestConsoleStore_TraceAndSpanID(t *testing.T) {
+	traceID, err := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+	if err != nil {
+		t.Fatalf("invalid trace ID: %v", err)
+	}
+	spanID, err := trace.SpanIDFromHex("00f067aa0ba902b7")
+	if err != nil {
+		t.Fatalf("invalid span ID: %v", err)
+	}
+
+	spanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+	})
+	tracedCtx := trace.ContextWithSpanContext(context.Background(), spanCtx)
+
+	t.Run("logs trace_id and span_id from context", func(t *testing.T) {
+		var buf bytes.Buffer
+		zl := zerolog.New(&buf)
+		store := NewConsoleStore(NewZerologLogger(&zl))
+
+		entry := &model.AuditLog{ID: "trace-1", Method: "GET", FullURL: "/health"}
+		if err := store.Save(tracedCtx, entry); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var logged map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &logged); err != nil {
+			t.Fatalf("failed to unmarshal log output: %v (raw: %s)", err, buf.String())
+		}
+		if got := logged["trace_id"]; got != traceID.String() {
+			t.Errorf("expected trace_id %q, got %v", traceID.String(), got)
+		}
+		if got := logged["span_id"]; got != spanID.String() {
+			t.Errorf("expected span_id %q, got %v", spanID.String(), got)
+		}
+	})
+
+	t.Run("omits trace_id and span_id when absent", func(t *testing.T) {
+		var buf bytes.Buffer
+		zl := zerolog.New(&buf)
+		store := NewConsoleStore(NewZerologLogger(&zl))
+
+		entry := &model.AuditLog{ID: "trace-2", Method: "GET", FullURL: "/health"}
+		if err := store.Save(context.Background(), entry); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var logged map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &logged); err != nil {
+			t.Fatalf("failed to unmarshal log output: %v (raw: %s)", err, buf.String())
+		}
+		if _, exists := logged["trace_id"]; exists {
+			t.Errorf("expected trace_id to be omitted, got %v", logged["trace_id"])
+		}
+		if _, exists := logged["span_id"]; exists {
+			t.Errorf("expected span_id to be omitted, got %v", logged["span_id"])
+		}
+	})
+
+	t.Run("manager saveAuditLog populates TraceID and SpanID on entry", func(t *testing.T) {
+		rec := &recordingStore{}
+		mgr := newTestManager(func(c *Config) {
+			c.LogStore = rec
+		})
+
+		entry := &model.AuditLog{ID: "trace-3", Method: "POST", FullURL: "/v1/orders"}
+		if err := mgr.saveAuditLog(tracedCtx, entry); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(rec.entries) != 1 {
+			t.Fatalf("expected 1 recorded entry, got %d", len(rec.entries))
+		}
+		if rec.entries[0].TraceID != traceID.String() {
+			t.Errorf("expected entry.TraceID %q, got %q", traceID.String(), rec.entries[0].TraceID)
+		}
+		if rec.entries[0].SpanID != spanID.String() {
+			t.Errorf("expected entry.SpanID %q, got %q", spanID.String(), rec.entries[0].SpanID)
+		}
+	})
 }

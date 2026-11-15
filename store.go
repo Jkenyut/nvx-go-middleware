@@ -1,11 +1,13 @@
 package middleware
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"sync"
 
 	"github.com/Jkenyut/nvx-go-middleware/model"
+	"github.com/Jkenyut/nvx-go-telemetry/telemetry"
 )
 
 // LogStore defines the interface for persisting audit log entries.
@@ -27,11 +29,11 @@ func NewConsoleStore(logger Logger) *ConsoleStore {
 }
 
 // Save writes the audit log entry to the configured logger.
-func (c *ConsoleStore) Save(_ context.Context, entry *model.AuditLog) error {
+func (c *ConsoleStore) Save(ctx context.Context, entry *model.AuditLog) error {
 	if c == nil || c.logger == nil || entry == nil {
 		return nil
 	}
-	c.logger.Info().
+	event := c.logger.Info().
 		Str("service_name", entry.ServiceName).
 		Str("method", entry.Method).
 		Str("full_url", entry.FullURL).
@@ -49,8 +51,16 @@ func (c *ConsoleStore) Save(_ context.Context, entry *model.AuditLog) error {
 		Str("protocol", entry.Protocol).
 		Str("user_agent", entry.UserAgent).
 		Str("error_message", entry.ErrorMessage).
-		Str("request_id", entry.RequestID).
-		Msg("Audit Log")
+		Str("request_id", entry.RequestID)
+
+	if traceID := cmp.Or(entry.TraceID, telemetry.TraceID(ctx)); traceID != "" {
+		event = event.Str("trace_id", traceID)
+	}
+	if spanID := cmp.Or(entry.SpanID, telemetry.SpanID(ctx)); spanID != "" {
+		event = event.Str("span_id", spanID)
+	}
+
+	event.Msg("Audit Log")
 	return nil
 }
 
