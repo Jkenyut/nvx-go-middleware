@@ -2,18 +2,18 @@
 package middleware
 
 import (
+	"cmp"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/go-chi/chi/v5"
-	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // ChainFeatures configures which middleware to use in a middleware chain.
 // It allows toggling specific Chi middleware and configuring parameters like compression, throttling, and rate limiting.
-// ChainFeatures configures which middleware features are enabled.
 type ChainFeatures struct {
 	UseChiCompress        bool `yaml:"useChiCompress" default:"true"`
 	UseChiTimeout         bool `yaml:"useChiTimeout" default:"false"`
@@ -47,24 +47,12 @@ type ChainConfig struct {
 // Note: Boolean fields (like Features) are not overridden because Go cannot distinguish
 // between an intentionally set 'false' and an unset boolean.
 func (c *ChainConfig) ApplyDefaults() {
-	if c.Compression.CompressionLevel == 0 {
-		c.Compression.CompressionLevel = constants.DefaultCompressionLevel
-	}
-	if c.Throttle.ThrottleLimit == 0 {
-		c.Throttle.ThrottleLimit = constants.DefaultThrottleLimit
-	}
-	if c.Throttle.ThrottleTimeoutMs == 0 {
-		c.Throttle.ThrottleTimeoutMs = constants.DefaultThrottleTimeoutMs
-	}
-	if c.Throttle.ThrottleBacklog == 0 {
-		c.Throttle.ThrottleBacklog = constants.DefaultThrottleBacklog
-	}
-	if c.Limiter.RateLimitRequests == 0 {
-		c.Limiter.RateLimitRequests = constants.DefaultRateLimitRequests
-	}
-	if c.Limiter.RateLimitWindowMs == 0 {
-		c.Limiter.RateLimitWindowMs = constants.DefaultRateLimitWindowMs
-	}
+	c.Compression.CompressionLevel = cmp.Or(c.Compression.CompressionLevel, constants.DefaultCompressionLevel)
+	c.Throttle.ThrottleLimit = cmp.Or(c.Throttle.ThrottleLimit, constants.DefaultThrottleLimit)
+	c.Throttle.ThrottleTimeoutMs = cmp.Or(c.Throttle.ThrottleTimeoutMs, int64(constants.DefaultThrottleTimeoutMs))
+	c.Throttle.ThrottleBacklog = cmp.Or(c.Throttle.ThrottleBacklog, constants.DefaultThrottleBacklog)
+	c.Limiter.RateLimitRequests = cmp.Or(c.Limiter.RateLimitRequests, constants.DefaultRateLimitRequests)
+	c.Limiter.RateLimitWindowMs = cmp.Or(c.Limiter.RateLimitWindowMs, int64(constants.DefaultRateLimitWindowMs))
 	if c.Limiter.PreRequestOnBeforeLimiter == nil {
 		c.Limiter.PreRequestOnBeforeLimiter = func(_ http.ResponseWriter, _ *http.Request) bool {
 			return true
@@ -79,7 +67,12 @@ func (c *ChainConfig) ApplyDefaults() {
 
 // DefaultChainConfig returns a ChainConfig initialized with safe default values.
 func DefaultChainConfig() ChainConfig {
-	var cfg ChainConfig
+	cfg := ChainConfig{
+		Features: ChainFeatures{
+			UseChiCompress:     true,
+			UseChiStripSlashes: true,
+		},
+	}
 	cfg.ApplyDefaults()
 	return cfg
 }
@@ -122,16 +115,6 @@ func (m *Manager) buildInnerChain(cfg *ChainConfig, next http.Handler) http.Hand
 // buildOuterChain applies the outermost core middleware.
 // This executes BEFORE validation, logging, and application logic.
 func (m *Manager) buildOuterChain(cfg *ChainConfig, handler http.Handler) http.Handler {
-	// TrustProxy MUST run before RateLimit and Validation to resolve Real IP accurately.
-	handler = m.TrustProxy(handler)
-
-	if m.cfg.Core.EnableTelemetry {
-		handler = otelhttp.NewMiddleware(m.cfg.Core.ServiceName)(handler)
-		if m.serverMetrics != nil {
-			handler = m.serverMetrics.Middleware(handler)
-		}
-	}
-
 	if cfg.Features.UseChiTimeout {
 		handler = m.ChiTimeout(time.Duration(m.cfg.Limits.RequestTimeoutMs) * time.Millisecond)(handler)
 	}
@@ -139,12 +122,23 @@ func (m *Manager) buildOuterChain(cfg *ChainConfig, handler http.Handler) http.H
 		handler = m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, time.Duration(cfg.Throttle.ThrottleTimeoutMs)*time.Millisecond)(handler)
 	}
 
+	// Recoverer runs inside telemetry/metrics so panics record 500 status and span errors.
 	handler = m.Recoverer(handler)
+
+	if m.cfg.Core.EnableTelemetry {
+		if m.serverMetrics != nil {
+			handler = m.serverMetrics.Middleware(handler)
+		}
+		handler = otelhttp.NewMiddleware(m.cfg.Core.ServiceName)(handler)
+	}
+
+	// TrustProxy MUST run outermost before RateLimit, Telemetry, and Validation to resolve Real IP accurately.
+	handler = m.TrustProxy(handler)
 
 	return handler
 }
 
-// BaseChain handles basic REST configuration
+// BaseChain handles basic REST configuration.
 func (m *Manager) BaseChain(cfg *ChainConfig, setupRoute func(r chi.Router)) func(http.Handler) http.Handler {
 	if cfg == nil {
 		resolved := DefaultChainConfig()
@@ -152,43 +146,11 @@ func (m *Manager) BaseChain(cfg *ChainConfig, setupRoute func(r chi.Router)) fun
 	}
 	return func(next http.Handler) http.Handler {
 		r := chi.NewRouter()
-
-		if m.cfg.Core.EnableTelemetry {
-			r.Use(otelhttp.NewMiddleware(m.cfg.Core.ServiceName))
-			if m.serverMetrics != nil {
-				r.Use(m.serverMetrics.Middleware)
-			}
-		}
-
-		if cfg.Features.UseChiStripSlashes {
-			r.Use(chimiddleware.StripSlashes)
-		}
-
-		r.Use(m.TrustProxy)
-
-		r.Use(m.Recoverer)
-
-		if cfg.Features.UseChiTimeout {
-			r.Use(chimiddleware.Timeout(time.Duration(m.cfg.Limits.RequestTimeoutMs) * time.Millisecond))
-		}
-
-		if cfg.Features.UseChiCompress {
-			r.Use(chimiddleware.Compress(cfg.Compression.CompressionLevel))
-		}
-
-		if cfg.Features.UseChiThrottle {
-			r.Use(m.ChiThrottleBacklog(cfg.Throttle.ThrottleLimit, cfg.Throttle.ThrottleBacklog, time.Duration(cfg.Throttle.ThrottleTimeoutMs)*time.Millisecond))
-		}
-
-		// structured logging
-		r.Use(m.Logger)
-
 		if setupRoute != nil {
 			setupRoute(r)
 		}
-
-		r.Mount("/", next)
-		return r
+		r.Mount("/", m.buildInnerChain(cfg, next))
+		return m.buildOuterChain(cfg, r)
 	}
 }
 
@@ -276,8 +238,8 @@ func (m *Manager) InternalChain(opts ...ChainOption) func(http.Handler) http.Han
 // The middleware are applied in reverse order so that the first middleware in the list
 // is the first one to process the request (outermost).
 func ApplyMiddleware(handler http.Handler, middlewares ...func(http.Handler) http.Handler) http.Handler {
-	for i := len(middlewares) - 1; i >= 0; i-- {
-		handler = middlewares[i](handler)
+	for _, mw := range slices.Backward(middlewares) {
+		handler = mw(handler)
 	}
 	return handler
 }

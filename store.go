@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/Jkenyut/nvx-go-middleware/model"
 )
@@ -87,20 +88,23 @@ func (m *multiLogStore) Save(ctx context.Context, entry *model.AuditLog) error {
 	if m == nil || len(m.stores) == 0 || entry == nil {
 		return nil
 	}
-	errCh := make(chan error, len(m.stores))
+	if len(m.stores) == 1 {
+		return m.stores[0].Save(ctx, entry)
+	}
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+	)
 	for _, s := range m.stores {
-		go func(store LogStore) {
-			errCh <- store.Save(ctx, entry)
-		}(s)
+		wg.Go(func() {
+			if err := s.Save(ctx, entry); err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+			}
+		})
 	}
-	var errs []error
-	for range m.stores {
-		if err := <-errCh; err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-	return nil
+	wg.Wait()
+	return errors.Join(errs...)
 }

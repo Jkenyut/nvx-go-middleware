@@ -1,7 +1,6 @@
 // Package constants provides common constants used throughout the NVX middleware.
 package constants
 
-// Header constants
 // Header constants define the standard headers used across the NVX middleware.
 const (
 	HeaderCorrelationID  = "X-Correlation-Id"
@@ -25,7 +24,6 @@ const (
 	AuthTypeInternal     = "internal"
 )
 
-// Error messages
 // Error messages for common middleware failures.
 const (
 	ErrMsgMissingHeaders = "missing required headers"
@@ -39,9 +37,7 @@ const (
 	ErrMsgInvalidTimestamp       = "invalid timestamp format"
 	ErrMsgUnsupportedContentType = "unsupported content type"
 	ErrMsgInvalidRequest         = "Invalid request"
-	// Deprecated: Use ErrMsgInvalidSignature instead.
-	ErrMsgSignatureInvalid = ErrMsgInvalidSignature
-	ErrMsgInvalidUUID      = "invalid UUID format"
+	ErrMsgInvalidUUID            = "invalid UUID format"
 )
 
 // Configuration defaults and limits.

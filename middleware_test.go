@@ -1,8 +1,11 @@
 package middleware
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -803,6 +806,144 @@ func TestLogger_ExistingRecorderCapacityExpanded(t *testing.T) {
 	}
 	if logs[0].ResponseBody == nil {
 		t.Fatal("expected response body to be captured, got nil")
+	}
+}
+
+type hijackableRecorder struct {
+	*httptest.ResponseRecorder
+	hijacked bool
+	conn     net.Conn
+}
+
+func (h *hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h.hijacked = true
+	return h.conn, bufio.NewReadWriter(bufio.NewReader(strings.NewReader("")), bufio.NewWriter(io.Discard)), nil
+}
+
+func TestWebSocket_HijackerAndUnwrap(t *testing.T) {
+	store := &MockLogStore{}
+	mgr := newTestManager(func(c *Config) {
+		c.LogStore = store
+	})
+
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+	defer c2.Close()
+
+	base := &hijackableRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		conn:             c1,
+	}
+
+	wsChain := mgr.WebSocketChain()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+		conn, _, err := rc.Hijack()
+		if err != nil {
+			t.Fatalf("expected Hijack() to succeed through wsResponseWriter, got %v", err)
+		}
+		if conn != c1 {
+			t.Fatalf("expected hijacked conn to match underlying conn")
+		}
+	}))
+
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	wsChain.ServeHTTP(base, req)
+
+	if !base.hijacked {
+		t.Fatal("expected underlying Hijack() to be invoked")
+	}
+
+	logs := store.GetLogs()
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 audit log entry, got %d", len(logs))
+	}
+	if logs[0].StatusCode != http.StatusSwitchingProtocols {
+		t.Errorf("expected status 101 after Hijack, got %d", logs[0].StatusCode)
+	}
+}
+
+func TestHeaderCleaner_UnwrapAndFlush(t *testing.T) {
+	mgr := newTestManager(func(c *Config) {
+		c.Security.HeadersToRemove = []string{"Server"}
+	})
+
+	var flushed bool
+	handler := mgr.RemoveHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", "secret-server")
+		if _, ok := w.(interface{ Unwrap() http.ResponseWriter }); !ok {
+			t.Fatal("expected headerCleanerResponseWriter to implement Unwrap")
+		}
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			t.Fatalf("expected Flush() to succeed, got %v", err)
+		}
+		flushed = true
+	}))
+
+	req := httptest.NewRequest("GET", "/sse", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if !flushed || !w.Flushed {
+		t.Error("expected underlying ResponseRecorder to be flushed")
+	}
+	if got := w.Header().Get("Server"); got != "" {
+		t.Errorf("expected Server header to be stripped, got %q", got)
+	}
+}
+
+func TestReadAndRestoreBody_ExceedsLimitPreservesBody(t *testing.T) {
+	payload := `{"query":"` + strings.Repeat("a", 64) + `"}`
+	req := httptest.NewRequest("POST", "/graphql", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+
+	_, err := ReadAndRestoreBody(req, 16)
+	if err == nil {
+		t.Fatal("expected error when body exceeds limit")
+	}
+
+	restored, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("failed reading restored body: %v", readErr)
+	}
+	if string(restored) != payload {
+		t.Errorf("restored body mismatch: got %q, want %q", string(restored), payload)
+	}
+}
+
+func TestGraphQL_GetAndBatchIntrospectionBlocked(t *testing.T) {
+	mgr := newTestManager()
+	okHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	blocked := mgr.GraphQLBlockIntrospection(okHandler)
+
+	// 1. GET introspection
+	reqGet := httptest.NewRequest("GET", "/graphql?query=%7B__schema%7Btypes%7Bname%7D%7D%7D", nil)
+	wGet := httptest.NewRecorder()
+	blocked.ServeHTTP(wGet, reqGet)
+	if wGet.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for GET introspection, got %d", wGet.Code)
+	}
+
+	// 2. Batch POST introspection
+	reqBatch := httptest.NewRequest("POST", "/graphql", strings.NewReader(`[{"query":"{__type(name:\"User\"){name}}"}]`))
+	reqBatch.Header.Set("Content-Type", "application/json")
+	wBatch := httptest.NewRecorder()
+	blocked.ServeHTTP(wBatch, reqBatch)
+	if wBatch.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for batch POST introspection, got %d", wBatch.Code)
+	}
+
+	// 3. GET query depth limit
+	depthChain := mgr.GraphQLChain(WithGraphQLMaxDepth(1))(okHandler)
+	reqDepth := httptest.NewRequest("GET", "/graphql?query=%7Buser%7Bprofile%7Bname%7D%7D%7D", nil)
+	wDepth := httptest.NewRecorder()
+	depthChain.ServeHTTP(wDepth, reqDepth)
+	if wDepth.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for GET exceeding query depth, got %d", wDepth.Code)
 	}
 }
 

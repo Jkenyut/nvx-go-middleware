@@ -1,31 +1,29 @@
 package middleware
 
 import (
+	"cmp"
+	"context"
 	"errors"
-	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"os"
+	"net/netip"
+	"slices"
 	"time"
 
 	"github.com/Jkenyut/nvx-go-helper/format"
+	appLogger "github.com/Jkenyut/nvx-go-helper/logger"
+	"github.com/Jkenyut/nvx-go-helper/sliceutil"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/diode"
+	"github.com/Jkenyut/nvx-go-middleware/model"
 )
-
-func init() {
-	zerolog.TimeFieldFormat = time.RFC3339
-}
 
 // Manager holds the middleware configuration and provides middleware methods.
 // It is the central entry point for creating and managing middleware chains.
 type Manager struct {
 	cfg           Config
 	logCloser     io.Closer
-	trustedIPs    map[string]struct{}
-	trustedNets   []*net.IPNet
+	trustedIPs    map[netip.Addr]struct{}
+	trustedNets   []netip.Prefix
 	serverMetrics *ServerMetrics
 }
 
@@ -65,101 +63,44 @@ func NewWithError(cfg *Config) (*Manager, error) {
 // applyDefaults fills in all missing Config fields with safe defaults.
 // It returns an io.Closer if it created any resources that need to be closed.
 func applyDefaults(cfg *Config) io.Closer {
-	var logCloser io.Closer
+	cfg.Core.ServiceName = cmp.Or(cfg.Core.ServiceName, "unknown-service")
+	cfg.Core.Env = cmp.Or(cfg.Core.Env, "development")
 
 	if cfg.Logger == nil {
-		env := cfg.Core.Env // defaults to "development" if empty
-
-		var writer io.Writer
-		isProd := env == "production" || env == "prod"
-
-		if isProd {
-			// JSON output for log aggregation systems
-			writer = os.Stdout
-		} else {
-			// Pretty, colored output for local development and staging
-			writer = zerolog.ConsoleWriter{
-				Out:     os.Stderr,
-				NoColor: false,
-			}
-		}
-
-		// Respect LOG_LEVEL environment variable if set
-		if levelStr := os.Getenv("LOG_LEVEL"); levelStr != "" {
-			if level, err := zerolog.ParseLevel(levelStr); err == nil {
-				zerolog.SetGlobalLevel(level)
-			}
-		} else {
-			// Default level based on environment
-			if isProd {
-				zerolog.SetGlobalLevel(zerolog.InfoLevel)
-			} else {
-				zerolog.SetGlobalLevel(zerolog.DebugLevel)
-			}
-		}
-
-		wr := diode.NewWriter(writer, 1000, 10*time.Millisecond, func(missed int) {
-			fmt.Fprintf(os.Stderr, "WARNING: diode buffer dropped %d log messages\n", missed)
-		})
-		logCloser = wr
-		logContext := zerolog.New(wr).
-			With().
-			Timestamp().
-			Str("service", cfg.Core.ServiceName)
-
-		// Caller is expensive. Only enable it in non-production environments.
-		if !isProd {
-			logContext = logContext.Caller()
-		}
-
-		log := logContext.Logger()
-		zerolog.DefaultContextLogger = &log
-		cfg.Logger = NewZerologLogger(&log)
+		subLog := appLogger.L().With().
+			Str("service", cfg.Core.ServiceName).
+			Str("env", cfg.Core.Env).
+			Logger()
+		cfg.Logger = NewZerologLogger(&subLog)
 	}
 
 	if cfg.LogStore == nil {
 		cfg.LogStore = &ConsoleStore{logger: cfg.Logger}
 	}
 
-	if cfg.Limits.RequestTimeoutMs == 0 {
-		cfg.Limits.RequestTimeoutMs = constants.RequestTimeoutMs
-	}
-	if cfg.Limits.RequestBodyLimitSize == 0 {
-		cfg.Limits.RequestBodyLimitSize = constants.RequestBodyLimitSize
-	}
-	if cfg.Limits.RequestBodyNonFileLimitSize == 0 {
-		cfg.Limits.RequestBodyNonFileLimitSize = constants.RequestBodyNonFileLimitSize
-	}
-	if cfg.Logging.ResponseBodyLogLimitSize == 0 {
-		cfg.Logging.ResponseBodyLogLimitSize = constants.ResponseBodyLogLimitSize
-	}
-	if cfg.Logging.LogStoreTimeoutMs == 0 {
-		cfg.Logging.LogStoreTimeoutMs = constants.DefaultLogStoreTimeoutMs
-	}
-	if cfg.Core.ServiceName == "" {
-		cfg.Core.ServiceName = "unknown-service"
-	}
-	if cfg.Core.Env == "" {
-		cfg.Core.Env = "development"
-	}
+	cfg.Limits.RequestTimeoutMs = cmp.Or(cfg.Limits.RequestTimeoutMs, int64(constants.RequestTimeoutMs))
+	cfg.Limits.RequestBodyLimitSize = cmp.Or(cfg.Limits.RequestBodyLimitSize, int64(constants.RequestBodyLimitSize))
+	cfg.Limits.RequestBodyNonFileLimitSize = cmp.Or(cfg.Limits.RequestBodyNonFileLimitSize, int64(constants.RequestBodyNonFileLimitSize))
+	cfg.Logging.ResponseBodyLogLimitSize = cmp.Or(cfg.Logging.ResponseBodyLogLimitSize, int64(constants.ResponseBodyLogLimitSize))
+	cfg.Logging.LogStoreTimeoutMs = cmp.Or(cfg.Logging.LogStoreTimeoutMs, int64(constants.DefaultLogStoreTimeoutMs))
 
 	if len(cfg.Headers.RequiredPublicAuthHeaders) == 0 {
-		cfg.Headers.RequiredPublicAuthHeaders = constants.RequiredPublicAuthHeaders
+		cfg.Headers.RequiredPublicAuthHeaders = slices.Clone(constants.RequiredPublicAuthHeaders)
 	}
 	if len(cfg.Headers.RequiredPublicHeaders) == 0 {
-		cfg.Headers.RequiredPublicHeaders = constants.RequiredPublicHeaders
+		cfg.Headers.RequiredPublicHeaders = slices.Clone(constants.RequiredPublicHeaders)
 	}
 	if len(cfg.Headers.RequiredInternalHeaders) == 0 {
-		cfg.Headers.RequiredInternalHeaders = constants.RequiredInternalHeaders
+		cfg.Headers.RequiredInternalHeaders = slices.Clone(constants.RequiredInternalHeaders)
 	}
 	if len(cfg.Headers.RequiredPublicAPIKeyHeaders) == 0 {
-		cfg.Headers.RequiredPublicAPIKeyHeaders = constants.RequiredPublicAPIKeyHeaders
+		cfg.Headers.RequiredPublicAPIKeyHeaders = slices.Clone(constants.RequiredPublicAPIKeyHeaders)
 	}
 	if len(cfg.Headers.RequiredSignaturePublicHeaders) == 0 {
-		cfg.Headers.RequiredSignaturePublicHeaders = constants.RequiredSignaturePublicHeaders
+		cfg.Headers.RequiredSignaturePublicHeaders = slices.Clone(constants.RequiredSignaturePublicHeaders)
 	}
 	if len(cfg.Headers.RequiredSignatureInternalHeaders) == 0 {
-		cfg.Headers.RequiredSignatureInternalHeaders = constants.RequiredSignatureInternalHeaders
+		cfg.Headers.RequiredSignatureInternalHeaders = slices.Clone(constants.RequiredSignatureInternalHeaders)
 	}
 	if len(cfg.Security.TrustedProxies) == 0 {
 		cfg.Security.TrustedProxies = []string{}
@@ -171,41 +112,25 @@ func applyDefaults(cfg *Config) io.Closer {
 		cfg.Security.AllowedContentTypes = []string{"application/json", "multipart/form-data"}
 	}
 	if len(cfg.Security.AllowedHeaders) == 0 {
-		cfg.Security.AllowedHeaders = uniqueStrings(
-			[]string{"Accept", "Authorization", "Content-Type"},
+		cfg.Security.AllowedHeaders = sliceutil.Unique(sliceutil.Flatten([][]string{
+			{"Accept", "Authorization", "Content-Type"},
 			cfg.Headers.RequiredPublicAuthHeaders,
 			cfg.Headers.RequiredPublicHeaders,
 			cfg.Headers.RequiredInternalHeaders,
 			cfg.Headers.RequiredPublicAPIKeyHeaders,
-		)
+		}))
 	}
-	if cfg.Headers.Keys.RequestID == "" {
-		cfg.Headers.Keys.RequestID = constants.HeaderRequestID
-	}
-	if cfg.Headers.Keys.CorrelationID == "" {
-		cfg.Headers.Keys.CorrelationID = constants.HeaderCorrelationID
-	}
-	if cfg.Headers.Keys.IP == "" {
-		cfg.Headers.Keys.IP = constants.HeaderIP
-	}
-	if cfg.Headers.Keys.IPOrigin == "" {
-		cfg.Headers.Keys.IPOrigin = constants.HeaderIPOrigin
-	}
-	if cfg.Headers.Keys.UserID == "" {
-		cfg.Headers.Keys.UserID = constants.HeaderUserID
-	}
-	if cfg.Headers.Keys.APIKey == "" {
-		cfg.Headers.Keys.APIKey = constants.HeaderAPIKey
-	}
-	if cfg.Headers.Keys.AuthType == "" {
-		cfg.Headers.Keys.AuthType = constants.HeaderAuthType
-	}
+	cfg.Headers.Keys.RequestID = cmp.Or(cfg.Headers.Keys.RequestID, constants.HeaderRequestID)
+	cfg.Headers.Keys.CorrelationID = cmp.Or(cfg.Headers.Keys.CorrelationID, constants.HeaderCorrelationID)
+	cfg.Headers.Keys.IP = cmp.Or(cfg.Headers.Keys.IP, constants.HeaderIP)
+	cfg.Headers.Keys.IPOrigin = cmp.Or(cfg.Headers.Keys.IPOrigin, constants.HeaderIPOrigin)
+	cfg.Headers.Keys.UserID = cmp.Or(cfg.Headers.Keys.UserID, constants.HeaderUserID)
+	cfg.Headers.Keys.APIKey = cmp.Or(cfg.Headers.Keys.APIKey, constants.HeaderAPIKey)
+	cfg.Headers.Keys.AuthType = cmp.Or(cfg.Headers.Keys.AuthType, constants.HeaderAuthType)
 	if len(cfg.Security.HeadersToRemove) == 0 {
 		cfg.Security.HeadersToRemove = []string{}
 	}
-	if cfg.Security.SignatureTimestampExpiredMs == 0 {
-		cfg.Security.SignatureTimestampExpiredMs = constants.TimestampExpiredMs
-	}
+	cfg.Security.SignatureTimestampExpiredMs = cmp.Or(cfg.Security.SignatureTimestampExpiredMs, int64(constants.TimestampExpiredMs))
 
 	if len(cfg.Logging.LogHeaders) == 0 {
 		cfg.Logging.LogHeaders = []string{
@@ -217,30 +142,15 @@ func applyDefaults(cfg *Config) io.Closer {
 		}
 	}
 
-	defaultMaskKeywords := format.DefaultMaskKeywords
-
 	if len(cfg.Logging.MaskKeywords) == 0 {
-		cfg.Logging.MaskKeywords = defaultMaskKeywords
+		cfg.Logging.MaskKeywords = slices.Clone(format.DefaultMaskKeywords)
 	} else {
-		seen := make(map[string]struct{}, len(cfg.Logging.MaskKeywords)+len(defaultMaskKeywords))
-		merged := make([]string, 0, len(cfg.Logging.MaskKeywords)+len(defaultMaskKeywords))
-
-		for _, kw := range defaultMaskKeywords {
-			if _, exists := seen[kw]; !exists {
-				seen[kw] = struct{}{}
-				merged = append(merged, kw)
-			}
-		}
-		for _, kw := range cfg.Logging.MaskKeywords {
-			if _, exists := seen[kw]; !exists {
-				seen[kw] = struct{}{}
-				merged = append(merged, kw)
-			}
-		}
-		cfg.Logging.MaskKeywords = merged
+		cfg.Logging.MaskKeywords = sliceutil.Unique(
+			sliceutil.Flatten([][]string{format.DefaultMaskKeywords, cfg.Logging.MaskKeywords}),
+		)
 	}
 
-	return logCloser
+	return nil
 }
 
 // Config returns a copy of the manager's configuration.
@@ -265,33 +175,28 @@ func (m *Manager) initTrustedProxies() {
 	if len(m.cfg.Security.TrustedProxies) == 0 {
 		return
 	}
-	m.trustedIPs = make(map[string]struct{}, len(m.cfg.Security.TrustedProxies))
-	m.trustedNets = make([]*net.IPNet, 0, len(m.cfg.Security.TrustedProxies))
+	m.trustedIPs = make(map[netip.Addr]struct{}, len(m.cfg.Security.TrustedProxies))
+	m.trustedNets = make([]netip.Prefix, 0, len(m.cfg.Security.TrustedProxies))
 	for _, proxy := range m.cfg.Security.TrustedProxies {
-		if _, ipNet, err := net.ParseCIDR(proxy); err == nil {
-			m.trustedNets = append(m.trustedNets, ipNet)
-		} else {
-			m.trustedIPs[proxy] = struct{}{}
+		if prefix, err := netip.ParsePrefix(proxy); err == nil {
+			m.trustedNets = append(m.trustedNets, prefix)
+		} else if addr, err := netip.ParseAddr(proxy); err == nil {
+			m.trustedIPs[addr] = struct{}{}
 		}
 	}
 }
 
-func uniqueStrings(items ...[]string) []string {
-	total := 0
-	for _, list := range items {
-		total += len(list)
+func (m *Manager) saveAuditLog(ctx context.Context, entry *model.AuditLog) error {
+	if m.cfg.LogStore == nil || entry == nil {
+		return nil
 	}
-	seen := make(map[string]struct{}, total)
-	out := make([]string, 0, total)
-	for _, list := range items {
-		for _, v := range list {
-			if _, ok := seen[v]; !ok {
-				seen[v] = struct{}{}
-				out = append(out, v)
-			}
-		}
+	timeoutMs := m.cfg.Logging.LogStoreTimeoutMs
+	if timeoutMs <= 0 {
+		timeoutMs = constants.DefaultLogStoreTimeoutMs
 	}
-	return out
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(timeoutMs)*time.Millisecond)
+	defer cancel()
+	return m.cfg.LogStore.Save(saveCtx, entry)
 }
 
 // SetHeaderAuthType sets the Auth-Type header to identify the authentication context.

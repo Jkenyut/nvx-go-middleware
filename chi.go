@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -10,7 +11,6 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/response"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
-	"github.com/bytedance/sonic"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
 )
@@ -47,10 +47,9 @@ func (m *Manager) ChiNoCache(next http.Handler) http.Handler {
 	return chimiddleware.NoCache(next)
 }
 
-// ChiHeartbeat wraps Chi's Heartbeat middleware.
-// It returns a middleware that responds to a specific path with a 200 OK status.
+// ChiHeartbeat delegates to Heartbeat and responds to a specific path with 200 OK "OK".
 func (m *Manager) ChiHeartbeat(endpoint string) func(http.Handler) http.Handler {
-	return chimiddleware.Heartbeat(endpoint)
+	return Heartbeat(endpoint)
 }
 
 // ChiProfiler wraps Chi's Profiler middleware.
@@ -100,11 +99,8 @@ func RateLimit(
 	signatureSecret string,
 ) func(http.Handler) http.Handler {
 	opts := []httprate.Option{
-		httprate.WithKeyFuncs(keyByHeaderAuthType),
 		httprate.WithErrorHandler(func(w http.ResponseWriter, r *http.Request, _ error) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusPreconditionRequired)
-			_ = sonic.ConfigDefault.NewEncoder(w).Encode(response.PreconditionRequired(r.Context(), "precondition required"))
+			response.WriteJSONResponse(w, response.PreconditionRequired(r.Context(), "precondition required"))
 		}),
 		httprate.WithResponseHeaders(httprate.ResponseHeaders{
 			Limit:      "RateLimit-Limit",
@@ -114,9 +110,7 @@ func RateLimit(
 			Increment:  "",
 		}),
 		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_ = sonic.ConfigDefault.NewEncoder(w).Encode(response.TooManyRequests(r.Context(), "too many requests"))
+			response.WriteJSONResponse(w, response.TooManyRequests(r.Context(), "too many requests"))
 		}),
 	}
 
@@ -175,11 +169,7 @@ func keyByHeaderAuthType(r *http.Request) (string, error) {
 // KeyByHeader returns a keying function that keys requests by the value of a specific header.
 // If the header is missing, it returns "unknown".
 func keyByHeader(r *http.Request, header string) (string, error) {
-	headerName := r.Header.Get(header)
-	if headerName == "" {
-		headerName = "unknown"
-	}
-	return headerName, nil
+	return cmp.Or(r.Header.Get(header), "unknown"), nil
 }
 
 func detectProtocol(r *http.Request) string {

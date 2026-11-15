@@ -1,11 +1,12 @@
 package middleware
 
 import (
+	"cmp"
 	"net/http"
 	"time"
 
+	"github.com/Jkenyut/nvx-go-telemetry/telemetry"
 	"github.com/go-chi/chi/v5"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -18,24 +19,22 @@ type ServerMetrics struct {
 
 // NewServerMetrics initializes HTTP server metrics instruments.
 func NewServerMetrics(instrumentationName string) (*ServerMetrics, error) {
-	if instrumentationName == "" {
-		instrumentationName = "github.com/Jkenyut/nvx-go-middleware"
-	}
-	meter := otel.Meter(instrumentationName)
+	instrumentationName = cmp.Or(instrumentationName, "github.com/Jkenyut/nvx-go-middleware")
+	mm := telemetry.NewMetricManager(instrumentationName)
 
-	durationHist, err := meter.Float64Histogram(
+	durationHist, err := mm.RegisterHistogram(
 		"http.server.request.duration",
-		metric.WithDescription("Duration of HTTP server requests in seconds"),
-		metric.WithUnit("s"),
+		"Duration of HTTP server requests in seconds",
+		"s",
 		metric.WithExplicitBucketBoundaries(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5),
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	reqCounter, err := meter.Int64Counter(
+	reqCounter, err := mm.RegisterCounter(
 		"http.server.requests.total",
-		metric.WithDescription("Total number of incoming HTTP requests processed"),
+		"Total number of incoming HTTP requests processed",
 	)
 	if err != nil {
 		return nil, err
@@ -64,21 +63,13 @@ func (sm *ServerMetrics) Middleware(next http.Handler) http.Handler {
 		defer func() {
 			duration := time.Since(start).Seconds()
 
-			routePattern := ""
+			var chiPattern string
 			if rCtx := chi.RouteContext(r.Context()); rCtx != nil {
-				routePattern = rCtx.RoutePattern()
+				chiPattern = rCtx.RoutePattern()
 			}
-			if routePattern == "" {
-				routePattern = r.Pattern
-			}
-			if routePattern == "" {
-				routePattern = "unmatched"
-			}
+			routePattern := cmp.Or(chiPattern, r.Pattern, "unmatched")
 
-			statusCode := rw.Status()
-			if statusCode == 0 {
-				statusCode = http.StatusOK
-			}
+			statusCode := cmp.Or(rw.Status(), http.StatusOK)
 
 			attrs := []attribute.KeyValue{
 				attribute.String("http.request.method", r.Method),

@@ -1,8 +1,10 @@
 package middleware
 
 import (
-	"context"
+	"bufio"
+	"cmp"
 	"fmt"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/response"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
+	"github.com/Jkenyut/nvx-go-telemetry/telemetry"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -21,17 +24,38 @@ import (
 )
 
 // wsResponseWriter wraps http.ResponseWriter to detect the WebSocket upgrade
-// and track whether the upgrade succeeded.
+// and track whether the upgrade succeeded while preserving Hijacker/Flusher.
 type wsResponseWriter struct {
 	http.ResponseWriter
-	hijacked bool
+	hijacked   bool
+	statusCode int
 }
 
 func (w *wsResponseWriter) WriteHeader(code int) {
+	w.statusCode = code
 	if code == http.StatusSwitchingProtocols {
 		w.hijacked = true
 	}
 	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *wsResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, rw, err := http.NewResponseController(w.ResponseWriter).Hijack()
+	if err == nil {
+		w.hijacked = true
+		if w.statusCode == 0 {
+			w.statusCode = http.StatusSwitchingProtocols
+		}
+	}
+	return conn, rw, err
+}
+
+func (w *wsResponseWriter) Flush() {
+	_ = http.NewResponseController(w.ResponseWriter).Flush()
+}
+
+func (w *wsResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 // WebSocketChain returns a middleware chain designed for WebSocket upgrade endpoints.
@@ -60,7 +84,7 @@ func (m *Manager) WebSocketChain(
 		coreHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Must be a WebSocket upgrade request
 			if !isWebSocketUpgrade(r) {
-				http.Error(w, "expected WebSocket upgrade", http.StatusBadRequest)
+				response.WriteJSONResponse(w, response.BadRequest(r.Context(), "expected WebSocket upgrade"))
 				return
 			}
 
@@ -68,7 +92,7 @@ func (m *Manager) WebSocketChain(
 			origin := r.Header.Get("Origin")
 			if origin != "" && len(m.cfg.Security.AllowedOrigins) > 0 && !slices.Contains(m.cfg.Security.AllowedOrigins, "*") {
 				if !slices.Contains(m.cfg.Security.AllowedOrigins, origin) {
-					http.Error(w, "cross-origin websocket forbidden", http.StatusForbidden)
+					response.WriteJSONResponse(w, response.Forbidden(r.Context(), "cross-origin websocket forbidden"))
 					return
 				}
 			}
@@ -123,8 +147,7 @@ func (m *Manager) WebSocketChain(
 					if m.cfg.Core.EnableTelemetry {
 						span := trace.SpanFromContext(r.Context())
 						if span.SpanContext().IsValid() {
-							span.RecordError(fmt.Errorf("panic: %v", rec))
-							span.SetStatus(codes.Error, "panic recovered")
+							telemetry.RecordError(span, fmt.Errorf("panic recovered: %v", rec))
 						}
 					}
 					m.cfg.Logger.Error().
@@ -140,7 +163,7 @@ func (m *Manager) WebSocketChain(
 						Msg("panic in WebSocket handler")
 
 					if ww == nil || !ww.hijacked {
-						http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+						response.WriteJSONResponse(w, response.InternalError(r.Context()))
 						return
 					}
 				}
@@ -172,10 +195,8 @@ func (m *Manager) WebSocketChain(
 				ErrorMessage:    "",
 			}
 
-			reqCtx := context.WithoutCancel(r.Context())
-
 			defer func() {
-				statusCode := http.StatusBadRequest
+				statusCode := cmp.Or(ww.statusCode, http.StatusBadRequest)
 				if ww.hijacked {
 					statusCode = http.StatusSwitchingProtocols
 				}
@@ -190,14 +211,7 @@ func (m *Manager) WebSocketChain(
 				entry.LatencyMS = time.Since(start).Milliseconds()
 				entry.ResponseHeaders = normalizeHeadersJSON(ww.Header(), m.cfg.Logging.MaskKeywords)
 
-				timeoutMs := m.cfg.Logging.LogStoreTimeoutMs
-				if timeoutMs <= 0 {
-					timeoutMs = constants.DefaultLogStoreTimeoutMs
-				}
-				saveCtx, cancel := context.WithTimeout(reqCtx, time.Duration(timeoutMs)*time.Millisecond)
-				defer cancel()
-
-				if err := m.cfg.LogStore.Save(saveCtx, &entry); err != nil {
+				if err := m.saveAuditLog(r.Context(), &entry); err != nil {
 					m.cfg.Logger.Error().
 						Str("service", m.cfg.Core.ServiceName).
 						Str("correlation_id", correlationID).

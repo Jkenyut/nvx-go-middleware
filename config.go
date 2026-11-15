@@ -7,8 +7,6 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/activity"
 )
 
-// ConfigCore holds the configuration for the middleware manager.
-// It includes core settings, logging configuration, security parameters, and header requirements.
 // ConfigCore holds core settings for the middleware.
 type ConfigCore struct {
 	Env             string `yaml:"env" default:"development"`
@@ -97,11 +95,12 @@ var ErrMissingKeys = errors.New("PublicKeySignature and PrivateKeySignature are 
 // Exported so protocol-specific adapters (WebSocket, gRPC) can reuse it.
 func WithActivityContext(r *http.Request, keys HeaderKeys) *http.Request {
 	h := r.Header
-	ctx := r.Context()
-	ctx = activity.WithCorrelationID(ctx, h.Get(keys.CorrelationID))
-	ctx = activity.WithUserID(ctx, h.Get(keys.UserID))
-	ctx = activity.WithUserIP(ctx, h.Get(keys.IP))
-	ctx = activity.WithRequestID(ctx, h.Get(keys.RequestID))
-	ctx = activity.WithUserIPOrigin(ctx, h.Get(keys.IPOrigin))
+	ctx := activity.WithActivity(r.Context(), activity.Activity{
+		CorrelationID: h.Get(keys.CorrelationID),
+		UserID:        h.Get(keys.UserID),
+		UserIP:        h.Get(keys.IP),
+		RequestID:     h.Get(keys.RequestID),
+		UserIPOrigin:  h.Get(keys.IPOrigin),
+	})
 	return r.WithContext(ctx)
 }

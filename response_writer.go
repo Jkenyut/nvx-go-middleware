@@ -36,16 +36,10 @@ func wrapResponseWriter(w http.ResponseWriter, r *http.Request, limit int) *resp
 
 // Write writes the response body to the buffer.
 func (r *responseRecorder) Write(b []byte) (int, error) {
-	ct := r.Header().Get("Content-Type")
-	if !isMultipart(ct) {
-		// Only buffer if we haven't exceeded the limit
-		if r.body.Len() < r.maxBodySize {
+	if r.maxBodySize > 0 && r.body.Len() < r.maxBodySize {
+		if !isMultipart(r.Header().Get("Content-Type")) {
 			remaining := r.maxBodySize - r.body.Len()
-			if len(b) > remaining {
-				r.body.Write(b[:remaining])
-			} else {
-				r.body.Write(b)
-			}
+			r.body.Write(b[:min(len(b), remaining)])
 		}
 	}
 

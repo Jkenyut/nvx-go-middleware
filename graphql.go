@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"context"
+	"cmp"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,9 +10,11 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/activity"
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/format"
+	"github.com/Jkenyut/nvx-go-helper/request"
 	"github.com/Jkenyut/nvx-go-helper/response"
 	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
+	"github.com/Jkenyut/nvx-go-telemetry/telemetry"
 	"github.com/bytedance/sonic"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
@@ -68,8 +70,7 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 					if m.cfg.Core.EnableTelemetry {
 						span := trace.SpanFromContext(r.Context())
 						if span.SpanContext().IsValid() {
-							span.RecordError(fmt.Errorf("panic: %v", rec))
-							span.SetStatus(codes.Error, "panic recovered")
+							telemetry.RecordError(span, fmt.Errorf("panic recovered: %v", rec))
 						}
 					}
 					m.cfg.Logger.Error().
@@ -98,29 +99,36 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 			}()
 
 			// ── Operation name extraction ─────────────────────────────
+			var raw []byte
 			var gqlBody graphqlRequestBody
 			if r.Method == http.MethodPost {
-				raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
-				if err == nil && len(raw) > 0 {
+				var err error
+				raw, err = ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
+				if err != nil {
+					response.WriteJSONResponse(w, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
+					return
+				}
+				if len(raw) > 0 {
 					_ = sonic.Unmarshal(raw, &gqlBody)
 				}
 			}
 
+			query := gqlBody.Query
 			operationName := r.Header.Get("X-GraphQL-Operation")
-			if operationName == "" && r.Method == http.MethodGet {
-				operationName = r.URL.Query().Get("operationName")
+			if r.Method == http.MethodGet {
+				if query == "" {
+					query = request.GetQueryString(r, "query", "")
+				}
+				if operationName == "" {
+					operationName = request.GetQueryString(r, "operationName", "")
+				}
 			}
-			if operationName == "" && gqlBody.OperationName != "" {
-				operationName = gqlBody.OperationName
-			}
-			if operationName == "" {
-				operationName = "anonymous"
-			}
+			operationName = cmp.Or(operationName, gqlBody.OperationName, "anonymous")
 			r.Header.Set("X-GraphQL-Operation", operationName)
 
 			// ── Depth limiting ────────────────────────────────────────
-			if maxDepth > 0 && gqlBody.Query != "" {
-				if depth := graphqlQueryDepth(gqlBody.Query); depth > maxDepth {
+			if maxDepth > 0 && query != "" {
+				if depth := graphqlQueryDepth(query); depth > maxDepth {
 					response.WriteJSONResponse(w, response.BadRequest(r.Context(), fmt.Sprintf("query depth %d exceeds maximum allowed depth %d", depth, maxDepth)))
 					return
 				}
@@ -140,14 +148,24 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 						attribute.String("user_agent", r.UserAgent()),
 						attribute.String("graphql.operation.name", operationName),
 					)
-					if gqlBody.Query != "" {
-						span.SetAttributes(attribute.Int("graphql.query.depth", graphqlQueryDepth(gqlBody.Query)))
+					if query != "" {
+						span.SetAttributes(attribute.Int("graphql.query.depth", graphqlQueryDepth(query)))
 					}
 				}
 			}
 
+			bodyLimit := 0
+			if m.cfg.Logging.LogResponseBodies {
+				bodyLimit = int(m.cfg.Logging.ResponseBodyLogLimitSize)
+			}
+
+			var reqBodyLogged any
+			if m.cfg.Logging.LogRequestBodies && len(raw) > 0 {
+				reqBodyLogged = normalizeBodyRaw(raw, m.cfg.Logging.MaskKeywords)
+			}
+
 			start := time.Now()
-			rw = wrapResponseWriter(w, r, int(m.cfg.Logging.ResponseBodyLogLimitSize))
+			rw = wrapResponseWriter(w, r, bodyLimit)
 
 			IDAuditLog := cryptoutil.V7()
 			entry := model.AuditLog{
@@ -164,7 +182,7 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 				CorrelationID:   correlationID,
 				RequestHeaders:  normalizeHeadersJSON(r.Header, m.cfg.Logging.MaskKeywords),
 				ResponseHeaders: nil,
-				RequestBody:     gqlBody,
+				RequestBody:     reqBodyLogged,
 				ResponseBody:    nil,
 				Protocol:        "GraphQL",
 				ServiceName:     m.cfg.Core.ServiceName,
@@ -172,13 +190,8 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 				ErrorMessage:    "",
 			}
 
-			reqCtx := context.WithoutCancel(r.Context())
-
 			defer func() {
-				status := rw.Status()
-				if status == 0 {
-					status = http.StatusInternalServerError
-				}
+				status := cmp.Or(rw.Status(), http.StatusInternalServerError)
 				if m.cfg.Core.EnableTelemetry {
 					span := trace.SpanFromContext(r.Context())
 					if span.SpanContext().IsValid() && status >= 500 {
@@ -192,14 +205,7 @@ func (m *Manager) GraphQLChain(opts ...GraphQLOption) func(http.Handler) http.Ha
 					entry.ResponseBody = normalizeBodyRaw(rw.Body(), m.cfg.Logging.MaskKeywords)
 				}
 
-				timeoutMs := m.cfg.Logging.LogStoreTimeoutMs
-				if timeoutMs <= 0 {
-					timeoutMs = constants.DefaultLogStoreTimeoutMs
-				}
-				saveCtx, cancel := context.WithTimeout(reqCtx, time.Duration(timeoutMs)*time.Millisecond)
-				defer cancel()
-
-				if err := m.cfg.LogStore.Save(saveCtx, &entry); err != nil {
+				if err := m.saveAuditLog(r.Context(), &entry); err != nil {
 					m.cfg.Logger.Error().
 						Str("correlation_id", correlationID).
 						Err(err).
@@ -298,9 +304,7 @@ func graphqlQueryDepth(query string) int {
 		switch ch {
 		case '{':
 			curDepth++
-			if curDepth > maxDepth {
-				maxDepth = curDepth
-			}
+			maxDepth = max(maxDepth, curDepth)
 		case '}':
 			if curDepth > 0 {
 				curDepth--
@@ -308,11 +312,8 @@ func graphqlQueryDepth(query string) int {
 		}
 	}
 
-	if maxDepth <= 0 {
-		return 0
-	}
 	// Subtract 1: the outermost { } wrapper is the root operation level, not field selection depth
-	return maxDepth - 1
+	return max(0, maxDepth-1)
 }
 
 // isGraphQLIntrospection reports whether the query appears to be a GraphQL introspection query.
@@ -326,13 +327,32 @@ func isGraphQLIntrospection(query string) bool {
 // queries. Useful for hardening production endpoints.
 func (m *Manager) GraphQLBlockIntrospection(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if isGraphQLIntrospection(request.GetQueryString(r, "query", "")) {
+				response.WriteJSONResponse(w, response.Forbidden(r.Context(), "introspection disabled"))
+				return
+			}
+		}
 		if r.Method == http.MethodPost {
 			raw, err := ReadAndRestoreBody(r, m.cfg.Limits.RequestBodyNonFileLimitSize)
-			if err == nil && len(raw) > 0 {
+			if err != nil {
+				response.WriteJSONResponse(w, response.PayloadTooLarge(r.Context(), constants.ErrMsgPayloadTooLarge))
+				return
+			}
+			if len(raw) > 0 {
 				var body graphqlRequestBody
 				if sonic.Unmarshal(raw, &body) == nil && isGraphQLIntrospection(body.Query) {
 					response.WriteJSONResponse(w, response.Forbidden(r.Context(), "introspection disabled"))
 					return
+				}
+				var batch []graphqlRequestBody
+				if sonic.Unmarshal(raw, &batch) == nil {
+					for _, item := range batch {
+						if isGraphQLIntrospection(item.Query) {
+							response.WriteJSONResponse(w, response.Forbidden(r.Context(), "introspection disabled"))
+							return
+						}
+					}
 				}
 			}
 		}
@@ -347,7 +367,7 @@ func ResolveGraphQLOperation(r *http.Request) string {
 		return op
 	}
 	if r.Method == http.MethodGet {
-		if op := r.URL.Query().Get("operationName"); op != "" {
+		if op := request.GetQueryString(r, "operationName", ""); op != "" {
 			return op
 		}
 	}

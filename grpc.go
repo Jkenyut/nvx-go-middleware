@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"runtime/debug"
@@ -9,18 +10,93 @@ import (
 	"github.com/Jkenyut/nvx-go-helper/activity"
 	"github.com/Jkenyut/nvx-go-helper/cryptoutil"
 	"github.com/Jkenyut/nvx-go-helper/format"
-	"github.com/Jkenyut/nvx-go-middleware/constants"
 	"github.com/Jkenyut/nvx-go-middleware/model"
+	"github.com/Jkenyut/nvx-go-telemetry/telemetry"
 	"github.com/bytedance/sonic"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/attribute"
-	otelcodes "go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
+
+func mdValue(md metadata.MD, key string) string {
+	if vals := md.Get(key); len(vals) > 0 {
+		return vals[0]
+	}
+	return ""
+}
+
+func (m *Manager) prepareGRPCRequest(
+	ctx context.Context,
+	fullMethod, methodType, protocol string,
+	bodyRequest any,
+) (context.Context, metadata.MD, string, model.AuditLog) {
+	md, _ := metadata.FromIncomingContext(ctx)
+
+	correlationID := cmp.Or(mdValue(md, m.cfg.Headers.Keys.CorrelationID), cryptoutil.V7())
+	requestID := mdValue(md, m.cfg.Headers.Keys.RequestID)
+	userID := mdValue(md, m.cfg.Headers.Keys.UserID)
+	ip := mdValue(md, m.cfg.Headers.Keys.IP)
+	ipOrigin := mdValue(md, m.cfg.Headers.Keys.IPOrigin)
+	userAgent := mdValue(md, "user-agent")
+
+	ctx = activity.WithActivity(ctx, activity.Activity{
+		CorrelationID: correlationID,
+		RequestID:     requestID,
+		UserID:        userID,
+		UserIP:        ip,
+		UserIPOrigin:  ipOrigin,
+	})
+
+	if m.cfg.Core.EnableTelemetry {
+		span := trace.SpanFromContext(ctx)
+		if !span.SpanContext().IsValid() {
+			m.cfg.Logger.Error().Msg("🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
+		} else {
+			span.SetAttributes(
+				attribute.String("service", m.cfg.Core.ServiceName),
+				attribute.String("correlation_id", correlationID),
+				attribute.String("request_id", requestID),
+				attribute.String("ip", ip),
+				attribute.String("ip_origin", ipOrigin),
+				attribute.String("user_id", userID),
+				attribute.String("user_agent", userAgent),
+			)
+		}
+	}
+
+	entry := model.AuditLog{
+		ID:             cryptoutil.V7(),
+		Method:         methodType,
+		FullURL:        fullMethod,
+		IP:             ip,
+		IPOrigin:       ipOrigin,
+		RequestID:      requestID,
+		CreatedBy:      format.ToInt64(userID),
+		CreatedAt:      format.NowUTC(),
+		CorrelationID:  correlationID,
+		RequestHeaders: maskMetadataJSON(md, m.cfg.Logging.MaskKeywords),
+		RequestBody:    bodyRequest,
+		Protocol:       protocol,
+		ServiceName:    m.cfg.Core.ServiceName,
+		UserAgent:      userAgent,
+	}
+
+	return ctx, md, correlationID, entry
+}
+
+func grpcAuditStatusCode(err error) (int, string) {
+	if err == nil {
+		return 200, ""
+	}
+	if st, ok := status.FromError(err); ok {
+		return int(st.Code()), err.Error()
+	}
+	return 500, err.Error()
+}
 
 // GRPCUnaryInterceptor returns a gRPC unary server interceptor that provides:
 //   - Correlation ID generation / propagation from incoming metadata
@@ -34,93 +110,17 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (resp any, err error) {
-		md, _ := metadata.FromIncomingContext(ctx)
-
-		// Helpers to extract the first value of a metadata key
-		get := func(key string) string {
-			if vals := md.Get(key); len(vals) > 0 {
-				return vals[0]
-			}
-			return ""
-		}
-
-		// Propagate / generate correlation ID
-		correlationID := get(m.cfg.Headers.Keys.CorrelationID)
-		if correlationID == "" {
-			correlationID = cryptoutil.V7()
-		}
-
-		// Enrich context
-		ctx = activity.WithCorrelationID(ctx, correlationID)
-		ctx = activity.WithRequestID(ctx, get(m.cfg.Headers.Keys.RequestID))
-		ctx = activity.WithUserID(ctx, get(m.cfg.Headers.Keys.UserID))
-		ctx = activity.WithUserIP(ctx, get(m.cfg.Headers.Keys.IP))
-		ctx = activity.WithUserIPOrigin(ctx, get(m.cfg.Headers.Keys.IPOrigin))
-
-		if m.cfg.Core.EnableTelemetry {
-			span := trace.SpanFromContext(ctx)
-			if !span.SpanContext().IsValid() {
-				m.cfg.Logger.Error().Msg("🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
-			} else {
-				span.SetAttributes(
-					attribute.String("service", m.cfg.Core.ServiceName),
-					attribute.String("correlation_id", correlationID),
-					attribute.String("request_id", get(m.cfg.Headers.Keys.RequestID)),
-					attribute.String("ip", get(m.cfg.Headers.Keys.IP)),
-					attribute.String("user_id", get(m.cfg.Headers.Keys.UserID)),
-					attribute.String("ip_origin", get(m.cfg.Headers.Keys.IPOrigin)),
-					attribute.String("user_agent", get("user-agent")),
-				)
-			}
-		}
-
-		start := time.Now()
-
-		IDAuditLog := cryptoutil.V7()
-		reqHeadersBytes := maskMetadataJSON(md, m.cfg.Logging.MaskKeywords)
-
 		var bodyRequest any
 		if m.cfg.Logging.LogRequestBodies && req != nil {
 			reqBytes, _ := sonic.ConfigDefault.Marshal(req)
 			bodyRequest = normalizeBodyRaw(reqBytes, m.cfg.Logging.MaskKeywords)
 		}
 
-		entry := model.AuditLog{
-			ID:              IDAuditLog,
-			Method:          "POST",
-			FullURL:         info.FullMethod,
-			StatusCode:      0,
-			LatencyMS:       0,
-			IP:              get(m.cfg.Headers.Keys.IP),
-			IPOrigin:        get(m.cfg.Headers.Keys.IPOrigin),
-			RequestID:       get(m.cfg.Headers.Keys.RequestID),
-			CreatedBy:       format.ToInt64(get(m.cfg.Headers.Keys.UserID)),
-			CreatedAt:       format.NowUTC(),
-			CorrelationID:   correlationID,
-			RequestHeaders:  reqHeadersBytes,
-			ResponseHeaders: nil,
-			RequestBody:     bodyRequest,
-			ResponseBody:    nil,
-			Protocol:        "gRPC Unary",
-			ServiceName:     m.cfg.Core.ServiceName,
-			UserAgent:       get("user-agent"),
-			ErrorMessage:    "",
-		}
-
-		reqCtx := context.WithoutCancel(ctx)
+		ctx, md, correlationID, entry := m.prepareGRPCRequest(ctx, info.FullMethod, "POST", "gRPC Unary", bodyRequest)
+		start := time.Now()
 
 		defer func() {
-			statusCode := 200
-			if err != nil {
-				entry.ErrorMessage = err.Error()
-				if st, ok := status.FromError(err); ok {
-					statusCode = int(st.Code())
-				} else {
-					statusCode = 500
-				}
-			}
-
-			entry.StatusCode = statusCode
+			entry.StatusCode, entry.ErrorMessage = grpcAuditStatusCode(err)
 			entry.LatencyMS = time.Since(start).Milliseconds()
 
 			if m.cfg.Logging.LogResponseBodies && resp != nil {
@@ -128,14 +128,7 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 				entry.ResponseBody = normalizeBodyRaw(respBytes, m.cfg.Logging.MaskKeywords)
 			}
 
-			timeoutMs := m.cfg.Logging.LogStoreTimeoutMs
-			if timeoutMs <= 0 {
-				timeoutMs = constants.DefaultLogStoreTimeoutMs
-			}
-			saveCtx, cancel := context.WithTimeout(reqCtx, time.Duration(timeoutMs)*time.Millisecond)
-			defer cancel()
-
-			if saveErr := m.cfg.LogStore.Save(saveCtx, &entry); saveErr != nil {
+			if saveErr := m.saveAuditLog(ctx, &entry); saveErr != nil {
 				m.cfg.Logger.Error().
 					Str("correlation_id", correlationID).
 					Err(saveErr).
@@ -147,20 +140,18 @@ func (m *Manager) GRPCUnaryInterceptor() grpc.UnaryServerInterceptor {
 		defer func() {
 			if rec := recover(); rec != nil {
 				if m.cfg.Core.EnableTelemetry {
-					span := trace.SpanFromContext(ctx)
-					span.RecordError(fmt.Errorf("panic: %v", rec))
-					span.SetStatus(otelcodes.Error, "panic recovered")
+					telemetry.RecordError(trace.SpanFromContext(ctx), fmt.Errorf("panic recovered: %v", rec))
 				}
 				stack := string(debug.Stack())
 				m.cfg.Logger.Error().
 					Str("service", m.cfg.Core.ServiceName).
 					Str("correlation_id", correlationID).
 					Str("method", info.FullMethod).
-					Str("request_id", get(m.cfg.Headers.Keys.RequestID)).
-					Str("ip", get(m.cfg.Headers.Keys.IP)).
-					Str("ip_origin", get(m.cfg.Headers.Keys.IPOrigin)).
-					Str("user_id", get(m.cfg.Headers.Keys.UserID)).
-					Str("user_agent", get("user-agent")).
+					Str("request_id", mdValue(md, m.cfg.Headers.Keys.RequestID)).
+					Str("ip", mdValue(md, m.cfg.Headers.Keys.IP)).
+					Str("ip_origin", mdValue(md, m.cfg.Headers.Keys.IPOrigin)).
+					Str("user_id", mdValue(md, m.cfg.Headers.Keys.UserID)).
+					Str("user_agent", mdValue(md, "user-agent")).
 					Interface("panic", rec).
 					Msgf("gRPC unary panic:\n%s", stack)
 				err = status.Errorf(codes.Internal, "internal server error")
@@ -185,96 +176,15 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 		info *grpc.StreamServerInfo,
 		handler grpc.StreamHandler,
 	) (err error) {
-		ctx := ss.Context()
-		md, _ := metadata.FromIncomingContext(ctx)
-
-		get := func(key string) string {
-			if vals := md.Get(key); len(vals) > 0 {
-				return vals[0]
-			}
-			return ""
-		}
-
-		correlationID := get(m.cfg.Headers.Keys.CorrelationID)
-		if correlationID == "" {
-			correlationID = cryptoutil.V7()
-		}
-
-		ctx = activity.WithCorrelationID(ctx, correlationID)
-		ctx = activity.WithRequestID(ctx, get(m.cfg.Headers.Keys.RequestID))
-		ctx = activity.WithUserID(ctx, get(m.cfg.Headers.Keys.UserID))
-		ctx = activity.WithUserIP(ctx, get(m.cfg.Headers.Keys.IP))
-		ctx = activity.WithUserIPOrigin(ctx, get(m.cfg.Headers.Keys.IPOrigin))
-
-		if m.cfg.Core.EnableTelemetry {
-			span := trace.SpanFromContext(ctx)
-			if !span.SpanContext().IsValid() {
-				m.cfg.Logger.Error().Msg("🔥 WARNING: EnableTelemetry=true but otelgrpc is missing! You forgot to use grpc.StatsHandler(otelgrpc.NewServerHandler()) or mgr.NewGRPCServer()")
-			} else {
-				span.SetAttributes(
-					attribute.String("service", m.cfg.Core.ServiceName),
-					attribute.String("correlation_id", correlationID),
-					attribute.String("request_id", get(m.cfg.Headers.Keys.RequestID)),
-					attribute.String("ip", get(m.cfg.Headers.Keys.IP)),
-					attribute.String("ip_origin", get(m.cfg.Headers.Keys.IPOrigin)),
-					attribute.String("user_id", get(m.cfg.Headers.Keys.UserID)),
-					attribute.String("user_agent", get("user-agent")),
-				)
-			}
-		}
-
+		ctx, _, correlationID, entry := m.prepareGRPCRequest(ss.Context(), info.FullMethod, "STREAM", "gRPC Stream", nil)
 		wrapped := &wrappedServerStream{ServerStream: ss, ctx: ctx}
 		start := time.Now()
 
-		IDAuditLog := cryptoutil.V7()
-		reqHeadersBytes := maskMetadataJSON(md, m.cfg.Logging.MaskKeywords)
-
-		entry := model.AuditLog{
-			ID:              IDAuditLog,
-			Method:          "STREAM",
-			FullURL:         info.FullMethod,
-			StatusCode:      0,
-			LatencyMS:       0,
-			IP:              get(m.cfg.Headers.Keys.IP),
-			IPOrigin:        get(m.cfg.Headers.Keys.IPOrigin),
-			RequestID:       get(m.cfg.Headers.Keys.RequestID),
-			CreatedBy:       format.ToInt64(get(m.cfg.Headers.Keys.UserID)),
-			CreatedAt:       format.NowUTC(),
-			CorrelationID:   correlationID,
-			RequestHeaders:  reqHeadersBytes,
-			ResponseHeaders: nil,
-			RequestBody:     nil,
-			ResponseBody:    nil,
-			Protocol:        "gRPC Stream",
-			ServiceName:     m.cfg.Core.ServiceName,
-			UserAgent:       get("user-agent"),
-			ErrorMessage:    "",
-		}
-
-		reqCtx := context.WithoutCancel(ctx)
-
 		defer func() {
-			statusCode := 200
-			if err != nil {
-				entry.ErrorMessage = err.Error()
-				if st, ok := status.FromError(err); ok {
-					statusCode = int(st.Code())
-				} else {
-					statusCode = 500
-				}
-			}
-
-			entry.StatusCode = statusCode
+			entry.StatusCode, entry.ErrorMessage = grpcAuditStatusCode(err)
 			entry.LatencyMS = time.Since(start).Milliseconds()
 
-			timeoutMs := m.cfg.Logging.LogStoreTimeoutMs
-			if timeoutMs <= 0 {
-				timeoutMs = constants.DefaultLogStoreTimeoutMs
-			}
-			saveCtx, cancel := context.WithTimeout(reqCtx, time.Duration(timeoutMs)*time.Millisecond)
-			defer cancel()
-
-			if saveErr := m.cfg.LogStore.Save(saveCtx, &entry); saveErr != nil {
+			if saveErr := m.saveAuditLog(ctx, &entry); saveErr != nil {
 				m.cfg.Logger.Error().
 					Str("correlation_id", correlationID).
 					Err(saveErr).
@@ -285,9 +195,7 @@ func (m *Manager) GRPCStreamInterceptor() grpc.StreamServerInterceptor {
 		defer func() {
 			if rec := recover(); rec != nil {
 				if m.cfg.Core.EnableTelemetry {
-					span := trace.SpanFromContext(ctx)
-					span.RecordError(fmt.Errorf("panic: %v", rec))
-					span.SetStatus(otelcodes.Error, "panic recovered")
+					telemetry.RecordError(trace.SpanFromContext(ctx), fmt.Errorf("panic recovered: %v", rec))
 				}
 				stack := string(debug.Stack())
 				m.cfg.Logger.Error().
@@ -334,10 +242,5 @@ func (m *Manager) NewGRPCServer(opts ...grpc.ServerOption) *grpc.Server {
 }
 
 func maskMetadataJSON(md metadata.MD, maskKeywords []string) []byte {
-	b, _ := sonic.ConfigDefault.Marshal(md)
-	if len(maskKeywords) == 0 {
-		return b
-	}
-	str := format.MaskAfterKeywords(string(b), maskKeywords, "*")
-	return []byte(str)
+	return marshalAndMaskJSON(md, maskKeywords)
 }
