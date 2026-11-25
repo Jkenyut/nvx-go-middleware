@@ -1,494 +1,501 @@
 # nvx-go-middleware
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/Jkenyut/nvx-go-middleware.svg)](https://pkg.go.dev/github.com/Jkenyut/nvx-go-middleware)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Jkenyut/nvx-go-middleware)](https://goreportcard.com/report/github.com/Jkenyut/nvx-go-middleware)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Coverage Status](https://img.shields.io/badge/coverage-88%25-brightgreen.svg)](#8-verification-testing-and-health-check)
 
-The `nvx-go-middleware` package provides server middleware for Go microservices.
-It supports HTTP, gRPC, and WebSocket transports.
-The library executes fast rejection of invalid requests before audit logging.
-This architecture saves CPU cycles, memory allocations, and storage operations.
+`nvx-go-middleware` provides Go server middleware for HTTP, GraphQL, WebSocket, and gRPC transports.
+The library validates inbound headers, timestamps, HMAC signatures, rate limits, and payload bounds before application handlers execute.
+Invalid requests terminate at the outer pipeline layer before audit logging or downstream storage I/O runs.
 
 ---
 
 ## 1. System Architecture and Data Flows
 
-The system architecture connects edge proxies, security middleware layers, application handlers, and telemetry sinks.
-
-### 1.1 System Topology and Component Architecture
+### 1.1 System Topology (`flowchart TD`)
 
 ```mermaid
 flowchart TD
-    subgraph INBOUND["Inbound Client Traffic"]
-        Client["HTTP Client or Web Browser"]
-        Mobile["Mobile Native Application"]
-        S2S["Cluster Microservice (S2S)"]
+    subgraph INBOUND["Inbound Adapter"]
+        Client["HTTP / GraphQL / WebSocket Client"]
+        GRPCClient["gRPC Client"]
+        EdgeProxy["Reverse Proxy / Cloudflare / Load Balancer"]
+        TrustProxy["TrustProxy IP Resolver"]
+        OuterGuard["CORS / Recoverer / Timeout / Throttle"]
+        AuthGuard["EnsurePublic / EnsurePublicAuth / EnsurePublicAPIKey / EnsureInternal"]
+        RateLimit["RateLimit (httprate + rateKeyInjector)"]
     end
 
-    subgraph EDGE["Network Edge Layer"]
-        Proxy["Reverse Proxy or Cloudflare CDN"]
+    subgraph APPLICATION["Application and Core Domain"]
+        InnerGuards["MaxBodySize / ChiStripSlashes / RemoveHeaders"]
+        Compress["ChiCompress (Outer to Logger)"]
+        AuditLogger["Logger / GraphQLChain / WebSocketChain / GRPCInterceptors"]
+        AppHandler["Application Route Handler / gRPC Service"]
     end
 
-    subgraph PIPELINE["nvx-go-middleware Execution Engine"]
-        direction TB
-        subgraph OUTER["Outer Pipeline (Fast Rejection)"]
-            TrustProxy["1. TrustProxy IP Resolver"]
-            OTel["2. OpenTelemetry Tracing and Metrics"]
-            Timeout["3. Request Timeout Guard"]
-            Throttle["4. Backlog Request Throttle"]
-            AuthGuard["5. Security Headers and HMAC Check"]
-            RateLimit["6. Rate Limiter (httprate)"]
-        end
-
-        subgraph INNER["Inner Pipeline (Audited Execution)"]
-            BodyLimit["7. Body Size and Media Type Guard"]
-            Sanitize["8. Strip Slashes and Header Cleaner"]
-            Compress["9. Response Compressor"]
-            LogRecorder["10. Response Body Buffer Recorder"]
-        end
-
-        subgraph LOGGING["Audit Logging Layer"]
-            Logger["Structured Logger Middleware"]
-        end
+    subgraph INFRASTRUCTURE["Infrastructure and Persistence"]
+        ConsoleStore["ConsoleStore (Zerolog JSON)"]
+        MultiStore["MultiLogStore (Concurrent Fan-Out)"]
+        CustomStore["Custom LogStore (DB / Queue)"]
     end
 
-    subgraph APPLICATION["Core Application Domain"]
-        Handler["Route Handler Logic"]
+    subgraph TELEMETRY["Telemetry and Observability"]
+        OTelHTTP["otelhttp / otelgrpc"]
+        ServerMetrics["ServerMetrics (OTel Histogram and Counter)"]
+        TraceCtx["OpenTelemetry trace_id and span_id"]
+        OTelCollector["OpenTelemetry Collector"]
     end
 
-    subgraph SINKS["Telemetry and Storage Backends"]
-        LogStore["Audit Storage (PostgreSQL / ClickHouse)"]
-        ConsoleOut["Standard Output (Zerolog Diode)"]
-        OTelCollector["OpenTelemetry Collector (:4317 gRPC)"]
-    end
-
-    Client --> Proxy
-    Mobile --> Proxy
-    S2S --> Proxy
-
-    Proxy -->|"Forward request"| TrustProxy
-    TrustProxy --> OTel
-    OTel --> Timeout
-    Timeout --> Throttle
-    Throttle --> AuthGuard
+    Client --> EdgeProxy
+    EdgeProxy --> TrustProxy
+    TrustProxy --> OTelHTTP
+    OTelHTTP --> ServerMetrics
+    ServerMetrics --> OuterGuard
+    OuterGuard --> AuthGuard
     AuthGuard --> RateLimit
+    RateLimit --> Compress
+    Compress --> AuditLogger
+    AuditLogger --> InnerGuards
+    InnerGuards --> AppHandler
 
-    RateLimit -->|"Pass authorized request"| BodyLimit
-    BodyLimit --> Sanitize
-    Sanitize --> Compress
-    Compress --> LogRecorder
-    LogRecorder --> Logger
-    Logger --> Handler
+    GRPCClient --> OTelHTTP
+    OTelHTTP --> AuditLogger
 
-    Logger -.->|"Save audit record"| LogStore
-    Logger -.->|"Write console events"| ConsoleOut
-    OTel -.->|"Send spans and metrics"| OTelCollector
+    AuditLogger -->|"Populate entry.TraceID and entry.SpanID"| TraceCtx
+    AuditLogger -->|"Save(ctx, entry)"| MultiStore
+    MultiStore --> ConsoleStore
+    MultiStore --> CustomStore
+    OTelHTTP -.->|"Export spans"| OTelCollector
+    ServerMetrics -.->|"Export metrics"| OTelCollector
 ```
 
-The outer pipeline checks request authenticity before logging runs.
-The engine drops invalid requests at the outer layer.
-This behavior prevents audit storage pollution during denial of service spikes.
+The outer pipeline rejects unauthenticated, expired, or rate-limited requests before body buffering or audit persistence runs.
+In `buildInnerChain` ([chain.go](chain.go)), `ChiCompress` wraps outside `Logger` so `Logger` captures plain JSON response bodies before `ChiCompress` compresses the payload for the client.
 
 ---
 
-### 1.2 Core Transaction Workflow
+### 1.2 Core Workflows (`sequenceDiagram`)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as Client Application
+    actor Client as Client Application
     participant Proxy as Reverse Proxy
+    participant Trust as TrustProxy
     participant Auth as EnsurePublicAuth
     participant Rate as RateLimit
+    participant Comp as ChiCompress
     participant Log as Logger
-    participant App as Handler
-    participant Store as LogStore
+    participant App as Route Handler
+    participant Store as MultiLogStore
 
-    User->>Proxy: Send HTTP Request with Token and HMAC
-    Proxy->>Auth: Forward Request with Proxy Headers
-    Auth->>Auth: Check Required Headers and Timestamp
-    alt Missing Headers or Expired Timestamp
-        Auth-->>User: Return HTTP 400 Bad Request
-    else Valid Headers
-        Auth->>Auth: Calculate HMAC and Compare Signature
-        alt Signature Mismatch
-            Auth-->>User: Return HTTP 401 Unauthorized
-        else Valid Signature
-            Auth->>Rate: Forward Authenticated Request
-            Rate->>Rate: Calculate Rate Key from Session or Token
-            alt Request Quota Exceeded
-                Rate-->>User: Return HTTP 429 Too Many Requests
-            else Quota Available
-                Rate->>Log: Forward Allowed Request
-                Log->>App: Invoke Application Handler
-                App-->>Log: Return Response Payload
-                Log->>Store: Save Audit Log Record
-                Log-->>User: Return HTTP 200 OK Response
+    Client->>Proxy: Send HTTP request with X-Signature and X-Timestamp
+    Proxy->>Trust: Forward request with X-Forwarded-For
+    Trust->>Trust: Resolve client IP right-to-left against TrustedProxies
+    Trust->>Auth: Forward request with X-Forwarded-For and X-Ip-Origin
+    Auth->>Auth: Validate RequiredPublicAuthHeaders, Platform, and Timestamp skew
+    alt Missing header, invalid platform, or expired timestamp
+        Auth-->>Client: Return HTTP 400 Bad Request
+    else Valid headers and timestamp
+        Auth->>Auth: ReadAndRestoreBody and compute SHA-256 body token
+        Auth->>Auth: Verify HMAC via cryptoutil.VerifySignature
+        alt Signature mismatch
+            Auth-->>Client: Return HTTP 401 Unauthorized
+        else Valid HMAC signature
+            Auth->>Rate: Forward authenticated request
+            Rate->>Rate: Compute HMAC rate key from session, token, or IP
+            alt Quota exceeded
+                Rate-->>Client: Return HTTP 429 Too Many Requests
+            else Quota available
+                Rate->>Comp: Forward request
+                Comp->>Log: Wrap responseWriter and invoke Logger
+                Log->>Log: Generate or propagate X-Correlation-Id (UUIDv7)
+                Log->>Log: Inject activity context and optional ContextInjector
+                Log->>App: Execute handler with pooled responseRecorder
+                App-->>Log: Write plain JSON response
+                opt EnableTelemetry or valid SpanContext
+                    Log->>Log: Extract trace_id and span_id from ctx
+                end
+                Log->>Store: Save AuditLog with context.WithoutCancel + LogStoreTimeoutMs
+                Log-->>Comp: Return uncompressed response bytes
+                Comp-->>Client: Compress response (if Accept-Encoding: gzip) and return HTTP 200
             end
         end
     end
 ```
 
-The client sends authentication tokens and cryptographic signatures in request headers.
-The proxy resolver identifies the original client address.
-The authentication guard rejects malformed requests immediately.
-The rate limiter calculates quota limits with session keys.
-The logging module records complete audit records after application execution.
+---
+
+### 1.3 Request Lifecycle State Machine (`stateDiagram-v2`)
+
+```mermaid
+stateDiagram-v2
+    [*] --> InboundRequest: Receive HTTP / gRPC / WS Request
+
+    state InboundRequest {
+        [*] --> ResolveIP
+        ResolveIP --> TrustedProxyPath: RemoteAddr in TrustedProxies or Private CIDR
+        ResolveIP --> UntrustedProxyPath: RemoteAddr untrusted (ignore XFF)
+    }
+
+    InboundRequest --> OuterValidation: Inject X-Forwarded-For and X-Ip-Origin
+
+    state OuterValidation {
+        [*] --> CheckHeaders
+        CheckHeaders --> Rejected400: Missing header / Invalid X-Platform / Timestamp skew
+        CheckHeaders --> CheckHMAC: Headers and timestamp valid
+        CheckHMAC --> Rejected401: Invalid HMAC signature or WS auth failure
+        CheckHMAC --> CheckOrigin: Signature valid
+        CheckOrigin --> Rejected403: WebSocket Origin not in AllowedOrigins
+        CheckOrigin --> CheckQuota: Origin valid
+        CheckQuota --> Rejected429: httprate limit exceeded
+        CheckQuota --> InnerExecution: Quota available
+    }
+
+    state InnerExecution {
+        [*] --> CheckMediaAndSize
+        CheckMediaAndSize --> Rejected413: Body exceeds limit or invalid Content-Type
+        CheckMediaAndSize --> RecordAndRun: Limits valid
+        RecordAndRun --> PanicRecovered500: Unhandled panic caught by Recoverer
+        RecordAndRun --> Completed: Handler finishes
+    }
+
+    Rejected400 --> Terminated
+    Rejected401 --> Terminated
+    Rejected403 --> Terminated
+    Rejected413 --> Terminated
+    Rejected429 --> Terminated
+    PanicRecovered500 --> PersistAudit: Record panic error on OTel span
+
+    Completed --> PersistAudit: Populate TraceID, SpanID, and mask keywords
+    PersistAudit --> Terminated: Return response to client
+    Terminated --> [*]
+```
 
 ---
 
-## 2. Data Schema and Lifecycle Operations
+### 1.4 Domain and Persistence Schema (`erDiagram`)
 
-The middleware structures audit log entries and presigned signature payloads.
-
-### 2.1 Data Entity Relationship Model
+This repository is a Go middleware library. It contains no `migrations/` directory or SQL database DDL.
+The diagram below maps the exact Go domain structs in [model/audit_log.go](model/audit_log.go), [model/presign.go](model/presign.go), and [config.go](config.go).
 
 ```mermaid
 erDiagram
     AUDIT_LOG {
-        string id PK "Unique identifier (UUIDv7)"
-        string service_name "Microservice identifier"
-        string method "HTTP verb or protocol command"
-        string full_url "Reconstructed target URL"
-        int status_code "HTTP response status"
-        int64 latency_ms "Execution latency in milliseconds"
-        string ip "Resolved client address"
-        string ip_origin "Connecting proxy address"
-        string request_id "Request tracking ID"
-        string correlation_id "Distributed trace correlation ID"
-        json_raw request_headers "Masked HTTP request headers"
-        json_raw response_headers "Masked HTTP response headers"
-        any request_body "Masked request payload"
-        any response_body "Masked response payload"
-        int64 created_by "Authenticated user identifier"
-        datetime created_at "UTC timestamp"
-        string protocol "Transport name (HTTP, gRPC, WS)"
-        string user_agent "Client user agent header"
-        string error_message "Error message or panic summary"
+        string id "UUIDv7 log entry identifier"
+        string method "HTTP verb, STREAM, or POST"
+        string full_url "Reconstructed URL or gRPC FullMethod"
+        int status_code "HTTP status code or gRPC code"
+        int64 latency_ms "Execution duration in milliseconds"
+        string ip "Resolved client IP address"
+        string ip_origin "Direct connecting proxy IP"
+        string request_id "Client X-Request-Id header"
+        string correlation_id "UUIDv7 distributed correlation ID"
+        json_raw_message request_headers "Masked request headers JSON"
+        json_raw_message response_headers "Masked response headers JSON"
+        any request_body "Masked parsed JSON or string"
+        any response_body "Masked parsed JSON or string"
+        int64 created_by "Parsed numeric X-User-Id"
+        time_Time created_at "UTC timestamp"
+        string protocol "HTTP proto, WebSocket, gRPC Unary, or gRPC Stream"
+        string service_name "Configured Core.ServiceName"
+        string user_agent "Client User-Agent string"
+        string error_message "Error or panic summary (omitempty)"
+        string trace_id "OpenTelemetry 32-hex trace ID (omitempty)"
+        string span_id "OpenTelemetry 16-hex span ID (omitempty)"
     }
 
     PRESIGN_REQUEST {
-        string method "Target HTTP method"
-        string uri "Target path and query"
-        string body "Payload string or hash token"
+        string method "Required HTTP method (validate:required)"
+        string uri "Required request URI (validate:required)"
+        string body "Required body token or payload (validate:required)"
     }
 
     PRESIGN_RESPONSE {
-        string signature "Calculated HMAC signature"
+        string signature "Generated HMAC signature"
     }
 
     CONFIG_SECURITY {
-        string public_key "Public HMAC secret key"
-        string private_key "Private internal secret key"
-        string_slice trusted_proxies "Trusted CIDR list"
-        string_slice allowed_origins "Permitted CORS origins"
+        string public_key_signature "HMAC secret for public routes"
+        string private_key_signature "HMAC secret for internal S2S routes"
+        string_slice trusted_proxies "IPs and CIDRs for TrustProxy"
+        string_slice allowed_origins "Permitted CORS and WS origins"
+        int64 signature_timestamp_expired_ms "Allowed clock drift in ms"
     }
 
-    CONFIG_SECURITY ||--o{ AUDIT_LOG : "governs"
-    PRESIGN_REQUEST ||--|| PRESIGN_RESPONSE : "generates"
-```
-
-The audit log structure captures transport, security, and timing metadata.
-Sensitive fields undergo keyword masking before JSON serialization.
-
----
-
-### 2.2 Request Lifecycle State Machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> InboundRequest: Connection Received
-
-    state InboundRequest {
-        [*] --> CheckProxy
-        CheckProxy --> ResolveClientIP: Remote Address Trusted
-        CheckProxy --> KeepRemoteIP: Remote Address Untrusted
-    }
-
-    InboundRequest --> SecurityPipeline: Forward Request
-
-    state SecurityPipeline {
-        [*] --> CheckHeaders
-        CheckHeaders --> Drop400: Header Missing or Invalid
-        CheckHeaders --> CheckSignature: Headers Valid
-        CheckSignature --> Drop401: Signature Mismatch
-        CheckSignature --> CheckRateLimit: Signature Matches
-        CheckRateLimit --> Drop429: Quota Limit Exceeded
-        CheckRateLimit --> PassedSecurity: Quota Permitted
-    }
-
-    Drop400 --> Terminate: Return JSON 400
-    Drop401 --> Terminate: Return JSON 401
-    Drop429 --> Terminate: Return JSON 429
-
-    PassedSecurity --> InnerProcessing: Execute Chain
-
-    state InnerProcessing {
-        [*] --> CheckBodySize
-        CheckBodySize --> Drop413: Body Exceeds Size Limit
-        CheckBodySize --> RecordResponse: Limit Permitted
-        RecordResponse --> RunHandler: Invoke Application
-        RunHandler --> FinalizeLog: Handler Completes
-    }
-
-    Drop413 --> Terminate: Return JSON 413
-
-    FinalizeLog --> PersistAudit: Save Record to Store
-    PersistAudit --> RespondClient: Send Payload
-    RespondClient --> Terminate
-    Terminate --> [*]
-```
-
-The state machine enforces ordered security checkpoints.
-Failed checkpoints terminate requests with standard JSON error envelopes.
-Passed requests reach application handlers and persist structured audit logs.
-
----
-
-## 3. Prerequisites and Tooling
-
-Install the verified tools listed in the table below:
-
-| Requirement | Supported Version | Functional Role |
-| :--- | :--- | :--- |
-| Go Toolchain | 1.24+ / 1.26+ | Compiles the middleware module and executes test suites. |
-| OpenTelemetry Collector | 0.95.0+ | Receives distributed traces and server metric points. |
-| Docker Engine | 26.0+ | Hosts local test containers and infrastructure. |
-| Docker Compose | v2.26+ | Runs multi-container dependency environments. |
-| GolangCI-Lint | v1.60+ | Executes static code analysis and lint gates. |
-
----
-
-## 4. Directory Structure
-
-The repository maintains modular separation between transports, chains, and storage backends:
-
-```text
-.
-├── .github/                # Stores GitHub Actions continuous integration workflows.
-│   └── workflows/
-│       └── ci.yml          # Runs build, test, and race detection checks.
-├── constants/              # Declares shared constants.
-│   └── constants.go        # Defines headers, error messages, and defaults.
-├── docs/                   # Stores technical reference documents.
-│   └── ARCHITECTURE.md     # Documents pipeline mechanics and sequence diagrams.
-├── examples/               # Contains runnable integration programs.
-│   ├── advanced/           # Demonstrates complete Chi server configuration.
-│   ├── basic/              # Demonstrates lightweight standard library routing.
-│   ├── client_signature/   # Shows signature generation in TypeScript.
-│   └── grpc_server/        # Shows gRPC server interceptor integration.
-├── model/                  # Declares shared data schemas.
-│   ├── audit_log.go        # Defines the AuditLog data struct.
-│   └── presign.go          # Defines presigned request and response models.
-├── chain.go                # Implements pre-built middleware chain profiles.
-├── chi.go                  # Implements Chi adapters and rate limiters.
-├── config.go               # Defines configuration structures and validators.
-├── CONTRIBUTING.md         # Explains branch models and contribution rules.
-├── go.mod                  # Declares dependencies and Go version.
-├── go.sum                  # Contains dependency checksum records.
-├── graphql.go              # Implements GraphQL depth and operation middleware.
-├── grpc.go                 # Implements gRPC unary and stream interceptors.
-├── LICENSE                 # Contains the Apache 2.0 software license.
-├── logger.go               # Declares logging interfaces and Zerolog adapter.
-├── Makefile                # Declares development build and test targets.
-├── manager.go              # Implements the Manager struct and constructors.
-├── metrics.go              # Implements OpenTelemetry HTTP server metrics.
-├── middleware.go           # Implements core HTTP security and audit handlers.
-├── middleware_test.go      # Validates HTTP middleware execution pipelines.
-├── options.go              # Declares functional options for configurations.
-├── options_test.go         # Validates option builders and configuration merging.
-├── README.md               # Documents system architecture and instructions.
-├── response_writer.go      # Implements pooled response body recording.
-├── store.go                # Implements LogStore and multi-store broadcasting.
-├── store_test.go           # Validates storage backends and concurrent persistence.
-└── ws.go                   # Implements WebSocket upgrade security checks.
+    CONFIG_SECURITY ||--o{ AUDIT_LOG : "governs validation for"
+    PRESIGN_REQUEST ||--|| PRESIGN_RESPONSE : "computes"
 ```
 
 ---
 
-## 5. Configuration Parameters
+## 2. Deep Engineering and Storage Trade-Offs
 
-Configure the middleware manager with functional options or configuration structs:
+### 2.1 `ChiCompress` Outer to `Logger` ([chain.go](chain.go))
 
-| Configuration Key | Type | Default Value | Description (ASD-STE100) |
-| :--- | :--- | :--- | :--- |
-| `core.env` | string | `"development"` | Sets the runtime environment name. |
-| `core.serviceName` | string | `"unknown-service"` | Sets the service identifier for tracing. |
-| `core.enableTelemetry` | boolean | `false` | Enables OpenTelemetry traces and metrics. |
-| `security.publicKeySignature` | string | `""` | Sets the public HMAC secret key. |
-| `security.privateKeySignature` | string | `""` | Sets the private internal secret key. |
-| `security.trustedProxies` | string slice | `[]` | Sets trusted proxy IPs and CIDR blocks. |
-| `security.allowedOrigins` | string slice | `["*"]` | Sets permitted origins for CORS checks. |
-| `security.allowedContentTypes` | string slice | `["application/json", ...]` | Sets accepted HTTP request media types. |
-| `security.signatureTimestampExpiredMs` | integer | `600000` | Sets permitted clock drift in milliseconds. |
-| `limits.requestTimeoutMs` | integer | `60000` | Sets request context cancellation timeouts. |
-| `limits.requestBodyLimitSize` | integer | `2147483648` (2 GB) | Sets maximum file upload limits. |
-| `limits.requestBodyNonFileLimitSize` | integer | `3145728` (3 MB) | Sets maximum non-file request limits. |
-| `logging.logRequestBodies` | boolean | `false` | Enables request payload logging. |
-| `logging.logResponseBodies` | boolean | `false` | Enables response payload logging. |
-| `logging.responseBodyLogLimitSize` | integer | `5242880` (5 MB) | Sets maximum logged response bytes. |
-| `logging.logStoreTimeoutMs` | integer | `5000` | Sets the audit persistence timeout. |
-
----
-
-## 6. Installation and Execution Procedure
-
-Follow these procedural steps to install, configure, and execute the service.
-
-### Step 1: Install Package Dependency
-
-Run the Go module command in your terminal:
-
-```bash
-go get github.com/Jkenyut/nvx-go-middleware
-```
-
-### Step 2: Initialize Manager with Options
-
-Create the manager instance in your application entry point:
+`buildInnerChain` applies `m.Logger(handler)` inside `m.ChiCompress(...)`:
 
 ```go
-package main
+handler = m.RemoveHeaders(handler)
 
-import (
-	"log"
-	"net/http"
+// Logger only records requests that survived Outer layers (DDoS, Bad Auth)
+// and sits inside ChiCompress so it captures plain (uncompressed) response bodies.
+handler = m.Logger(handler)
 
-	"github.com/Jkenyut/nvx-go-middleware"
-	"github.com/go-chi/chi/v5"
-)
+if cfg.Features.UseChiCompress {
+	handler = m.ChiCompress(cfg.Compression.CompressionLevel)(handler)
+}
+```
 
-func main() {
-	// Initialize the middleware manager using functional options
-	mgr, err := middleware.New(
-		middleware.WithServiceName("order-service"),
-		middleware.WithEnv("production"),
-		middleware.WithTelemetry(true),
-		middleware.WithSecurityKeys("public-secret-key", "private-secret-key"),
-		middleware.WithTrustedProxies("10.0.0.0/8", "172.16.0.0/12"),
-		middleware.WithAllowedOrigins("https://app.example.com"),
-	)
-	if err != nil {
-		log.Fatalf("failed to initialize middleware: %v", err)
-	}
-	defer mgr.Close()
+Placing `Logger` inside `ChiCompress` ensures `responseRecorder` captures uncompressed JSON bytes for `AuditLog.ResponseBody` while `ChiCompress` compresses the wire payload for clients sending `Accept-Encoding: gzip`.
 
-	r := chi.NewRouter()
+### 2.2 Pooled `responseRecorder` with 64 KB Cap ([response_writer.go](response_writer.go))
 
-	// Apply public route chain with device checks and IP rate limits
-	r.Use(mgr.PublicChain())
+`wrapResponseWriter` reuses `*bytes.Buffer` instances via `sync.Pool` and bounds captured bytes by `ResponseBodyLogLimitSize`:
 
-	r.Get("/products", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`[{"id":"prod-1","name":"Item"}]`))
-	})
+```go
+const maxPooledBufferSize = 64 * 1024 // 64 KB
 
-	log.Println("Server listening on :8080")
-	if err := http.ListenAndServe(":8080", r); err != nil {
-		log.Fatalf("server stopped: %v", err)
+func (r *responseRecorder) Free() {
+	if r.body != nil {
+		if r.body.Cap() <= maxPooledBufferSize {
+			r.body.Reset()
+			responseBufferPool.Put(r.body)
+		}
+		r.body = nil
 	}
 }
 ```
 
----
+Buffers exceeding 64 KB drop out of the pool so large responses do not pin oversized heap allocations across requests.
 
-## 7. API and Operational Interface
+### 2.3 Detached Audit Persistence with Trace Preservation ([manager.go](manager.go))
 
-The table summarizes primary middleware functions and pre-built chains:
+`Manager.saveAuditLog` extracts `TraceID` and `SpanID` before detaching cancellation via `context.WithoutCancel(ctx)`:
 
-| Function Interface | Operational Area | Functional Role (ASD-STE100) |
-| :--- | :--- | :--- |
-| `middleware.New(opts...)` | Manager Lifecycle | Starts the manager with functional options. |
-| `middleware.NewWithError(cfg)` | Manager Lifecycle | Starts the manager from a configuration struct. |
-| `mgr.PublicChain(opts...)` | Route Chain | Creates a chain for unauthenticated routes. |
-| `mgr.PublicAuthChain(opts...)` | Route Chain | Creates a chain for authenticated user routes. |
-| `mgr.PublicAPIKeyChain(opts...)` | Route Chain | Creates a chain for external API key routes. |
-| `mgr.InternalChain(opts...)` | Route Chain | Creates a chain for service-to-service routes. |
-| `mgr.PreSignChain(opts...)` | Route Chain | Creates a chain for request presigning endpoints. |
-| `mgr.WebhookChain(opts...)` | Route Chain | Creates a chain for high-volume webhook ingestion. |
-| `mgr.GraphQLChain(opts...)` | GraphQL Adapter | Applies depth checks and extracts operation names. |
-| `mgr.WebSocketChain(opts...)` | WebSocket Adapter | Enforces pre-upgrade origin and authentication checks. |
-| `mgr.NewGRPCServer(opts...)` | gRPC Factory | Creates a server with traces, metrics, and recovery. |
-| `mgr.ServerMetrics()` | Observability | Records latency histograms and request counters. |
-| `mgr.DefaultCORS()` | Security | Handles CORS preflight and origin verification. |
-| `mgr.MaxBodySize(opts...)` | Security | Rejects request payloads that exceed limits. |
-| `middleware.MultiLogStore(s...)` | Persistence | Broadcasts audit logs concurrently across multiple stores. |
-
-### Advanced Transport Integrations
-
-#### gRPC Service Factory
 ```go
-// Creates a gRPC server configured with trace handlers and interceptors
-grpcServer := mgr.NewGRPCServer()
+entry.TraceID = cmp.Or(entry.TraceID, telemetry.TraceID(ctx))
+entry.SpanID = cmp.Or(entry.SpanID, telemetry.SpanID(ctx))
+timeoutMs := m.cfg.Logging.LogStoreTimeoutMs
+if timeoutMs <= 0 {
+	timeoutMs = constants.DefaultLogStoreTimeoutMs
+}
+saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(timeoutMs)*time.Millisecond)
+defer cancel()
+return m.cfg.LogStore.Save(saveCtx, entry)
 ```
 
-#### GraphQL Endpoint Adapter
-```go
-// Applies query depth limits and logs GraphQL operations
-router.Handle("/graphql", mgr.GraphQLChain(
-	middleware.WithGraphQLMaxDepth(10),
-)(graphqlHandler))
-```
+This guarantees audit persistence completes even if the client disconnects early, retains OpenTelemetry `SpanContext` values, and bounds storage latency with `LogStoreTimeoutMs`.
 
-#### WebSocket Upgrade Adapter
-```go
-// Checks origin headers and credentials before upgrading connection
-router.Handle("/ws", mgr.WebSocketChain(
-	middleware.WithWSAuthenticator(func(r *http.Request) bool {
-		return r.URL.Query().Get("token") != ""
-	}),
-)(wsHandler))
-```
+### 2.4 Right-to-Left `X-Forwarded-For` Traversal and Pre-Parsed `netip` ([manager.go](manager.go), [middleware.go](middleware.go))
+
+`initTrustedProxies` pre-parses `TrustedProxies` into `map[netip.Addr]struct{}` and `[]netip.Prefix` during `New(...)`.
+At request time, `resolveClientIP` walks `X-Forwarded-For` from right to left (`slices.Backward(parts)`) and selects the first IP not in trusted or private networks.
+If `RemoteAddr` is untrusted, `TrustProxy` ignores client-supplied forwarding headers to prevent IP spoofing.
+
+### 2.5 Non-Destructive Body Inspection ([middleware.go](middleware.go))
+
+`ReadAndRestoreBody` reads at most `limit + 1` bytes via `io.LimitReader(r.Body, limit+1)` so `EnsurePublic*` can hash the body (`ResolveBodyToken`) and restore `r.Body` via `io.NopCloser` (or `io.MultiReader` when over limit) for downstream handlers.
+Multipart uploads return `nil, nil` and skip buffering.
+
+### 2.6 Concurrent `MultiLogStore` Fan-Out ([store.go](store.go))
+
+`MultiLogStore` flattens nested multi-stores, executes `Save` concurrently across all configured `LogStore` backends using `sync.WaitGroup`, and aggregates failures with `errors.Join`.
 
 ---
 
-## 8. Verification, Testing and Health Check
+## 3. Source-Verified Reference Catalogs
 
-Execute verified commands to check correctness, memory safety, and code style.
+### 3.1 Business Metric and Telemetry Catalog
 
-### Step 1: Run Unit Tests with Race Detection
+Metrics are registered in [metrics.go](metrics.go) via `telemetry.NewMetricManager`.
 
-Execute the unit test suite:
+| Metric Name | Instrument Type | Unit | Monitored Attributes | Description (ASD-STE100) |
+| :--- | :--- | :--- | :--- | :--- |
+| `http.server.request.duration` | `Float64Histogram` | `s` | `http.request.method`, `http.route`, `http.response.status_code` | Records HTTP request execution latency across explicit bucket boundaries (`0.005` to `5` seconds). |
+| `http.server.requests.total` | `Int64Counter` | `1` | `http.request.method`, `http.route`, `http.response.status_code` | Counts total processed HTTP server requests. |
+
+OpenTelemetry spans also record attributes in [middleware.go](middleware.go), [graphql.go](graphql.go), [ws.go](ws.go), and [grpc.go](grpc.go): `service`, `correlation_id`, `request_id`, `ip`, `ip_origin`, `user_id`, `user_agent`, `path` (HTTP), `protocol`, `header_auth_type` (HTTP), `graphql.operation.name` (GraphQL), and `http.target` (WebSocket).
+
+---
+
+### 3.2 HTTP Header and Gateway Contract
+
+Headers are defined in [constants/constants.go](constants/constants.go) and mapped via `HeaderKeys` in [config.go](config.go).
+
+| Header Name | Required | Origin / Context | Functional Role (ASD-STE100) |
+| :--- | :--- | :--- | :--- |
+| `X-Request-Id` | Yes (Public, Auth, APIKey, Internal, PreSign) | Client or API Gateway | Identifies individual requests for tracing and `activity` context. |
+| `X-Correlation-Id` | Auto-generated if empty | Gateway or Middleware | Propagates UUIDv7 distributed correlation across services. |
+| `X-Platform` | Yes (Public, Auth, APIKey, Internal, PreSign) | Client | Validates client platform against `mobile`, `web`, `desktop`, `server`, `other`. |
+| `X-Timestamp` | Yes (Public, Auth, APIKey, Internal, PreSign) | Client | Supplies Unix timestamp checked against `SignatureTimestampExpiredMs`. |
+| `X-Signature` | Yes (Public, Auth, APIKey, Internal) | Client | Supplies HMAC signature verified by `cryptoutil.VerifySignature`. |
+| `X-App-Id` | Yes (Public, Auth, APIKey, Public PreSign) | Client | Identifies client application and scopes rate limit keys. |
+| `User-Agent` | Yes (Public) | Client | Identifies client user agent and logs request origin metadata. |
+| `X-Token` | Yes (PublicAuth) | Client | Supplies user authentication token for `PublicAuthChain`. |
+| `X-Session-ID` | Optional | Client | Scopes `PublicAuth` rate limit keys when present. |
+| `X-Api-Key` | Yes (PublicAPIKey) | Client | Authenticates external API key consumers and scopes rate limits. |
+| `X-User-Id` | Optional | Auth / Gateway | Populates `AuditLog.CreatedBy`, `activity` context, and span attributes. |
+| `X-Forwarded-For` | Proxy-populated | Reverse Proxy / `TrustProxy` | Carries client IP chain; `TrustProxy` overwrites it with resolved client IP. |
+| `X-Ip-Origin` | Middleware-populated | `TrustProxy` | Stores direct connecting proxy or peer IP address. |
+| `X-Auth-Type` | Middleware-populated | `SetHeaderAuthType` | Marks active auth zone (`public`, `public-auth`, `public-api-key`, `internal`). |
+| `X-Rate-Key` | Middleware-populated | `rateKeyInjector` | Stores computed HMAC rate limit key for `httprate`. |
+| `CF-Connecting-IP` | Optional | Cloudflare Edge | Supplies authoritative client IP when `RemoteAddr` is trusted. |
+| `X-Real-Ip` | Optional | Reverse Proxy | Supplies fallback client IP when `CF-Connecting-IP` and `XFF` do not match. |
+| `X-GraphQL-Operation` | Middleware-populated | `GraphQLChain` | Stores extracted GraphQL `operationName` or `"anonymous"`. |
+
+---
+
+### 3.3 Configuration and Environment Matrix
+
+`nvx-go-middleware` loads configuration via Go structs (`Config` in [config.go](config.go) and `ChainConfig` in [chain.go](chain.go)) with `yaml` and `default` struct tags, plus functional `Option` / `ChainOption` builders in [options.go](options.go). This repository does not read `.env` files or provide a `config.template.yaml`.
+
+| Config YAML Path | Go Type | Default Value | Description (ASD-STE100) |
+| :--- | :--- | :--- | :--- |
+| `core.env` | `string` | `"development"` | Sets runtime environment; `"prod"` or `"production"` hides missing header names in 400 errors. |
+| `core.serviceName` | `string` | `"unknown-service"` | Sets service name for logs, `AuditLog.ServiceName`, and OpenTelemetry spans. |
+| `core.enableTelemetry` | `bool` | `false` | Enables `otelhttp`, `otelgrpc`, `ServerMetrics`, and span attribute recording. |
+| `limits.requestTimeoutMs` | `int64` | `60000` | Sets request timeout duration in milliseconds when `UseChiTimeout` is enabled. |
+| `limits.requestBodyLimitSize` | `int64` | `2147483648` (2 GB) | Sets maximum multipart upload body size in bytes. |
+| `limits.requestBodyNonFileLimitSize` | `int64` | `3145728` (3 MB) | Sets maximum non-file request body size in bytes. |
+| `logging.logRequestBodies` | `bool` | `false` | Enables capturing and masking request bodies in `AuditLog`. |
+| `logging.logResponseBodies` | `bool` | `false` | Enables capturing and masking response bodies in `AuditLog`. |
+| `logging.responseBodyLogLimitSize` | `int64` | `5242880` (5 MB) | Sets maximum response body bytes buffered per request. |
+| `logging.logStoreTimeoutMs` | `int64` | `5000` | Sets timeout in milliseconds for `LogStore.Save`. |
+| `logging.maskKeywords` | `[]string` | `format.DefaultMaskKeywords` | Appends sensitive field names masked with `"*"` in logs. |
+| `logging.logHeaders` | `[]string` | `["X-Request-Id", "X-Correlation-Id", "X-Forwarded-For", "X-Ip-Origin", "X-User-Id"]` | Selects request headers attached to error log events. |
+| `security.publicKeySignature` | `string` | `""` (Required) | Sets HMAC secret key for public and presign endpoints. |
+| `security.privateKeySignature` | `string` | `""` (Required) | Sets HMAC secret key for internal service-to-service endpoints. |
+| `security.trustedProxies` | `[]string` | `[]` | Lists trusted proxy IPs and CIDRs for `TrustProxy`. |
+| `security.allowedOrigins` | `[]string` | `["*"]` | Lists permitted origins for CORS and WebSocket upgrades. |
+| `security.allowedContentTypes` | `[]string` | `["application/json", "multipart/form-data"]` | Lists permitted request media types in `MaxBodySize`. |
+| `security.allowedHeaders` | `[]string` | `["Accept", "Authorization", "Content-Type", ...required headers]` | Sets `Access-Control-Allow-Headers` for CORS responses. |
+| `security.headersToRemove` | `[]string` | `[]` | Lists response headers deleted by `RemoveHeaders`. |
+| `security.signatureTimestampExpiredMs` | `int64` | `600000` (10 min) | Sets maximum allowed timestamp drift in milliseconds. |
+| `features.useChiCompress` | `bool` | `true` | Enables gzip compression outer to `Logger` in `buildInnerChain`. |
+| `features.useChiTimeout` | `bool` | `false` | Enables `ChiTimeout` in `buildOuterChain`. |
+| `features.useChiThrottle` | `bool` | `false` | Enables `ChiThrottleBacklog` in `buildOuterChain`. |
+| `features.useChiRateLimitAuth` | `bool` | `false` | Enables `RateLimit` on `PublicAuthChain`, `PublicAPIKeyChain`, and `ProtectedRateLimitChain`. |
+| `features.useChiRateLimitPublic` | `bool` | `false` | Enables `RateLimit` on `PublicChain`, `PreSignChain`, and `PublicRateLimitChain`. |
+| `features.useChiStripSlashes` | `bool` | `true` | Enables `ChiStripSlashes` in `buildInnerChain`. |
+| `compression.compressionLevel` | `int` | `5` | Sets gzip compression level (`1`–`9`) for `ChiCompress`. |
+| `throttle.throttleLimit` | `int` | `100` | Sets maximum concurrent requests for `ChiThrottleBacklog`. |
+| `throttle.throttleTimeoutMs` | `int64` | `30000` | Sets backlog wait timeout in milliseconds. |
+| `throttle.throttleBacklog` | `int` | `100` | Sets queued request backlog capacity. |
+| `limiter.rateLimitRequests` | `int` | `100` | Sets maximum requests per rate limit window. |
+| `limiter.rateLimitWindowMs` | `int64` | `60000` | Sets rate limit sliding window duration in milliseconds. |
+
+---
+
+### 3.4 Middleware Chains and Built-In Endpoint Catalog
+
+#### HTTP Handlers and Probes
+
+| Method | Endpoint / Builder | Required Headers / Guard | Description (ASD-STE100) |
+| :--- | :--- | :--- | :--- |
+| `GET` | `mgr.PingHandler()` | `MethodOnly("GET")` | Returns HTTP `200` JSON `"pong"` health response. |
+| `POST` | `mgr.PreSignHandler(opts...)` | `MethodOnly("POST")` + `PreSignChain` (`RequiredSignaturePublicHeaders`) | Validates `PresignRequest` and returns HMAC signature in `PresignResponse`. |
+| `ANY` | `middleware.Heartbeat(path)` / `mgr.ChiHeartbeat(path)` | Exact path match | Returns HTTP `200` `"OK"` plain text response. |
+| `GET` | `mgr.ChiProfiler()` | None (debug only) | Mounts `net/http/pprof` profiling endpoints. |
+
+#### Pre-Built Middleware Chains and Protocol Adapters
+
+| Builder | Transport | Auth Guard Constant | Description (ASD-STE100) |
+| :--- | :--- | :--- | :--- |
+| `mgr.PublicChain(opts...)` | HTTP REST | `AuthTypePublic` (`RequiredPublicHeaders`) | Enforces public header, timestamp, and HMAC checks with optional rate limiting. |
+| `mgr.PublicAuthChain(opts...)` | HTTP REST | `AuthTypePublicAuth` (`RequiredPublicAuthHeaders`) | Enforces user token, header, timestamp, and HMAC checks with optional rate limiting. |
+| `mgr.PublicAPIKeyChain(opts...)` | HTTP REST | `AuthTypePublicAPIKey` (`RequiredPublicAPIKeyHeaders`) | Enforces API key, header, timestamp, and HMAC checks with optional rate limiting. |
+| `mgr.InternalChain(opts...)` | HTTP REST | `AuthTypeInternal` (`RequiredInternalHeaders`) | Enforces internal S2S headers and private-key HMAC signatures. |
+| `mgr.PreSignChain(opts...)` | HTTP REST | `AuthTypePublic` (`RequiredSignaturePublicHeaders`) | Validates presign request headers before `PreSignHandler` executes. |
+| `mgr.WebhookChain(opts...)` | HTTP REST | None | Applies `TrustProxy`, `Recoverer`, telemetry, `MaxBodySize`, `ChiCompress`, and `Logger`. |
+| `mgr.PublicRateLimitChain(opts...)` | Chi Router | `AuthTypePublic` | Applies rate limiting and inner chain via `BaseChain` without signature checks. |
+| `mgr.ProtectedRateLimitChain(opts...)` | Chi Router | `AuthTypePublicAuth` | Applies auth-scoped rate limiting and inner chain via `BaseChain`. |
+| `mgr.GraphQLChain(opts...)` | HTTP GraphQL | Optional `WithGraphQLMaxDepth` | Extracts `X-GraphQL-Operation`, enforces query depth limits, and logs requests. |
+| `mgr.WebSocketChain(opts...)` | WebSocket | Optional `WithWSAuthenticator` | Validates `Upgrade` header, `Origin` allowlist, and pre-upgrade auth before hijacking. |
+| `mgr.NewGRPCServer(opts...)` | gRPC | `otelgrpc` + Unary/Stream Interceptors | Builds `grpc.Server` with OpenTelemetry stats, panic recovery, and audit logging. |
+
+---
+
+### 3.5 Makefile and Operational Runbook
+
+#### Local Verification Steps
+
+1. Verify Go toolchain (`go.mod` specifies `go 1.27.3`):
+
+```bash
+go version
+```
+
+2. Format and run static analysis:
+
+```bash
+gofmt -l .
+go vet ./...
+```
+
+3. Run all unit tests with race detection:
 
 ```bash
 go test -count=1 -race ./...
 ```
 
-### Step 2: Run Micro-Benchmarks
+#### `Makefile` Targets
 
-Measure execution speed and memory allocations:
-
-```bash
-go test -run=^$ -bench=. -benchmem ./...
-```
-
-### Step 3: Run Static Code Analysis
-
-Execute static analysis checks:
-
-```bash
-go vet ./...
-```
-
----
-
-## 9. Troubleshooting and Fault Isolation
-
-Review the table below to resolve common configuration and runtime errors:
-
-| Observed Symptom | Probable Root Cause | Corrective Action (ASD-STE100) |
+| Target | Command | Description (ASD-STE100) |
 | :--- | :--- | :--- |
-| `missing required headers` | Client request omitted mandatory tracking headers. | Send `X-Request-Id`, `X-Platform`, and `X-Timestamp`. |
-| `invalid request signature` | HMAC signature mismatch or clock drift exceeded. | Check the secret key and synchronize the device clock. |
-| `request payload too large` | Request body exceeded configured size limits. | Increase `RequestBodyLimitSize` or reduce payload size. |
-| `cross-origin websocket forbidden` | WebSocket handshake sent an unlisted origin header. | Add the client origin to `AllowedOrigins`. |
-| Audit logs show missing response body. | Response body size exceeded logging byte limits. | Increase `ResponseBodyLogLimitSize` in configuration. |
-| High Prometheus memory consumption. | Unparameterized URL paths entered metric labels. | Inject route patterns using `WithRoutePattern`. |
-| Buffer dropped warning in console logs. | High traffic saturated the diode ring buffer. | Increase diode ring capacity or use async stores. |
+| `make help` | `grep` + `awk` | Lists available `Makefile` targets and descriptions. |
+| `make test` | `go test -v ./...` | Runs all package unit tests in verbose mode. |
+| `make test-cover` | `go test -v -cover ./...` | Runs all unit tests and prints statement coverage per package. |
+| `make lint` | `golangci-lint run --fix ./...` | Runs `golangci-lint` with automatic fixes enabled. |
+| `make clean` | `go clean && rm -f coverage.out` | Removes Go build cache artifacts and `coverage.out`. |
 
 ---
 
-## 10. License
+### 3.6 Annotated Repository Directory Tree
 
-This project is licensed under the Apache License 2.0. Refer to [LICENSE](LICENSE) for full legal terms.
+```text
+.
+├── .github/
+│   └── workflows/
+│       └── go.yml              # Defines GitHub Actions CI build and test workflow.
+├── .golangci.yml               # Configures golangci-lint rules.
+├── constants/
+│   └── constants.go            # Defines standard headers, auth types, error messages, and defaults.
+├── docs/
+│   ├── ARCHITECTURE.md         # Documents pipeline architecture, options, and security flows.
+│   └── superpowers/plans/      # Stores internal design and implementation plan notes.
+├── examples/
+│   ├── advanced/main.go        # Demonstrates Chi router integration with full options.
+│   ├── basic/main.go           # Demonstrates minimal net/http middleware usage.
+│   ├── client_signature/       # Provides Postman collection and TypeScript HMAC client example.
+│   └── grpc_server/            # Demonstrates NewGRPCServer interceptor integration.
+├── model/
+│   ├── audit_log.go            # Defines AuditLog struct including TraceID and SpanID fields.
+│   └── presign.go              # Defines PresignRequest and PresignResponse structs.
+├── chain.go                    # Implements ChainConfig and pre-built HTTP middleware chains.
+├── chi.go                      # Implements Chi middleware wrappers and httprate key builders.
+├── config.go                   # Defines Config structs, Validate, and WithActivityContext.
+├── CONTRIBUTING.md             # Documents contribution and branching conventions.
+├── go.mod                      # Declares Go module path and dependency versions.
+├── go.sum                      # Records cryptographic checksums for module dependencies.
+├── graphql.go                  # Implements GraphQLChain, depth scanner, and introspection blocker.
+├── grpc.go                     # Implements NewGRPCServer and unary/stream audit interceptors.
+├── LICENSE                     # Contains Apache 2.0 license text.
+├── logger.go                   # Defines Logger/LogEvent interfaces and zerologAdapter.
+├── Makefile                    # Defines local test, coverage, lint, and clean targets.
+├── manager.go                  # Implements Manager lifecycle, defaults, trusted proxies, and saveAuditLog.
+├── metrics.go                  # Implements OpenTelemetry ServerMetrics instruments.
+├── middleware.go               # Implements CORS, TrustProxy, MaxBodySize, HMAC auth, and Logger.
+├── middleware_test.go          # Tests HTTP middleware, chains, compression order, and benchmarks.
+├── options.go                  # Implements functional Option, ChainOption, CORS, BodySize, GraphQL, and WS builders.
+├── options_test.go             # Tests functional options and ChainConfig resolution.
+├── response_writer.go          # Implements sync.Pool-backed responseRecorder with 64 KB buffer cap.
+├── store.go                    # Implements LogStore, ConsoleStore (with trace_id/span_id), and MultiLogStore.
+├── store_test.go               # Tests ConsoleStore, MultiLogStore, and trace_id/span_id propagation.
+└── ws.go                       # Implements WebSocketChain, Origin validation, and Hijack tracking.
+```
+
+---
+
+## 4. License
+
+This project uses the Apache License 2.0. Refer to [LICENSE](LICENSE) for full terms.
